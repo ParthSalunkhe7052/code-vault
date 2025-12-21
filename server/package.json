@@ -1,0 +1,6 @@
+{
+  "devDependencies": {
+    "javascript-obfuscator": "^5.1.0",
+    "@yao-pkg/pkg": "^6.0.0"
+  }
+}

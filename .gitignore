@@ -1,0 +1,70 @@
+# =====================================
+# License Wrapper - Git Ignore
+# =====================================
+
+# ----- Environment & Secrets -----
+.env
+.env.*
+*.env
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# ----- Node.js -----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# ----- Build Outputs -----
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+output/
+src-tauri/target/
+
+# ----- IDE & Editors -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ----- Uploads & User Data -----
+server/uploads/
+uploads/
+
+# ----- Database -----
+*.db
+*.sqlite
+*.sqlite3
+
+# ----- Logs -----
+*.log
+logs/
+
+# ----- Testing -----
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ----- Misc -----
+*.bak
+*.tmp
+*.temp
+Thumbs.db
