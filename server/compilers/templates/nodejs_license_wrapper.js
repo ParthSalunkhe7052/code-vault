@@ -32,12 +32,20 @@ function waitForKeypress(message = 'Press Enter to exit...') {
     });
 }
 
+// Sanitize message for safe logging (prevent log injection)
+function sanitizeLogMessage(msg) {
+    if (typeof msg !== 'string') return String(msg);
+    // Remove control characters and limit length
+    return msg.replace(/[\x00-\x1f\x7f]/g, '').substring(0, 1000);
+}
+
 // Exit with error message (waits for keypress first)
 async function exitWithError(message, code = 1) {
+    const safeMessage = sanitizeLogMessage(message);
     console.error('\n' + '='.repeat(50));
     console.error('  ❌ ERROR');
     console.error('='.repeat(50));
-    console.error(message);
+    console.error(safeMessage);
     console.error('='.repeat(50));
     await waitForKeypress();
     process.exit(code);
@@ -87,12 +95,17 @@ Else
 End If
         `.trim();
 
-        const vbsPath = path.join(os.tmpdir(), `cv_input_${Date.now()}.vbs`);
+        // Use crypto.randomBytes for secure, unpredictable temp file name
+        const randomSuffix = crypto.randomBytes(16).toString('hex');
+        const vbsPath = path.join(os.tmpdir(), `cv_input_${randomSuffix}.vbs`);
 
         console.log('[CodeVault] Opening license key dialog...');
 
         try {
-            fs.writeFileSync(vbsPath, vbsScript, 'utf-8');
+            // Use exclusive create mode to prevent race conditions
+            const fd = fs.openSync(vbsPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+            fs.writeSync(fd, vbsScript, 0, 'utf-8');
+            fs.closeSync(fd);
 
             // Use spawnSync for more reliable execution
             const result = child_process.spawnSync('cscript', ['//Nologo', vbsPath], {
@@ -203,13 +216,17 @@ async function loadOrPromptLicense() {
         await exitWithError('No license key provided.\n\nPlease run the application again and enter a valid license key.');
     }
 
-    // Save license for future runs
+    // Save license for future runs (atomic write to prevent race conditions)
     console.log('[CodeVault] Saving license key...');
     try {
-        fs.writeFileSync(licensePath, licenseKey, 'utf-8');
-        console.log('[CodeVault] ✓ License key saved to:', licensePath);
+        // Write to temp file first, then rename (atomic operation)
+        const tempPath = licensePath + '.tmp.' + crypto.randomBytes(8).toString('hex');
+        fs.writeFileSync(tempPath, licenseKey, { encoding: 'utf-8', mode: 0o600 });
+        fs.renameSync(tempPath, licensePath);
+        console.log('[CodeVault] ✓ License key saved to:', sanitizeLogMessage(licensePath));
     } catch (e) {
-        console.error('[CodeVault] ⚠ Could not save license file:', e.message);
+        const safeError = sanitizeLogMessage(e.message);
+        console.error('[CodeVault] ⚠ Could not save license file:', safeError);
         console.error('[CodeVault] You may need to enter the license key again next time.');
         // Don't exit - continue with validation
     }
