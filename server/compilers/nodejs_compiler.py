@@ -1,236 +1,32 @@
+"""
+Node.js Compiler for CodeVault.
+Compiles Node.js projects with license protection using pkg.
+"""
+
 import os
 import shutil
-import subprocess
 import json
-import logging
 import asyncio
 import uuid
 import tempfile
 from pathlib import Path
 from typing import Optional, Callable
 
-# License Wrapper Script for Node.js
-# This script is injected into the entry file to validate the license before running the user's code.
-NODE_LICENSE_WRAPPER = r"""
-const crypto = require('crypto');
-const os = require('os');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
 
-// Configuration (Injected by compiler)
+# Load the license wrapper template from file
+def _load_wrapper_template() -> str:
+    template_path = Path(__file__).parent / "templates" / "nodejs_license_wrapper.js"
+    if template_path.exists():
+        return template_path.read_text(encoding='utf-8')
+    else:
+        # Fallback: minimal inline template
+        return '''
 const LICENSE_KEY = '{{LICENSE_KEY}}';
-const API_URL = '{{API_URL}}'; // e.g. https://api.codevault.com/api/v1/license/validate
+const API_URL = '{{API_URL}}';
+console.log('[CodeVault] Template file not found. Running in DEMO mode.');
+module.exports = async () => true;
+'''
 
-// Helper to get HWID
-function getHWID() {
-  try {
-      const cpus = os.cpus();
-      const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
-      const info = `${os.hostname()}|${os.platform()}|${os.arch()}|${os.totalmem()}|${cpuModel}`;
-      return crypto.createHash('sha256').update(info).digest('hex');
-  } catch (e) {
-      return 'unknown-hwid';
-  }
-}
-
-// Get the directory where the executable is located
-function getExeDir() {
-    // For pkg-compiled executables, process.execPath points to the exe
-    // For regular node, it points to the node binary
-    if (process.pkg) {
-        return path.dirname(process.execPath);
-    }
-    return __dirname;
-}
-
-// Get the license key file path
-function getLicenseKeyPath() {
-    return path.join(getExeDir(), 'license.key');
-}
-
-// Prompt user for license key via console
-function promptForLicenseKey() {
-    return new Promise((resolve) => {
-        // Check if we have a TTY (console) attached
-        // If not (e.g., double-clicked exe), we cannot prompt
-        if (!process.stdin.isTTY) {
-            console.error('[CodeVault] ERROR: No console available for license key input.');
-            console.error('[CodeVault] Please run this application from a command prompt,');
-            console.error('[CodeVault] or create a license.key file next to the executable.');
-            resolve(null);
-            return;
-        }
-        
-        try {
-            const rl = readline.createInterface({
-                input: process.stdin,
-                output: process.stdout
-            });
-            
-            console.log('\n' + '='.repeat(50));
-            console.log('  LICENSE KEY REQUIRED');
-            console.log('='.repeat(50));
-            
-            rl.question('Enter License Key: ', (answer) => {
-                rl.close();
-                const key = answer ? answer.trim() : null;
-                resolve(key);
-            });
-        } catch (e) {
-            console.error('[CodeVault] ERROR: Could not prompt for license key:', e.message);
-            resolve(null);
-        }
-    });
-}
-
-// Load license from file or prompt user
-async function loadOrPromptLicense() {
-    const licensePath = getLicenseKeyPath();
-    
-    // Try to load from file first
-    if (fs.existsSync(licensePath)) {
-        try {
-            const key = fs.readFileSync(licensePath, 'utf-8').trim();
-            if (key) {
-                console.log(`[CodeVault] Loaded license from ${licensePath}`);
-                return key;
-            }
-        } catch (e) {
-            console.log(`[CodeVault] Warning: Could not read license file: ${e.message}`);
-        }
-    }
-    
-    // Prompt for license
-    console.log('[CodeVault] No license key found. Please enter your license key.');
-    const licenseKey = await promptForLicenseKey();
-    
-    if (!licenseKey) {
-        console.log('\n❌ No license key provided. Exiting...');
-        process.exit(1);
-    }
-    
-    // Save license for future runs
-    try {
-        fs.writeFileSync(licensePath, licenseKey, 'utf-8');
-        console.log(`[CodeVault] License key saved to ${licensePath}`);
-    } catch (e) {
-        console.log(`[CodeVault] Warning: Could not save license file: ${e.message}`);
-    }
-    
-    return licenseKey;
-}
-
-// Delete saved license file (on validation failure)
-function deleteSavedLicense() {
-    try {
-        const licensePath = getLicenseKeyPath();
-        if (fs.existsSync(licensePath)) {
-            fs.unlinkSync(licensePath);
-            console.log('License file removed. Please try again with a valid key.');
-        }
-    } catch (e) {
-        // Ignore cleanup errors
-    }
-}
-
-// Validate License
-async function validateLicense() {
-  let currentLicenseKey = LICENSE_KEY;
-  
-  if (currentLicenseKey === 'DEMO') {
-    console.log('[CodeVault] Running in DEMO mode');
-    return true;
-  }
-  
-  // Handle GENERIC_BUILD mode - prompt for license at runtime
-  if (currentLicenseKey === 'GENERIC_BUILD') {
-    currentLicenseKey = await loadOrPromptLicense();
-  }
-  
-  return new Promise((resolve, reject) => {
-    const hwid = getHWID();
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const timestamp = Math.floor(Date.now() / 1000);
-    
-    // Parse URL
-    let urlObj;
-    try {
-        urlObj = new URL(API_URL);
-    } catch (e) {
-        console.error('[CodeVault] Invalid API URL');
-        process.exit(1);
-    }
-
-    const postData = JSON.stringify({
-      license_key: currentLicenseKey,
-      hwid: hwid,
-      nonce: nonce,
-      timestamp: timestamp,
-      machine_name: os.hostname()
-    });
-    
-    const options = {
-      hostname: urlObj.hostname,
-      port: urlObj.port || 443,
-      path: urlObj.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    };
-    
-    // Determine protocol
-    const lib = urlObj.protocol === 'http:' ? require('http') : require('https');
-
-    const req = lib.request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => body += chunk);
-      res.on('end', () => {
-        try {
-            if (res.statusCode !== 200) {
-                 console.error(`[CodeVault] Validation failed (HTTP ${res.statusCode})`);
-                 // Delete saved license on server error that indicates invalid
-                 if (LICENSE_KEY === 'GENERIC_BUILD') {
-                     deleteSavedLicense();
-                 }
-                 process.exit(1);
-            }
-
-            const response = JSON.parse(body);
-            if (response.status === 'valid') {
-              resolve(true);
-            } else {
-              console.error('[CodeVault] License invalid:', response.message || 'Unknown error');
-              // Delete saved license on validation failure
-              if (LICENSE_KEY === 'GENERIC_BUILD') {
-                  deleteSavedLicense();
-              }
-              process.exit(1);
-            }
-        } catch (e) {
-            console.error('[CodeVault] Failed to parse validation response');
-            process.exit(1);
-        }
-      });
-    });
-    
-    req.on('error', (e) => {
-        console.error('[CodeVault] Connection error:', e.message);
-        // Fail open or closed? Currently failing closed.
-        process.exit(1); 
-    });
-    
-    req.write(postData);
-    req.end();
-  });
-}
-
-// Export validation function
-module.exports = validateLicense;
-"""
 
 class NodeJSCompiler:
     def __init__(self, node_modules_path: Path):
@@ -251,7 +47,6 @@ class NodeJSCompiler:
             return local_bin
             
         # 2. Check server root node_modules (one level up from where we assume main.py is)
-        # This is heuristics.
         server_root_bin = self.node_modules_path.parent / "node_modules" / ".bin" / tool_name
         if os.name == 'nt':
              server_root_bin = server_root_bin.with_suffix(".cmd")
@@ -301,10 +96,9 @@ class NodeJSCompiler:
                 npm_path, "install",
                 cwd=str(source_dir),
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT  # Merge stderr into stdout for unified logging
+                stderr=asyncio.subprocess.STDOUT
             )
             
-            # Stream output to log_callback
             while True:
                 line = await process.stdout.readline()
                 if not line:
@@ -325,22 +119,40 @@ class NodeJSCompiler:
         except Exception as e:
             raise Exception(f"❌ npm install failed: {str(e)}")
 
-    def _prepare_package_json(self, build_dir: Path, bootstrap_filename: str, log_callback_sync=None) -> None:
+    def _prepare_package_json(self, build_dir: Path, bootstrap_filename: str, entry_file: str) -> None:
         """
         Ensure package.json exists and has a proper 'bin' field pointing to our bootstrap.
-        If no package.json exists, creates a minimal one.
-        If package.json exists but lacks 'bin', adds it.
+        Also configures 'pkg' scripts to ensure ALL JS files are included (fixes dynamic require).
         """
         package_json_path = build_dir / "package.json"
         
+        # Normalize entry file for pkg (forward slashes)
+        normalized_entry = entry_file.replace('\\', '/')
+        
+        # CRITICAL FIX: Scan ALL .js files in the project and add to scripts
+        all_js_files = []
+        for js_file in build_dir.rglob("*.js"):
+            if "node_modules" in str(js_file):
+                continue
+            rel_path = js_file.relative_to(build_dir).as_posix()
+            all_js_files.append(rel_path)
+        
+        # Also include .json files that might be required
+        all_json_files = []
+        for json_file in build_dir.rglob("*.json"):
+            if "node_modules" in str(json_file) or json_file.name in ("package.json", "package-lock.json"):
+                continue
+            rel_path = json_file.relative_to(build_dir).as_posix()
+            all_json_files.append(rel_path)
+        
         if not package_json_path.exists():
-            # Create minimal package.json
             package_data = {
                 "name": "codevault-wrapped-app",
                 "version": "1.0.0",
                 "bin": bootstrap_filename,
                 "pkg": {
-                    "assets": ["**/*"],
+                    "scripts": all_js_files,
+                    "assets": all_json_files + ["**/*.json", "!package.json", "!package-lock.json"],
                     "outputPath": "dist"
                 }
             }
@@ -353,17 +165,14 @@ class NodeJSCompiler:
             with open(package_json_path, 'r', encoding='utf-8') as f:
                 package_data = json.load(f)
         except json.JSONDecodeError:
-            # Malformed package.json, create a fresh one
-            package_data = {
-                "name": "codevault-wrapped-app",
-                "version": "1.0.0"
-            }
+            package_data = {"name": "codevault-wrapped-app", "version": "1.0.0"}
         
-        # Add or update bin field to point to bootstrap
-        if "bin" not in package_data:
-            package_data["bin"] = bootstrap_filename
+        package_data["bin"] = bootstrap_filename
+        package_data["pkg"] = {
+            "scripts": all_js_files,
+            "assets": all_json_files + ["**/*.json", "!package.json", "!package-lock.json"]
+        }
         
-        # Write back
         with open(package_json_path, 'w', encoding='utf-8') as f:
             json.dump(package_data, f, indent=2)
 
@@ -390,23 +199,16 @@ class NodeJSCompiler:
         await self.log("Starting Node.js compilation process...", log_callback)
         await self.log(f"Source directory: {source_dir}", log_callback)
         
-        # Create a unique temporary build directory
         build_dir = None
         
         try:
-            # ===============================================
-            # STEP 1: Install dependencies in source_dir first
-            # ===============================================
-            await self._run_npm_install(source_dir, log_callback)
-            
-            # Validate entry file exists
+            # STEP 1: Validate entry file and tools before copying
             entry_path = source_dir / entry_file
             if not entry_path.exists():
                 raise Exception(f"Entry file not found: {entry_path}")
             
             await self.log(f"✓ Entry file validated: {entry_file}", log_callback)
             
-            # Check if required tools are available
             pkg_available = str(self.pkg_bin) != "pkg" or shutil.which("pkg") or shutil.which("npx")
             if not pkg_available:
                 raise Exception("❌ 'pkg' not found. Please install Node.js and run: npm install -g pkg")
@@ -419,17 +221,12 @@ class NodeJSCompiler:
             elif not obfuscator_available:
                 await self.log("⚠️ javascript-obfuscator not found. Code will not be obfuscated.", log_callback)
 
-            # ===============================================
             # STEP 2: Copy source to temp build directory
-            # ===============================================
             await self.log("📁 Creating temporary build directory...", log_callback)
             
-            # Create temp directory in system temp
             build_dir = Path(tempfile.mkdtemp(prefix="cv_nodejs_build_"))
             await self.log(f"Build directory: {build_dir}", log_callback)
             
-            # Copy entire source_dir to build_dir
-            # Use shutil.copytree with dirs_exist_ok=True to copy contents
             for item in source_dir.iterdir():
                 src_path = source_dir / item.name
                 dst_path = build_dir / item.name
@@ -441,7 +238,7 @@ class NodeJSCompiler:
             
             await self.log("✓ Source copied to build directory.", log_callback)
             
-            # Verify node_modules was copied if package.json has dependencies
+            # Check and install dependencies if needed
             package_json_path = build_dir / "package.json"
             node_modules_in_build = build_dir / "node_modules"
             if package_json_path.exists():
@@ -450,37 +247,35 @@ class NodeJSCompiler:
                         pkg_data = json.load(f)
                     has_deps = bool(pkg_data.get('dependencies') or pkg_data.get('devDependencies'))
                     if has_deps and not node_modules_in_build.exists():
-                        await self.log("⚠️ Warning: package.json has dependencies but node_modules was not copied.", log_callback)
-                        await self.log("  The built executable may fail to load modules.", log_callback)
-                except Exception:
-                    pass
+                        await self.log("📦 Installing dependencies in build directory...", log_callback)
+                        await self._run_npm_install(build_dir, log_callback)
+                except Exception as e:
+                    await self.log(f"⚠️ Could not check/install dependencies: {e}", log_callback)
 
-            # ===============================================
             # STEP 3: Inject License Wrapper into build_dir
-            # ===============================================
             wrapper_path = build_dir / "cv_license_wrapper.js"
-            wrapper_content = NODE_LICENSE_WRAPPER.replace('{{LICENSE_KEY}}', license_key).replace('{{API_URL}}', api_url)
+            
+            # Load wrapper template and inject values
+            wrapper_template = _load_wrapper_template()
+            safe_license_key = json.dumps(license_key)
+            safe_api_url = json.dumps(api_url)
+            wrapper_content = wrapper_template.replace("'{{LICENSE_KEY}}'", safe_license_key).replace("'{{API_URL}}'", safe_api_url)
             
             with open(wrapper_path, 'w', encoding='utf-8') as f:
                 f.write(wrapper_content)
             
-            # Create a bootstrap entry file with UNIQUE name
+            # Create bootstrap entry file
             bootstrap_filename = f"_cv_bootstrap_{uuid.uuid4().hex[:8]}.js"
             bootstrap_entry = build_dir / bootstrap_filename
             
-            # cv_bootstrap.js triggers validation, then requires the MAIN file.
-            # Normalize entry_file: replace backslashes with forward slashes for Node.js
             normalized_entry = entry_file.replace('\\', '/')
             
             bootstrap_content = f"""
-const path = require('path');
 const validateLicense = require('./cv_license_wrapper');
 
 validateLicense().then(() => {{
     console.log('[CodeVault] License verified. Starting application...');
-    // Use path.join for proper resolution inside pkg snapshot
-    const entryPath = path.join(__dirname, '{normalized_entry}');
-    require(entryPath);
+    require('./{normalized_entry}');
 }}).catch(err => {{
     console.error('[CodeVault] Startup error:', err);
     process.exit(1);
@@ -491,53 +286,15 @@ validateLicense().then(() => {{
                 
             await self.log("✓ License wrapper injected.", log_callback)
             
-            # ===============================================
-            # STEP 4: Update package.json bin field
-            # ===============================================
-            self._prepare_package_json(build_dir, bootstrap_filename)
+            # STEP 4: Update package.json bin field & pkg scripts
+            self._prepare_package_json(build_dir, bootstrap_filename, entry_file)
             await self.log("✓ package.json configured.", log_callback)
 
-            # ===============================================
-            # STEP 5: Obfuscation (in-place on build_dir copy)
-            # ===============================================
+            # STEP 5: Obfuscation (if enabled)
             if should_obfuscate:
-                await self.log("🔒 Obfuscating JavaScript code (in-place)...", log_callback)
-                
-                # Obfuscate in-place, excluding node_modules
-                # javascript-obfuscator with --output pointing to same dir overwrites files
-                cmd = [
-                    str(self.obfuscator_bin),
-                    str(build_dir),
-                    "--output", str(build_dir),
-                    "--ignore-require-imports", "true",
-                    "--compact", "true",
-                    "--control-flow-flattening", "true",
-                    "--string-array", "true",
-                    "--string-array-encoding", "rc4",
-                    "--exclude", "**/node_modules/**",
-                    "--exclude", "node_modules/**"
-                ]
-
-                try:
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, stderr = await process.communicate()
-                    
-                    if process.returncode != 0:
-                        error_output = stderr.decode('utf-8', errors='replace')
-                        await self.log(f"⚠️ Obfuscation warning: {error_output}", log_callback)
-                        await self.log("Continuing without obfuscation...", log_callback)
-                    else:
-                        await self.log("✓ Obfuscation completed.", log_callback)
-                except Exception as e:
-                    await self.log(f"⚠️ Obfuscation failed: {e}. Continuing without obfuscation.", log_callback)
+                await self._run_obfuscation(build_dir, log_callback)
             
-            # ===============================================
-            # STEP 6: Packaging with pkg (from build_dir)
-            # ===============================================
+            # STEP 6: Packaging with pkg
             await self.log("📦 Packaging application into executable...", log_callback)
             
             target = options.get('target', 'node18-win-x64')
@@ -546,32 +303,30 @@ validateLicense().then(() => {{
             if os.name == 'nt' and not output_name.endswith('.exe'):
                 output_exe = output_exe.with_suffix('.exe')
             
-            # Ensure output directory exists
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            pkg_entry = build_dir / bootstrap_filename
-                
             pkg_cmd = [
                 str(self.pkg_bin),
-                str(pkg_entry),
+                ".",
                 "--target", target,
                 "--output", str(output_exe),
                 "--public",
-                "--no-bytecode",  # Disable bytecode to avoid "Failed to make bytecode" errors
-                "--compress", "GZip"  # Add compression since we're not using bytecode
+                "--no-bytecode",
+                "--compress", "GZip"
             ]
             
             await self.log(f"Running: {' '.join(pkg_cmd)}", log_callback)
             
+            bundling_warnings = []
+            
             try:
                 process = await asyncio.create_subprocess_exec(
                     *pkg_cmd,
-                    cwd=str(build_dir),  # Run pkg from build_dir so it finds node_modules
+                    cwd=str(build_dir),
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT  # Merge for unified logging
+                    stderr=asyncio.subprocess.STDOUT
                 )
                 
-                # Stream output
                 while True:
                     line = await process.stdout.readline()
                     if not line:
@@ -579,8 +334,15 @@ validateLicense().then(() => {{
                     decoded_line = line.decode('utf-8', errors='replace').rstrip()
                     if decoded_line:
                         await self.log(f"  pkg: {decoded_line}", log_callback)
+                        if "Cannot resolve" in decoded_line or "was not included" in decoded_line:
+                            bundling_warnings.append(decoded_line)
                 
                 await process.wait()
+                
+                if bundling_warnings:
+                    await self.log(f"⚠️ Warning: {len(bundling_warnings)} file(s) may not be bundled correctly", log_callback)
+                    for warn in bundling_warnings[:3]:
+                        await self.log(f"   → {warn}", log_callback)
                  
                 if process.returncode != 0:
                     raise Exception(f"pkg failed with exit code {process.returncode}")
@@ -598,9 +360,7 @@ validateLicense().then(() => {{
             return output_exe
             
         finally:
-            # ===============================================
             # CLEANUP: Always remove temp build directory
-            # ===============================================
             if build_dir and build_dir.exists():
                 try:
                     await self.log("🧹 Cleaning up temporary build directory...", log_callback)
@@ -608,4 +368,37 @@ validateLicense().then(() => {{
                     await self.log("✓ Cleanup complete.", log_callback)
                 except Exception as cleanup_error:
                     await self.log(f"⚠️ Cleanup warning: {cleanup_error}", log_callback)
-                    # Don't raise - cleanup failure shouldn't fail the build
+
+    async def _run_obfuscation(self, build_dir: Path, log_callback: Optional[Callable] = None):
+        """Run JavaScript obfuscation on the build directory."""
+        await self.log("🔒 Obfuscating JavaScript code (in-place)...", log_callback)
+        
+        cmd = [
+            str(self.obfuscator_bin),
+            str(build_dir),
+            "--output", str(build_dir),
+            "--ignore-require-imports", "true",
+            "--compact", "true",
+            "--control-flow-flattening", "true",
+            "--string-array", "true",
+            "--string-array-encoding", "rc4",
+            "--exclude", "**/node_modules/**",
+            "--exclude", "node_modules/**"
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                error_output = stderr.decode('utf-8', errors='replace')
+                await self.log(f"⚠️ Obfuscation warning: {error_output}", log_callback)
+                await self.log("Continuing without obfuscation...", log_callback)
+            else:
+                await self.log("✓ Obfuscation completed.", log_callback)
+        except Exception as e:
+            await self.log(f"⚠️ Obfuscation failed: {e}. Continuing without obfuscation.", log_callback)
