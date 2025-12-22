@@ -6,6 +6,7 @@ Extracted from main.py for modularity.
 import sys
 import json
 import time
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -173,7 +174,9 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
     job_cache[job_id]['progress'] = 50
     
     job_cache[job_id]['logs'].append('🔨 Building with Nuitka...')
-    output_name = data.output_name or 'app'
+    # Security: Sanitize output_name to prevent command injection
+    raw_output_name = data.output_name or 'app'
+    output_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_output_name) or 'app'
     entry_file = safe_join(project_dir, entry_point)
     
     nuitka_cmd = [
@@ -277,7 +280,9 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
         job_cache[job_id]['progress'] = 30
     
     job_cache[job_id]['logs'].append('🔨 Building with Nuitka...')
-    output_name = data.output_name or source_file.stem
+    # Security: Sanitize output_name to prevent command injection
+    raw_output_name = data.output_name or source_file.stem
+    output_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_output_name) or 'app'
     
     nuitka_cmd = [
         sys.executable, "-m", "nuitka",

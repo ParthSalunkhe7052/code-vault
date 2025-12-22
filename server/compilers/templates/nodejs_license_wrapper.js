@@ -345,7 +345,8 @@ async function validateLicense() {
 
         // Handle connection errors
         req.on('error', async (e) => {
-            console.error('[CodeVault] Connection error:', e.message);
+            // Security: Sanitize error message to prevent log injection
+            const safeErrorMessage = sanitizeLogMessage(e.message || 'Unknown error');
 
             let helpText = '';
             if (e.code === 'ECONNREFUSED') {
@@ -355,16 +356,19 @@ async function validateLicense() {
             } else if (e.code === 'ENOTFOUND') {
                 helpText = `\nCould not resolve hostname: ${urlObj.hostname}\n\nPossible causes:\n1. No internet connection\n2. DNS server issues\n3. Invalid server URL\n\nPlease check your internet connection.`;
             } else {
-                helpText = `\nNetwork error: ${e.message}\n\nPlease check your internet connection and try again.`;
+                helpText = `\nNetwork error: ${safeErrorMessage}\n\nPlease check your internet connection and try again.`;
             }
 
+            console.error('[CodeVault] Connection error:', safeErrorMessage);
             await exitWithError(`Cannot connect to license server.${helpText}`);
         });
 
         // Handle timeout
         req.on('timeout', async () => {
             req.destroy();
-            await exitWithError(`Connection to license server timed out.\n\nThe server at ${API_URL} is not responding.\nPlease try again later.`);
+            // Security: Sanitize URL in log message
+            const safeUrl = sanitizeLogMessage(API_URL);
+            await exitWithError(`Connection to license server timed out.\n\nThe server at ${safeUrl} is not responding.\nPlease try again later.`);
         });
 
         req.write(postData);

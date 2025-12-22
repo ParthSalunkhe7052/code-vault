@@ -16,6 +16,10 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+# Import path security utilities
+import re
+PROJECT_ID_PATTERN = re.compile(r'^[a-f0-9]{32}$')
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -159,7 +163,17 @@ class StorageService:
                 # Fall through to local storage
         
         # Local storage fallback
+        # Security: Validate project_id format before using in path
+        if not PROJECT_ID_PATTERN.match(project_id):
+            raise ValueError("Invalid project ID format")
+        
         project_dir = LOCAL_UPLOAD_DIR / project_id
+        # Additional check: ensure we're still within LOCAL_UPLOAD_DIR
+        try:
+            project_dir.resolve().relative_to(LOCAL_UPLOAD_DIR.resolve())
+        except ValueError:
+            raise ValueError("Invalid project path")
+        
         project_dir.mkdir(parents=True, exist_ok=True)
         
         ext = Path(filename).suffix
@@ -268,7 +282,17 @@ class StorageService:
                 print(f"[Storage] Error deleting project files from R2: {e}")
         
         # Also clean local storage
+        # Security: Validate project_id format before using in path
+        if not PROJECT_ID_PATTERN.match(project_id):
+            return deleted_count  # Skip invalid project IDs
+        
         local_project_dir = LOCAL_UPLOAD_DIR / project_id
+        # Additional check: ensure we're still within LOCAL_UPLOAD_DIR
+        try:
+            local_project_dir.resolve().relative_to(LOCAL_UPLOAD_DIR.resolve())
+        except ValueError:
+            return deleted_count  # Skip if path escapes base directory
+        
         if local_project_dir.exists():
             import shutil
             shutil.rmtree(local_project_dir)

@@ -9,6 +9,7 @@ import json
 import asyncio
 import uuid
 import tempfile
+import re
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -299,8 +300,13 @@ validateLicense().then(() => {{
             
             target = options.get('target', 'node18-win-x64')
             
-            output_exe = output_dir / output_name
-            if os.name == 'nt' and not output_name.endswith('.exe'):
+            # Security: Sanitize output_name to prevent path traversal
+            safe_output_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', output_name)
+            if not safe_output_name:
+                safe_output_name = 'app'
+            
+            output_exe = output_dir / safe_output_name
+            if os.name == 'nt' and not safe_output_name.endswith('.exe'):
                 output_exe = output_exe.with_suffix('.exe')
             
             output_dir.mkdir(parents=True, exist_ok=True)

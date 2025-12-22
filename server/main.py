@@ -536,12 +536,11 @@ async def build_installer(data: InstallerBuildRequest):
             "logs": logs
         }
     except Exception as e:
-        # Security: Log full error server-side, return generic message to client
-        import logging
-        logging.error(f"Build failed: {e}", exc_info=True)
+        # Security: Log error server-side without exposing stack trace to client
+        print(f"[Build Error] Build failed (details hidden from client)")
         return {
             "success": False,
-            "error": "Build failed. Check server logs for details.",
+            "error": "Build failed. Please check project configuration and try again.",
             "logs": logs
         }
 
