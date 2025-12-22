@@ -1,5 +1,5 @@
 import React from 'react';
-import { Hammer, FileCode, Terminal, Key, CheckCircle, Loader, AlertCircle, FolderOpen, Download } from 'lucide-react';
+import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download } from 'lucide-react';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -12,7 +12,8 @@ const Step5Build = ({
     project,
     entryFile,
     showConsole,
-    selectedLicense,
+    protectionMode = 'generic',
+    demoDuration = 60,
     fileTree,
     isBuilding,
     buildProgress,
@@ -99,8 +100,8 @@ const Step5Build = ({
                     <button
                         onClick={() => setDistributionType('portable')}
                         className={`p-4 rounded-lg border-2 transition-all text-left ${distributionType === 'portable'
-                                ? 'border-indigo-500 bg-indigo-500/20'
-                                : 'border-white/10 bg-white/5 hover:border-white/20'
+                            ? 'border-indigo-500 bg-indigo-500/20'
+                            : 'border-white/10 bg-white/5 hover:border-white/20'
                             }`}
                     >
                         <div className="font-medium text-white mb-1">Portable .exe</div>
@@ -110,8 +111,8 @@ const Step5Build = ({
                     <button
                         onClick={() => setDistributionType('installer')}
                         className={`p-4 rounded-lg border-2 transition-all text-left ${distributionType === 'installer'
-                                ? 'border-indigo-500 bg-indigo-500/20'
-                                : 'border-white/10 bg-white/5 hover:border-white/20'
+                            ? 'border-indigo-500 bg-indigo-500/20'
+                            : 'border-white/10 bg-white/5 hover:border-white/20'
                             }`}
                     >
                         <div className="font-medium text-white mb-1">Windows Installer</div>
@@ -183,11 +184,15 @@ const Step5Build = ({
                 </div>
 
                 <div className="p-4 flex items-center gap-4">
-                    <Key size={20} className="text-purple-400" />
+                    <Shield size={20} className="text-purple-400" />
                     <div className="flex-1">
-                        <p className="text-xs text-slate-400">License</p>
-                        <p className="text-white font-mono text-sm">
-                            {selectedLicense || 'No license (Demo mode)'}
+                        <p className="text-xs text-slate-400">Protection Mode</p>
+                        <p className="text-white text-sm">
+                            {protectionMode === 'demo'
+                                ? `Trial Mode (${demoDuration >= 1440 ? Math.floor(demoDuration / 1440) + ' days' : demoDuration >= 60 ? Math.floor(demoDuration / 60) + ' hours' : demoDuration + ' min'})`
+                                : protectionMode === 'none'
+                                    ? 'No Protection'
+                                    : 'Generic Build (runtime key)'}
                         </p>
                     </div>
                 </div>

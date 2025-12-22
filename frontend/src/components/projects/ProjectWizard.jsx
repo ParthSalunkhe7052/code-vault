@@ -32,7 +32,7 @@ const ProjectWizard = ({
 
     const [currentStep, setCurrentStep] = useState(1);
     const [completedSteps, setCompletedSteps] = useState([]);
-    const [selectedLicense, setSelectedLicense] = useState('');
+    const [protectionMode, setProtectionMode] = useState('generic'); // 'generic' | 'demo' | 'none'
     const [showConsole, setShowConsole] = useState(true); // Will be set from settings in useEffect
     const [isBuilding, setIsBuilding] = useState(false);
     const [buildStatus, setBuildStatus] = useState('idle');
@@ -356,9 +356,9 @@ const ProjectWizard = ({
                         project_version: "1.0.0",  // TODO: Get from project settings
                         publisher: publisher,
                         language: language,
-                        license_key: selectedLicense || null,
+                        license_key: null,  // Generic build - no embedded key
                         server_url: 'http://localhost:8000',
-                        license_mode: selectedLicense ? 'fixed' : 'generic',
+                        license_mode: protectionMode === 'none' ? null : protectionMode === 'demo' ? 'demo' : 'generic',
                         distribution_type: distributionType,
                         create_desktop_shortcut: createDesktopShortcut,
                         create_start_menu: createStartMenu,
@@ -456,9 +456,8 @@ const ProjectWizard = ({
             case 4:
                 return (
                     <Step4License
-                        licenses={licenses}
-                        selectedLicense={selectedLicense}
-                        setSelectedLicense={setSelectedLicense}
+                        protectionMode={protectionMode}
+                        setProtectionMode={setProtectionMode}
                         // Demo mode props
                         demoMode={demoMode}
                         setDemoMode={setDemoMode}
@@ -472,7 +471,8 @@ const ProjectWizard = ({
                         project={project}
                         entryFile={configData.entry_file}
                         showConsole={showConsole}
-                        selectedLicense={selectedLicense}
+                        protectionMode={protectionMode}
+                        demoDuration={demoDuration}
                         fileTree={configData.file_tree}
                         isBuilding={isBuilding}
                         buildProgress={buildProgress}

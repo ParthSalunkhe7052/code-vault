@@ -2444,7 +2444,7 @@ pub async fn run_installer_build(
         "entry_file": request.entry_file,
         "language": request.language,
         "license_key": request.license_key.unwrap_or_else(|| "GENERIC_BUILD".to_string()),
-        "api_url": request.server_url.unwrap_or_else(|| "http://localhost:8000".to_string()),
+        "api_url": format!("{}/api/v1/license/validate", request.server_url.as_deref().unwrap_or("http://localhost:8000")),
         "license_mode": request.license_mode.unwrap_or_else(|| "generic".to_string()),
         "distribution_type": request.distribution_type,
         "create_desktop_shortcut": request.create_desktop_shortcut.unwrap_or(true),
