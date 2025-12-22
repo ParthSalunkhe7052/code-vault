@@ -35,7 +35,8 @@ from config import (
 from startup_checks import run_startup_checks
 from database import get_db, release_db, lifespan
 from utils import (
-    utc_now, generate_api_key, get_current_user
+    utc_now, generate_api_key, get_current_user,
+    safe_join, validate_project_id, SecurityError
 )
 
 # Import storage and email services
@@ -387,6 +388,9 @@ async def upload_project_zip(
     """Upload an entire project as a ZIP file."""
     conn = await get_db()
     try:
+        # Security: Validate project_id format before any path operations
+        validate_project_id(project_id)
+        
         project = await conn.fetchrow("SELECT id, name, language FROM projects WHERE id = $1 AND user_id = $2", 
                                       project_id, user['id'])
         if not project:
@@ -395,10 +399,11 @@ async def upload_project_zip(
         if not file.filename.endswith('.zip'):
             raise HTTPException(status_code=400, detail="File must be a .zip file")
         
-        project_dir = UPLOAD_DIR / project_id
+        # Use safe_join for all path operations
+        project_dir = safe_join(UPLOAD_DIR, project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
         
-        zip_path = project_dir / "project.zip"
+        zip_path = safe_join(project_dir, "project.zip")
         content = await file.read()
         
         from storage_service import validate_file_size
@@ -409,7 +414,7 @@ async def upload_project_zip(
         with open(zip_path, "wb") as f:
             f.write(content)
         
-        source_dir = project_dir / "source"
+        source_dir = safe_join(project_dir, "source")
         if source_dir.exists():
             shutil.rmtree(source_dir)
         source_dir.mkdir(parents=True, exist_ok=True)
@@ -453,8 +458,12 @@ async def upload_project_zip(
         }
     except HTTPException:
         raise
+    except SecurityError as e:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process ZIP: {str(e)}")
+        import logging
+        logging.error(f"Failed to process ZIP: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to process ZIP file")
     finally:
         await release_db(conn)
 
@@ -527,9 +536,12 @@ async def build_installer(data: InstallerBuildRequest):
             "logs": logs
         }
     except Exception as e:
+        # Security: Log full error server-side, return generic message to client
+        import logging
+        logging.error(f"Build failed: {e}", exc_info=True)
         return {
             "success": False,
-            "error": str(e),
+            "error": "Build failed. Check server logs for details.",
             "logs": logs
         }
 
@@ -682,21 +694,27 @@ async def download_compiled_file(job_id: str, user: dict = Depends(get_current_u
             raise HTTPException(status_code=404, detail="Output file not found")
         
         project_id = job['project_id']
-        output_dir = UPLOAD_DIR / project_id / "output"
-        output_file = output_dir / job['output_filename']
+        
+        # Security: Validate project_id and use safe paths
+        validate_project_id(project_id)
+        project_base = safe_join(UPLOAD_DIR, project_id)
+        output_dir = safe_join(project_base, "output")
+        output_file = safe_join(output_dir, job['output_filename'])
         
         if not output_file.exists():
             exe_files = list(output_dir.glob("*.exe"))
             if exe_files:
                 output_file = exe_files[0]
             else:
-                raise HTTPException(status_code=404, detail=f"Compiled file not found: {job['output_filename']}")
+                raise HTTPException(status_code=404, detail="Compiled file not found")
         
         return FileResponse(
             path=str(output_file),
             filename=job['output_filename'],
             media_type='application/octet-stream'
         )
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
     finally:
         await release_db(conn)
 

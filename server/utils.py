@@ -2,12 +2,15 @@
 Utility functions for CodeVault API.
 """
 
+import os
+import re
 import time
 import secrets
 import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from pathlib import Path
+from typing import Optional, List, Union
 
 import jwt
 import bcrypt
@@ -17,6 +20,141 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import SECRET_KEY, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 from database import get_db, release_db
 from models import LicenseValidationResponse
+
+
+# =============================================================================
+# Path Security Utilities (Prevent Path Traversal Attacks)
+# =============================================================================
+
+class SecurityError(Exception):
+    """Raised when a security violation is detected."""
+    pass
+
+
+# Regex pattern for valid project IDs (32 hex characters)
+PROJECT_ID_PATTERN = re.compile(r'^[a-f0-9]{32}$')
+
+
+def validate_project_id(project_id: str) -> bool:
+    """
+    Validate that a project_id is a valid hex string.
+    
+    Args:
+        project_id: The project ID to validate
+        
+    Returns:
+        True if valid
+        
+    Raises:
+        SecurityError: If the project_id is invalid
+    """
+    if not project_id or not isinstance(project_id, str):
+        raise SecurityError("Invalid project ID: empty or not a string")
+    
+    if not PROJECT_ID_PATTERN.match(project_id):
+        raise SecurityError(f"Invalid project ID format: must be 32 hex characters")
+    
+    return True
+
+
+def safe_join(base: Path, *parts: str) -> Path:
+    """
+    Safely join path components, preventing path traversal attacks.
+    
+    Args:
+        base: The base directory (must be absolute)
+        *parts: Path components to join
+        
+    Returns:
+        Resolved absolute Path that is guaranteed to be within base
+        
+    Raises:
+        SecurityError: If the resulting path escapes the base directory
+    """
+    if not base.is_absolute():
+        base = base.resolve()
+    
+    # Clean each part to remove dangerous components
+    cleaned_parts = []
+    for part in parts:
+        if not part:
+            continue
+        # Convert to string and clean
+        part_str = str(part)
+        # Reject obvious traversal attempts
+        if '..' in part_str or part_str.startswith('/') or part_str.startswith('\\'):
+            raise SecurityError(f"Path traversal detected in: {part_str}")
+        cleaned_parts.append(part_str)
+    
+    # Join and resolve the full path
+    if cleaned_parts:
+        target = base.joinpath(*cleaned_parts).resolve()
+    else:
+        target = base.resolve()
+    
+    # Verify the resolved path is within the base
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
+        raise SecurityError(f"Path escapes base directory: {target}")
+    
+    return target
+
+
+def validate_safe_path(base: Path, target: Union[Path, str]) -> Path:
+    """
+    Validate that a target path is safely within a base directory.
+    
+    Args:
+        base: The allowed base directory
+        target: The path to validate (can be string or Path)
+        
+    Returns:
+        Resolved absolute Path that is guaranteed to be within base
+        
+    Raises:
+        SecurityError: If the target escapes the base directory
+    """
+    base_resolved = base.resolve()
+    
+    if isinstance(target, str):
+        target = Path(target)
+    
+    target_resolved = target.resolve()
+    
+    try:
+        target_resolved.relative_to(base_resolved)
+    except ValueError:
+        raise SecurityError(f"Path escapes allowed directory: {target_resolved}")
+    
+    return target_resolved
+
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize a filename to prevent path traversal and invalid characters.
+    
+    Args:
+        filename: The filename to sanitize
+        
+    Returns:
+        Sanitized filename safe for filesystem use
+    """
+    if not filename:
+        return "unnamed"
+    
+    # Remove path separators and null bytes
+    filename = filename.replace('/', '_').replace('\\', '_').replace('\x00', '')
+    
+    # Remove leading dots (hidden files) and parent references
+    while filename.startswith('.'):
+        filename = filename[1:]
+    
+    # Limit length
+    if len(filename) > 255:
+        filename = filename[:255]
+    
+    return filename or "unnamed"
 
 # Security
 security = HTTPBearer(auto_error=False)

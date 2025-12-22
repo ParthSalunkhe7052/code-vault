@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from config import LICENSE_SERVER_URL
-from utils import utc_now
+from utils import utc_now, safe_join, validate_project_id, SecurityError
 from database import get_db, release_db
 from compilers.nodejs_compiler import NodeJSCompiler
 
@@ -81,9 +81,15 @@ async def compile_nodejs_project(job_id: str, project_id: str, data, job_cache: 
     """Compile a Node.js project."""
     job_cache[job_id]['logs'].append('📦 Node.js project detected')
     
-    source_dir = upload_dir / project_id / "source"
+    # Security: Validate project_id before using in paths
+    validate_project_id(project_id)
+    
+    # Use safe_join to prevent path traversal
+    project_base = safe_join(upload_dir, project_id)
+    source_dir = safe_join(project_base, "source")
+    
     if not source_dir.exists():
-        source_dir = upload_dir / project_id
+        source_dir = project_base
         job_cache[job_id]['logs'].append('   Single file mode')
     else:
         job_cache[job_id]['logs'].append('   Multi-file mode')
@@ -91,20 +97,22 @@ async def compile_nodejs_project(job_id: str, project_id: str, data, job_cache: 
     entry_file = data.entry_file
     if not entry_file:
         for candidate in ['index.js', 'app.js', 'main.js', 'server.js']:
-            if (source_dir / candidate).exists():
+            candidate_path = safe_join(source_dir, candidate)
+            if candidate_path.exists():
                 entry_file = candidate
                 break
     
     if not entry_file:
         raise Exception("Entry file not specified and could not be auto-detected")
     
-    entry_path = source_dir / entry_file
+    # Validate entry file path
+    entry_path = safe_join(source_dir, entry_file)
     if not entry_path.exists():
-        raise Exception(f"Entry file not found: {entry_path}")
+        raise Exception(f"Entry file not found: {entry_file}")
         
     job_cache[job_id]['logs'].append(f"   Entry: {entry_file}")
     
-    output_dir = upload_dir / project_id / "output"
+    output_dir = safe_join(project_base, "output")
     output_dir.mkdir(exist_ok=True)
     
     node_modules = Path(__file__).parent.parent / "node_modules"
@@ -139,10 +147,13 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
     job_cache[job_id]['logs'].append(f"   Files: {file_tree['total_files']}")
     job_cache[job_id]['logs'].append(f"   Entry: {file_tree['entry_point']}")
     
-    project_dir = upload_dir / project_id / "source"
+    # Security: Validate project_id and use safe paths
+    validate_project_id(project_id)
+    project_base = safe_join(upload_dir, project_id)
+    project_dir = safe_join(project_base, "source")
     
     if not project_dir.exists():
-        raise Exception(f"Project source directory not found: {project_dir}")
+        raise Exception("Project source directory not found")
     
     job_cache[job_id]['progress'] = 10
     
@@ -155,13 +166,15 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
     
     job_cache[job_id]['logs'].append('🔐 Injecting license validation...')
     entry_point = file_tree['entry_point']
+    # Validate entry_point doesn't escape project_dir
+    safe_join(project_dir, entry_point)
     inject_license_into_multi_folder(project_dir, entry_point, data.license_key or "DEMO-KEY")
     
     job_cache[job_id]['progress'] = 50
     
     job_cache[job_id]['logs'].append('🔨 Building with Nuitka...')
     output_name = data.output_name or 'app'
-    entry_file = project_dir / entry_point
+    entry_file = safe_join(project_dir, entry_point)
     
     nuitka_cmd = [
         sys.executable, "-m", "nuitka",
@@ -197,7 +210,7 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
         job_cache[job_id]['logs'].append(f"Error: {result.stderr[:500]}")
         raise Exception(f"Nuitka failed: {result.stderr[:200]}")
     
-    exe_file = project_dir / f"{output_name}.exe"
+    exe_file = safe_join(project_dir, f"{output_name}.exe")
     if not exe_file.exists():
         for f in project_dir.glob("*.exe"):
             exe_file = f
@@ -206,9 +219,9 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
     if not exe_file.exists():
         raise Exception("Compiled executable not found")
     
-    output_dir = upload_dir / project_id / "output"
+    output_dir = safe_join(project_base, "output")
     output_dir.mkdir(exist_ok=True)
-    final_exe = output_dir / f"{output_name}.exe"
+    final_exe = safe_join(output_dir, f"{output_name}.exe")
     shutil.move(str(exe_file), str(final_exe))
     
     file_size = final_exe.stat().st_size / 1024 / 1024
@@ -221,20 +234,24 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
     job_cache[job_id]['logs'].append('📄 Single-file project detected')
     job_cache[job_id]['progress'] = 10
     
-    project_dir = upload_dir / project_id / "source"
+    # Security: Validate project_id and use safe paths
+    validate_project_id(project_id)
+    project_base = safe_join(upload_dir, project_id)
+    project_dir = safe_join(project_base, "source")
     
     if not project_dir.exists():
-        file_dir = upload_dir / project_id
+        file_dir = project_base
         py_files = list(file_dir.glob("*.py"))
         if py_files:
             source_file = py_files[0]
             project_dir = file_dir
         else:
-            raise Exception(f"Project source not found: {project_dir}")
+            raise Exception("Project source not found")
     else:
         entry_file_name = data.entry_file
         if entry_file_name:
-            source_file = project_dir / entry_file_name
+            # Validate entry_file doesn't escape project_dir
+            source_file = safe_join(project_dir, entry_file_name)
         else:
             py_files = list(project_dir.glob("*.py"))
             if not py_files:
@@ -242,7 +259,7 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
             source_file = py_files[0]
     
     if not source_file.exists():
-        raise Exception(f"Source file not found: {source_file}")
+        raise Exception("Source file not found")
     
     job_cache[job_id]['logs'].append(f'   Entry file: {source_file.name}')
     job_cache[job_id]['progress'] = 20
@@ -301,7 +318,7 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
         job_cache[job_id]['logs'].append(f"Error: {error_msg}")
         raise Exception(f"Nuitka failed: {error_msg[:200]}")
     
-    exe_file = project_dir / f"{output_name}.exe"
+    exe_file = safe_join(project_dir, f"{output_name}.exe")
     if not exe_file.exists():
         for f in project_dir.glob("*.exe"):
             exe_file = f
@@ -310,9 +327,9 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
     if not exe_file.exists():
         raise Exception("Compiled executable not found")
     
-    output_dir = upload_dir / project_id / "output"
+    output_dir = safe_join(project_base, "output")
     output_dir.mkdir(exist_ok=True)
-    final_exe = output_dir / f"{output_name}.exe"
+    final_exe = safe_join(output_dir, f"{output_name}.exe")
     
     if final_exe.exists():
         final_exe.unlink()
