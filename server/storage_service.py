@@ -45,6 +45,41 @@ LOCAL_UPLOAD_DIR = Path(__file__).parent / "uploads"
 LOCAL_UPLOAD_DIR.mkdir(exist_ok=True)
 
 
+# =============================================================================
+# Security: Path validation helper (CodeQL-recognized pattern)
+# =============================================================================
+
+def get_safe_project_dir(project_id: str) -> Path:
+    """
+    Get a validated project directory path.
+    
+    This function validates the project_id format and ensures the resulting
+    path is safely within LOCAL_UPLOAD_DIR using a CodeQL-recognized pattern.
+    
+    Args:
+        project_id: The project ID (must be 32 hex characters)
+        
+    Returns:
+        Validated absolute Path to the project directory
+        
+    Raises:
+        ValueError: If project_id is invalid or path escapes base directory
+    """
+    # Validate project_id format
+    if not PROJECT_ID_PATTERN.match(project_id):
+        raise ValueError("Invalid project ID format")
+    
+    # Construct and resolve the path
+    project_dir = (LOCAL_UPLOAD_DIR / project_id).resolve()
+    base_resolved = LOCAL_UPLOAD_DIR.resolve()
+    
+    # Security check using str().startswith() pattern that CodeQL recognizes
+    if not str(project_dir).startswith(str(base_resolved) + os.sep) and project_dir != base_resolved:
+        raise ValueError("Path escapes base directory")
+    
+    return project_dir
+
+
 
 @dataclass
 class StoredFile:
@@ -163,17 +198,8 @@ class StorageService:
                 # Fall through to local storage
         
         # Local storage fallback
-        # Security: Validate project_id format before using in path
-        if not PROJECT_ID_PATTERN.match(project_id):
-            raise ValueError("Invalid project ID format")
-        
-        project_dir = LOCAL_UPLOAD_DIR / project_id
-        # Additional check: ensure we're still within LOCAL_UPLOAD_DIR
-        try:
-            project_dir.resolve().relative_to(LOCAL_UPLOAD_DIR.resolve())
-        except ValueError:
-            raise ValueError("Invalid project path")
-        
+        # Security: Use helper function with CodeQL-recognized validation
+        project_dir = get_safe_project_dir(project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
         
         ext = Path(filename).suffix
@@ -282,16 +308,11 @@ class StorageService:
                 print(f"[Storage] Error deleting project files from R2: {e}")
         
         # Also clean local storage
-        # Security: Validate project_id format before using in path
-        if not PROJECT_ID_PATTERN.match(project_id):
-            return deleted_count  # Skip invalid project IDs
-        
-        local_project_dir = LOCAL_UPLOAD_DIR / project_id
-        # Additional check: ensure we're still within LOCAL_UPLOAD_DIR
+        # Security: Use helper function with CodeQL-recognized validation
         try:
-            local_project_dir.resolve().relative_to(LOCAL_UPLOAD_DIR.resolve())
+            local_project_dir = get_safe_project_dir(project_id)
         except ValueError:
-            return deleted_count  # Skip if path escapes base directory
+            return deleted_count  # Skip invalid project IDs
         
         if local_project_dir.exists():
             import shutil

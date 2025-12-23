@@ -18,6 +18,43 @@ from database import get_db, release_db
 from compilers.nodejs_compiler import NodeJSCompiler
 
 
+# =============================================================================
+# Security: Subprocess wrapper with path validation
+# =============================================================================
+
+def safe_subprocess_run(cmd: list, cwd: Path, allowed_base: Path, **kwargs):
+    """
+    Run subprocess with validated cwd path.
+    
+    This wrapper ensures the working directory is within the allowed base directory
+    before executing any subprocess command. This prevents path traversal attacks.
+    
+    Args:
+        cmd: Command list to execute
+        cwd: Working directory for the subprocess
+        allowed_base: Base directory that cwd must be within
+        **kwargs: Additional arguments passed to subprocess.run
+        
+    Returns:
+        subprocess.CompletedProcess result
+        
+    Raises:
+        SecurityError: If cwd escapes the allowed base directory
+    """
+    import os
+    # Resolve both paths to eliminate symlinks and relative components
+    resolved_cwd = cwd.resolve()
+    resolved_base = allowed_base.resolve()
+    
+    # Security check: ensure cwd is within allowed base
+    # Using str().startswith() pattern that CodeQL recognizes
+    if not str(resolved_cwd).startswith(str(resolved_base) + os.sep) and resolved_cwd != resolved_base:
+        raise SecurityError(f"Working directory escapes allowed path")
+    
+    # Execute subprocess with the validated, resolved path
+    return subprocess.run(cmd, cwd=str(resolved_cwd), **kwargs)
+
+
 async def run_compilation_job(job_id: str, project_id: str, data, job_cache: dict, upload_dir: Path):
     """Background task to run actual compilation with Nuitka or pkg."""
     try:
@@ -198,9 +235,10 @@ async def compile_multi_folder_project(job_id: str, project_id: str, file_tree: 
     job_cache[job_id]['progress'] = 60
     job_cache[job_id]['logs'].append('⚙️  Compiling (this may take 2-5 minutes)...')
     
-    result = subprocess.run(
+    result = safe_subprocess_run(
         nuitka_cmd,
         cwd=project_dir,
+        allowed_base=upload_dir,
         capture_output=True,
         text=True,
         timeout=600
@@ -305,9 +343,10 @@ async def compile_single_file_project(job_id: str, project_id: str, data, job_ca
         await release_db(conn)
     
     try:
-        result = subprocess.run(
+        result = safe_subprocess_run(
             nuitka_cmd,
             cwd=project_dir,
+            allowed_base=upload_dir,
             capture_output=True,
             text=True,
             timeout=600

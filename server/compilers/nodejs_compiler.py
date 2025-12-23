@@ -204,9 +204,13 @@ class NodeJSCompiler:
         
         try:
             # STEP 1: Validate entry file and tools before copying
-            entry_path = source_dir / entry_file
+            # Security: Validate entry_file doesn't escape source_dir
+            entry_path = (source_dir / entry_file).resolve()
+            source_resolved = source_dir.resolve()
+            if not str(entry_path).startswith(str(source_resolved) + os.sep) and entry_path != source_resolved:
+                raise Exception("Entry file path is invalid - path traversal detected")
             if not entry_path.exists():
-                raise Exception(f"Entry file not found: {entry_path}")
+                raise Exception(f"Entry file not found")
             
             await self.log(f"✓ Entry file validated: {entry_file}", log_callback)
             
@@ -309,6 +313,12 @@ validateLicense().then(() => {{
             if os.name == 'nt' and not safe_output_name.endswith('.exe'):
                 output_exe = output_exe.with_suffix('.exe')
             
+            # Security: Validate output_exe is within output_dir (CodeQL-recognized pattern)
+            output_exe_resolved = output_exe.resolve()
+            output_dir_resolved = output_dir.resolve()
+            if not str(output_exe_resolved).startswith(str(output_dir_resolved) + os.sep):
+                raise Exception("Invalid output path - path traversal detected")
+            
             output_dir.mkdir(parents=True, exist_ok=True)
             
             pkg_cmd = [
@@ -359,11 +369,12 @@ validateLicense().then(() => {{
                 await self.log(f"❌ Packaging error: {e}", log_callback)
                 raise e
                 
-            if not output_exe.exists():
+            # Use the already-validated resolved path for the exists check
+            if not output_exe_resolved.exists():
                 raise Exception("Output executable was not created.")
             
-            await self.log(f"✅ Build successful: {output_exe}", log_callback)
-            return output_exe
+            await self.log(f"✅ Build successful: {output_exe.name}", log_callback)
+            return output_exe_resolved
             
         finally:
             # CLEANUP: Always remove temp build directory

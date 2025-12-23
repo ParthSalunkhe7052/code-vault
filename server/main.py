@@ -528,16 +528,15 @@ async def build_installer(data: InstallerBuildRequest):
     try:
         output_path = await orchestrator.build(config, log_callback)
         
+        # Security: Only return filename, not full path (prevents info exposure)
         return {
             "success": True,
-            "output_path": str(output_path),
             "output_name": output_path.name,
             "distribution_type": data.distribution_type,
             "logs": logs
         }
-    except Exception as e:
-        # Security: Log error server-side without exposing stack trace to client
-        print(f"[Build Error] Build failed (details hidden from client)")
+    except Exception:
+        # Security: Don't expose any exception details to client
         return {
             "success": False,
             "error": "Build failed. Please check project configuration and try again.",

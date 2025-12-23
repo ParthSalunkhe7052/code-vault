@@ -41,11 +41,11 @@ function sanitizeLogMessage(msg) {
 
 // Exit with error message (waits for keypress first)
 async function exitWithError(message, code = 1) {
-    const safeMessage = sanitizeLogMessage(message);
     console.error('\n' + '='.repeat(50));
     console.error('  ❌ ERROR');
     console.error('='.repeat(50));
-    console.error(safeMessage);
+    // Security: Sanitize directly in output call (CodeQL-recognized pattern)
+    console.error(sanitizeLogMessage(String(message)));
     console.error('='.repeat(50));
     await waitForKeypress();
     process.exit(code);
@@ -371,6 +371,8 @@ async function validateLicense() {
             await exitWithError(`Connection to license server timed out.\n\nThe server at ${safeUrl} is not responding.\nPlease try again later.`);
         });
 
+        // lgtm[js/file-access-to-http] - Intentional: license key from file sent for validation
+        // This is the core purpose of the license wrapper - sending the stored key for server validation
         req.write(postData);
         req.end();
     });
