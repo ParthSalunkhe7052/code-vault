@@ -412,10 +412,11 @@ async def stripe_webhook(
             
             return {"status": "success"}
     except Exception as e:
+        # Security: Log full error server-side, return generic message to client
         logger.error(f"[Stripe Webhook] Error processing event: {e}")
         # Return success to prevent Stripe from retrying endlessly (we logged the error)
         # In a real production system, you might want to return 500 for retryable errors
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": "An internal error occurred processing this webhook"}
     finally:
         await release_db(conn)
 
