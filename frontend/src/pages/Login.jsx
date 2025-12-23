@@ -170,7 +170,7 @@ const Login = () => {
                             {!isRegisterMode && (
                                 <div>
                                     <a
-                                        href={`mailto:support@license-wrapper.com?subject=Password Reset Request&body=Please reset my password for: ${email}`}
+                                        href={`mailto:support@license-wrapper.com?subject=Password Reset Request&body=Please reset my password for: ${encodeURIComponent(email)}`}
                                         className="block text-[10px] text-slate-500 hover:text-primary/70 transition-colors font-mono"
                                     >
                                         Forgot Password?

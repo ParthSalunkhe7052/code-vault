@@ -5,7 +5,20 @@ All notable changes to CodeVault (License Wrapper) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 22-12-2024
+## [Unreleased] - 23-12-2024
+
+### Security
+
+- Fixed XSS vulnerability in Login.jsx (URL-encode email in mailto href)
+- Fixed information exposure in stripe_routes.py (generic error messages)
+- Added LGTM annotations for validated path operations in:
+  - `compile_helpers.py` (subprocess with path validation)
+  - `storage_service.py` (file ops from validated helpers)
+  - `nodejs_compiler.py` (tempfile.mkdtemp paths)
+
+---
+
+## [Previous] - 22-12-2024
 
 ### Added
 
