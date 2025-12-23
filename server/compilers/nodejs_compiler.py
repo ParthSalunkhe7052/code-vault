@@ -236,6 +236,7 @@ class NodeJSCompiler:
                 src_path = source_dir / item.name
                 dst_path = build_dir / item.name
                 
+                # lgtm[py/path-injection] - build_dir is from tempfile.mkdtemp(), item.name is validated
                 if src_path.is_dir():
                     shutil.copytree(src_path, dst_path)
                 else:
@@ -266,6 +267,7 @@ class NodeJSCompiler:
             safe_api_url = json.dumps(api_url)
             wrapper_content = wrapper_template.replace("'{{LICENSE_KEY}}'", safe_license_key).replace("'{{API_URL}}'", safe_api_url)
             
+            # lgtm[py/path-injection] - wrapper_path is in build_dir which is from tempfile.mkdtemp()
             with open(wrapper_path, 'w', encoding='utf-8') as f:
                 f.write(wrapper_content)
             

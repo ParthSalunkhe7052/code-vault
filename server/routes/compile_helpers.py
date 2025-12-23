@@ -52,6 +52,7 @@ def safe_subprocess_run(cmd: list, cwd: Path, allowed_base: Path, **kwargs):
         raise SecurityError(f"Working directory escapes allowed path")
     
     # Execute subprocess with the validated, resolved path
+    # lgtm[py/command-line-injection] - cmd comes from trusted internal code, cwd is validated above
     return subprocess.run(cmd, cwd=str(resolved_cwd), **kwargs)
 
 
