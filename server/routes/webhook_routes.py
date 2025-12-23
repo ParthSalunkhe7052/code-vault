@@ -379,7 +379,8 @@ async def test_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
             await conn.execute("UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = $1", webhook_id)
             # Security: Log error details server-side, return generic message to client
             import logging
-            logging.error(f"[Webhook Test] Failed to send webhook {webhook_id}: {str(e)}")
+            from utils import sanitize_log_message
+            logging.error(f"[Webhook Test] Failed to send webhook {webhook_id}: {sanitize_log_message(str(e))}")
             raise HTTPException(status_code=500, detail="Failed to send test webhook. Please check the URL and try again.")
     finally:
         await release_db(conn)
