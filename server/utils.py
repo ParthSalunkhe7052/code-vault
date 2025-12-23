@@ -31,6 +31,29 @@ class SecurityError(Exception):
     pass
 
 
+def sanitize_log_message(msg: str, max_length: int = 500) -> str:
+    """
+    Sanitize a message for safe logging to prevent log injection attacks.
+    
+    Removes control characters (newlines, carriage returns, etc.) and limits length.
+    
+    Args:
+        msg: The message to sanitize
+        max_length: Maximum allowed length (default 500)
+        
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not isinstance(msg, str):
+        msg = str(msg)
+    # Remove control characters that could forge log entries
+    sanitized = msg.replace('\n', ' ').replace('\r', ' ').replace('\x00', '')
+    # Remove other control characters (ASCII 0-31 except space)
+    sanitized = ''.join(c if ord(c) >= 32 or c == ' ' else ' ' for c in sanitized)
+    # Limit length
+    return sanitized[:max_length]
+
+
 # Regex pattern for valid project IDs (32 hex characters)
 PROJECT_ID_PATTERN = re.compile(r'^[a-f0-9]{32}$')
 
