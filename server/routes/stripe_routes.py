@@ -196,7 +196,8 @@ async def create_or_get_stripe_customer(user_id: str, email: str, conn) -> str:
         
     except stripe.error.StripeError as e:
         logger.error(f"[Stripe] Failed to create customer: {str(e)}")
-        raise HTTPException(status_code=502, detail=f"Payment provider error: {str(e)}")
+        # Security: Don't expose Stripe error details to client
+        raise HTTPException(status_code=502, detail="Payment provider error. Please try again later.")
 
 
 def get_tier_from_price_id(price_id: str) -> str:
@@ -300,7 +301,8 @@ async def create_checkout_session(
             
         except stripe.error.StripeError as e:
             logger.error(f"[Stripe] Checkout session error: {str(e)}")
-            raise HTTPException(status_code=502, detail=f"Could not create checkout: {str(e)}")
+            # Security: Don't expose Stripe error details to client
+            raise HTTPException(status_code=502, detail="Could not create checkout session. Please try again later.")
     finally:
         await release_db(conn)
 
@@ -337,7 +339,8 @@ async def create_customer_portal(
             
         except stripe.error.StripeError as e:
             logger.error(f"[Stripe] Portal session error: {str(e)}")
-            raise HTTPException(status_code=502, detail=f"Could not open billing portal: {str(e)}")
+            # Security: Don't expose Stripe error details to client
+            raise HTTPException(status_code=502, detail="Could not open billing portal. Please try again later.")
     finally:
         await release_db(conn)
 
@@ -744,7 +747,8 @@ async def create_license_purchase(data: PublicPurchaseRequest, request: Request)
             
         except stripe.error.StripeError as e:
             logger.error(f"[Stripe] License purchase checkout error: {str(e)}")
-            raise HTTPException(status_code=502, detail=f"Could not create checkout: {str(e)}")
+            # Security: Don't expose Stripe error details to client
+            raise HTTPException(status_code=502, detail="Could not create checkout session. Please try again later.")
     finally:
         await release_db(conn)
 
