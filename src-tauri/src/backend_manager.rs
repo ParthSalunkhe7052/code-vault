@@ -12,6 +12,7 @@ use std::thread;
 static BACKEND_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 
 /// Backend configuration
+#[allow(dead_code)]
 pub struct BackendConfig {
     pub port: u16,
     pub log_dir: PathBuf,

@@ -98,7 +98,6 @@ TIER_LIMITS = {
         "analytics": True,
         "webhooks": True,
         "team_seats": 5,
-        "team_seats": 5,
         "white_labeling": True,
         "node_support": True,
     }

@@ -1,16 +1,16 @@
 import React from 'react';
-import { Check, Upload, FolderTree, Settings, Key, Hammer } from 'lucide-react';
+import { Check, Upload, FolderTree, Settings, Shield, Hammer } from 'lucide-react';
 
 /**
  * WizardStepIndicator - Visual progress indicator for the project wizard
- * Shows 5 steps: Upload, Review, Configure, License, Build
+ * Shows 5 steps: Upload, Review, Configure, Protection, Build
  */
 const WizardStepIndicator = ({ currentStep, completedSteps = [] }) => {
     const steps = [
         { id: 1, name: 'Upload', icon: Upload },
         { id: 2, name: 'Review', icon: FolderTree },
         { id: 3, name: 'Configure', icon: Settings },
-        { id: 4, name: 'License', icon: Key },
+        { id: 4, name: 'Protection', icon: Shield },
         { id: 5, name: 'Build', icon: Hammer },
     ];
 
