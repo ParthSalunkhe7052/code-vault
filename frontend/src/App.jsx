@@ -1,8 +1,8 @@
-import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/Toast';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { BuildProvider } from './contexts/BuildContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
@@ -55,50 +55,52 @@ const PublicRoute = ({ children }) => {
 
 function App() {
     return (
-        <SettingsProvider>
-            <ToastProvider>
-                <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                    <Routes>
-                        {/* Public Routes */}
-                        <Route
-                            path="/login"
-                            element={
-                                <PublicRoute>
-                                    <Login />
-                                </PublicRoute>
-                            }
-                        />
+        <BuildProvider>
+            <SettingsProvider>
+                <ToastProvider>
+                    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                        <Routes>
+                            {/* Public Routes */}
+                            <Route
+                                path="/login"
+                                element={
+                                    <PublicRoute>
+                                        <Login />
+                                    </PublicRoute>
+                                }
+                            />
 
-                        {/* Protected Routes */}
-                        <Route
-                            path="/"
-                            element={
-                                <ProtectedRoute>
-                                    <Layout />
-                                </ProtectedRoute>
-                            }
-                        >
-                            <Route index element={<Dashboard />} />
-                            <Route path="admin" element={
-                                <AdminRoute>
-                                    <AdminDashboard />
-                                </AdminRoute>
-                            } />
-                            <Route path="projects" element={<Projects />} />
-                            <Route path="licenses" element={<Licenses />} />
-                            <Route path="webhooks" element={<Webhooks />} />
-                            <Route path="settings" element={<Settings />} />
-                            <Route path="build-settings" element={<BuildSettings />} />
-                            <Route path="pricing" element={<Pricing />} />
-                            <Route path="billing" element={<Billing />} />
-                        </Route>
+                            {/* Protected Routes */}
+                            <Route
+                                path="/"
+                                element={
+                                    <ProtectedRoute>
+                                        <Layout />
+                                    </ProtectedRoute>
+                                }
+                            >
+                                <Route index element={<Dashboard />} />
+                                <Route path="admin" element={
+                                    <AdminRoute>
+                                        <AdminDashboard />
+                                    </AdminRoute>
+                                } />
+                                <Route path="projects" element={<Projects />} />
+                                <Route path="licenses" element={<Licenses />} />
+                                <Route path="webhooks" element={<Webhooks />} />
+                                <Route path="settings" element={<Settings />} />
+                                <Route path="build-settings" element={<BuildSettings />} />
+                                <Route path="pricing" element={<Pricing />} />
+                                <Route path="billing" element={<Billing />} />
+                            </Route>
 
-                        {/* Catch all - redirect to home */}
-                        <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                </BrowserRouter>
-            </ToastProvider>
-        </SettingsProvider>
+                            {/* Catch all - redirect to home */}
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                    </BrowserRouter>
+                </ToastProvider>
+            </SettingsProvider>
+        </BuildProvider>
     );
 }
 

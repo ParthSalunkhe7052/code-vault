@@ -5,6 +5,7 @@ import WizardStepIndicator from './WizardStepIndicator';
 import { Step1Upload, Step2Review, Step3Configure, Step4License, Step5Build } from './WizardSteps';
 import PrerequisitesCheck from '../PrerequisitesCheck';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useProjectBuild } from '../../contexts/BuildContext';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -30,15 +31,21 @@ const ProjectWizard = ({
     // Get settings from context
     const { settings } = useSettings();
 
+    // Get persistent build state from context
+    const projectBuild = useProjectBuild(project?.id);
+    const {
+        status: buildStatus,
+        progress: buildProgress,
+        logs: buildLogs,
+        outputPath,
+        isBuilding,
+        jobId: currentJobId
+    } = projectBuild;
+
     const [currentStep, setCurrentStep] = useState(1);
     const [completedSteps, setCompletedSteps] = useState([]);
     const [protectionMode, setProtectionMode] = useState('generic'); // 'generic' | 'demo' | 'none'
     const [showConsole, setShowConsole] = useState(true); // Will be set from settings in useEffect
-    const [isBuilding, setIsBuilding] = useState(false);
-    const [buildStatus, setBuildStatus] = useState('idle');
-    const [buildProgress, setBuildProgress] = useState(0);
-    const [buildLogs, setBuildLogs] = useState([]);
-    const [outputPath, setOutputPath] = useState(null);
     const [projectPath, setProjectPath] = useState('');
     const [showPrereqs, setShowPrereqs] = useState(false); // Prerequisites modal
 
@@ -66,21 +73,29 @@ const ProjectWizard = ({
     // Reset wizard when opened
     useEffect(() => {
         if (isOpen) {
-            // If files already exist, start at step 2
-            const hasFiles = configData.files?.length > 0 || configData.file_tree;
-            setCurrentStep(hasFiles ? 2 : 1);
-            setCompletedSteps(hasFiles ? [1] : []);
-            setBuildStatus('idle');
-            setBuildProgress(0);
-            setBuildLogs([]);
-            setOutputPath(null);
+            // PRIORITY 1: If there's an active or recent build, go straight to Step 5
+            if (buildStatus === 'running' || buildStatus === 'pending') {
+                // Active build - jump to build step immediately
+                setCurrentStep(5);
+                setCompletedSteps([1, 2, 3, 4]); // Mark all previous steps as complete
+            } else if (buildStatus === 'completed' || buildStatus === 'failed') {
+                // Recent build result - show the build step so user can see outcome
+                setCurrentStep(5);
+                setCompletedSteps([1, 2, 3, 4]);
+            } else {
+                // No active build - normal flow
+                // If files already exist, start at step 2
+                const hasFiles = configData.files?.length > 0 || configData.file_tree;
+                setCurrentStep(hasFiles ? 2 : 1);
+                setCompletedSteps(hasFiles ? [1] : []);
+            }
 
             // Init node options if present
             if (configData.compiler_options?.target) {
                 setNodeTarget(configData.compiler_options.target);
             }
         }
-    }, [isOpen, configData.files, configData.file_tree]);
+    }, [isOpen, configData.files, configData.file_tree, buildStatus]);
 
     // Sync local state to configData for saving
     useEffect(() => {
@@ -146,23 +161,18 @@ const ProjectWizard = ({
             const { listen } = await import('@tauri-apps/api/event');
 
             unlistenProgress = await listen('compilation-progress', (event) => {
-                const { progress: prog, message, stage } = event.payload;
-                setBuildProgress(prog);
-                setBuildLogs(prev => [...prev.slice(-99), message]);
+                const { progress: prog, message } = event.payload;
+                projectBuild.updateBuild({ progress: prog });
+                projectBuild.addLog(message);
             });
 
             unlistenResult = await listen('compilation-result', (event) => {
                 const { success, output_path, error_message } = event.payload;
                 if (success) {
-                    setBuildStatus('completed');
-                    setOutputPath(output_path);
-                    setBuildProgress(100);
-                    setBuildLogs(prev => [...prev, `✅ Build complete: ${output_path}`]);
+                    projectBuild.complete(output_path);
                 } else {
-                    setBuildStatus('failed');
-                    setBuildLogs(prev => [...prev, `❌ Build failed: ${error_message}`]);
+                    projectBuild.fail(error_message);
                 }
-                setIsBuilding(false);
             });
         };
 
@@ -172,7 +182,7 @@ const ProjectWizard = ({
             unlistenProgress?.then?.(fn => fn?.());
             unlistenResult?.then?.(fn => fn?.());
         };
-    }, [isOpen, buildStatus]);
+    }, [isOpen, buildStatus, projectBuild]);
 
     const canProceed = () => {
         switch (currentStep) {
@@ -236,25 +246,23 @@ const ProjectWizard = ({
     // Called after prerequisites check passes
     const doStartBuild = async () => {
         setShowPrereqs(false);
-        setIsBuilding(true);
-        setBuildStatus('running');
-        setBuildProgress(0);
-        setBuildLogs(['Starting build process...']);
-        setOutputPath(null);
+
+        // Use context methods to update build state (persists across tab switches)
+        projectBuild.start();
+        projectBuild.updateBuild({ progress: 0 });
 
         try {
             // First save the config
             await onConfigSave();
-            setBuildLogs(prev => [...prev, '✅ Configuration saved']);
+            projectBuild.addLog('✅ Configuration saved');
 
             if (isTauri) {
                 const { invoke } = await import('@tauri-apps/api/core');
 
                 // Check if project path is set
                 if (!projectPath) {
-                    setBuildLogs(prev => [...prev, '⚠️ Please select a project folder first']);
-                    setBuildStatus('failed');
-                    setIsBuilding(false);
+                    projectBuild.addLog('⚠️ Please select a project folder first');
+                    projectBuild.fail('No project folder selected');
                     return;
                 }
 
@@ -288,17 +296,16 @@ const ProjectWizard = ({
                 }
 
                 if (!entryFileName) {
-                    setBuildLogs(prev => [...prev, '⚠️ No entry file selected']);
-                    setBuildStatus('failed');
-                    setIsBuilding(false);
+                    projectBuild.addLog('⚠️ No entry file selected');
+                    projectBuild.fail('No entry file selected');
                     return;
                 }
 
-                setBuildLogs(prev => [...prev, `📁 Project: ${projectPath}`, `📄 Entry: ${entryFileName}`]);
-
+                projectBuild.addLog(`📁 Project: ${projectPath}`);
+                projectBuild.addLog(`📄 Entry: ${entryFileName}`);
 
                 // Check if entry file exists in the selected folder before compiling
-                setBuildLogs(prev => [...prev, `🔍 Checking if file exists...`]);
+                projectBuild.addLog('🔍 Checking if file exists...');
 
                 try {
                     const fileExists = await invoke('check_file_exists', {
@@ -307,25 +314,18 @@ const ProjectWizard = ({
                     });
 
                     if (!fileExists) {
-                        setBuildLogs(prev => [...prev,
-                        `❌ Entry file NOT found: ${entryFileName}`,
-                            ``,
-                        `📌 Make sure you selected the correct folder containing your ${project?.language === 'nodejs' ? 'JavaScript' : 'Python'} files.`,
-                        `   Selected: ${projectPath}`,
-                        `   Looking for: ${entryFileName}`,
-                            ``,
-                            `Hint: If you uploaded a ZIP, the extracted files are on the server,`,
-                            `      not in your local folder. Select the correct local folder.`
-                        ]);
-                        setBuildStatus('failed');
-                        setIsBuilding(false);
+                        projectBuild.addLog(`❌ Entry file NOT found: ${entryFileName}`);
+                        projectBuild.addLog(`📌 Make sure you selected the correct folder containing your ${project?.language === 'nodejs' ? 'JavaScript' : 'Python'} files.`);
+                        projectBuild.addLog(`   Selected: ${projectPath}`);
+                        projectBuild.addLog(`   Looking for: ${entryFileName}`);
+                        projectBuild.fail('Entry file not found');
                         return;
                     }
-                    setBuildLogs(prev => [...prev, `✅ Entry file found`]);
+                    projectBuild.addLog('✅ Entry file found');
                 } catch (fsError) {
                     // If fs check fails, try anyway (permission issues)
                     console.warn('Could not check file existence:', fsError);
-                    setBuildLogs(prev => [...prev, `⚠️ Could not verify file, attempting build anyway...`]);
+                    projectBuild.addLog('⚠️ Could not verify file, attempting build anyway...');
                 }
 
                 // Use the new professional installer build system
@@ -334,18 +334,14 @@ const ProjectWizard = ({
                 const compilerName = language === 'nodejs' ? 'Node.js (pkg → NSIS)' : 'Python (Nuitka → NSIS)';
                 const outputBaseName = entryFileName.split(/[/\\]/).pop().replace(/\.(py|js|ts|mjs|cjs)$/, '') || 'output';
 
-                // Get distribution settings from context
-                const distributionType = settings.defaultDistributionType || 'portable';
-                const createDesktopShortcut = settings.defaultCreateDesktopShortcut ?? true;
-                const createStartMenu = settings.defaultCreateStartMenu ?? true;
-                const publisher = settings.defaultPublisher || 'Unknown Publisher';
+                // Distribution settings now use the state variables from Step5Build
+                // (distributionType, createDesktopShortcut, createStartMenu, publisher)
+                // which the user can edit before building
 
-                setBuildLogs(prev => [...prev,
-                    `🔧 Build System: Professional Installer`,
-                `📦 Distribution: ${distributionType === 'installer' ? 'Windows Installer' : 'Portable Executable'}`,
-                `📋 Compiler: ${compilerName}`
-                ]);
-                setBuildProgress(10);
+                projectBuild.addLog('🔧 Build System: Professional Installer');
+                projectBuild.addLog(`📦 Distribution: ${distributionType === 'installer' ? 'Windows Installer' : 'Portable Executable'}`);
+                projectBuild.addLog(`📋 Compiler: ${compilerName}`);
+                projectBuild.updateBuild({ progress: 10 });
 
                 // Call the new installer build command
                 await invoke('run_installer_build', {
@@ -371,16 +367,14 @@ const ProjectWizard = ({
 
             } else {
                 // Web mode - just save config, can't compile
-                setBuildLogs(prev => [...prev, '⚠️ Compilation only available in desktop app.', 'Use the CLI tool to build locally.']);
-                setBuildProgress(100);
-                setBuildStatus('completed');
-                setIsBuilding(false);
+                projectBuild.addLog('⚠️ Compilation only available in desktop app.');
+                projectBuild.addLog('Use the CLI tool to build locally.');
+                projectBuild.complete('N/A - Web Mode');
             }
         } catch (error) {
             console.error('Build error:', error);
-            setBuildLogs(prev => [...prev, `❌ Error: ${error.message || error}`]);
-            setBuildStatus('failed');
-            setIsBuilding(false);
+            projectBuild.addLog(`❌ Error: ${error.message || error}`);
+            projectBuild.fail(error.message || String(error));
         }
     };
 
@@ -394,6 +388,30 @@ const ProjectWizard = ({
             await invoke('open_output_folder', { path: folderPath });
         } catch (error) {
             console.error('Failed to open folder:', error);
+        }
+    };
+
+    // Handle stop/cancel build
+    const handleStopBuild = async () => {
+        if (!currentJobId) {
+            // For Tauri local builds, just update status via context
+            projectBuild.cancel();
+            return;
+        }
+
+        try {
+            // Call the server cancel endpoint
+            const response = await fetch(`http://localhost:8000/api/v1/build/installer/${currentJobId}/cancel`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                projectBuild.cancel();
+            }
+        } catch (error) {
+            console.error('Failed to cancel build:', error);
+            // Still mark as cancelled locally via context
+            projectBuild.cancel();
         }
     };
 
@@ -482,6 +500,7 @@ const ProjectWizard = ({
                         projectPath={projectPath}
                         onBrowseProjectPath={handleBrowseProjectPath}
                         onStartBuild={handleCheckPrerequisites}
+                        onStopBuild={handleStopBuild}
                         onOpenOutputFolder={handleOpenOutputFolder}
                         // Distribution settings
                         distributionType={distributionType}

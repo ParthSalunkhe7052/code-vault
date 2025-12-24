@@ -8,20 +8,22 @@ import sys
 
 class Colors:
     """ANSI color codes for terminal output."""
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
+
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
 
 
 def enable_colors():
     """Enable ANSI colors on Windows."""
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
         except Exception:
@@ -29,16 +31,24 @@ def enable_colors():
 
 
 def color_print(msg, color=Colors.RESET):
-    """Print colored message."""
+    """Print colored message with Unicode-safe encoding."""
     enable_colors()
-    print(f"{color}{msg}{Colors.RESET}")
+    output = f"{color}{msg}{Colors.RESET}"
+    try:
+        print(output)
+    except UnicodeEncodeError:
+        # Fallback for Windows consoles that don't support Unicode
+        safe_output = output.encode(
+            sys.stdout.encoding or "utf-8", errors="replace"
+        ).decode(sys.stdout.encoding or "utf-8", errors="replace")
+        print(safe_output)
 
 
 def print_header(title: str):
     """Print a styled header."""
-    print(f"\n{Colors.CYAN}{'='*60}")
+    print(f"\n{Colors.CYAN}{'=' * 60}")
     print(f"  {title}")
-    print(f"{'='*60}{Colors.RESET}\n")
+    print(f"{'=' * 60}{Colors.RESET}\n")
 
 
 def print_success(msg: str):

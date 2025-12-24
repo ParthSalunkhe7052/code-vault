@@ -127,9 +127,6 @@ class NodeJSCompiler:
         """
         package_json_path = build_dir / "package.json"
         
-        # Normalize entry file for pkg (forward slashes)
-        normalized_entry = entry_file.replace('\\', '/')
-        
         # CRITICAL FIX: Scan ALL .js files in the project and add to scripts
         all_js_files = []
         for js_file in build_dir.rglob("*.js"):
@@ -152,8 +149,15 @@ class NodeJSCompiler:
                 "version": "1.0.0",
                 "bin": bootstrap_filename,
                 "pkg": {
-                    "scripts": all_js_files,
-                    "assets": all_json_files + ["**/*.json", "!package.json", "!package-lock.json"],
+                    "scripts": all_js_files + [
+                        "node_modules/**/*.js",
+                        "node_modules/**/*.cjs",
+                        "node_modules/**/*.mjs"
+                    ],
+                    "assets": all_json_files + [
+                        "node_modules/**/*.json",
+                        "node_modules/**/*.node"
+                    ],
                     "outputPath": "dist"
                 }
             }
@@ -170,8 +174,15 @@ class NodeJSCompiler:
         
         package_data["bin"] = bootstrap_filename
         package_data["pkg"] = {
-            "scripts": all_js_files,
-            "assets": all_json_files + ["**/*.json", "!package.json", "!package-lock.json"]
+            "scripts": all_js_files + [
+                "node_modules/**/*.js",
+                "node_modules/**/*.cjs",
+                "node_modules/**/*.mjs"
+            ],
+            "assets": all_json_files + [
+                "node_modules/**/*.json",
+                "node_modules/**/*.node"
+            ]
         }
         
         with open(package_json_path, 'w', encoding='utf-8') as f:
@@ -210,7 +221,7 @@ class NodeJSCompiler:
             if not str(entry_path).startswith(str(source_resolved) + os.sep) and entry_path != source_resolved:
                 raise Exception("Entry file path is invalid - path traversal detected")
             if not entry_path.exists():
-                raise Exception(f"Entry file not found")
+                raise Exception("Entry file not found")
             
             await self.log(f"✓ Entry file validated: {entry_file}", log_callback)
             
@@ -279,13 +290,28 @@ class NodeJSCompiler:
             
             bootstrap_content = f"""
 const validateLicense = require('./cv_license_wrapper');
+const readline = require('readline');
+
+function exitWithError(err) {{
+    console.error('[CodeVault] Startup error:', err);
+    console.log('\\nPress any key to exit...');
+    
+    if (process.stdin.isTTY) {{
+        process.stdin.setRawMode(true);
+    }}
+    process.stdin.resume();
+    process.stdin.on('data', () => process.exit(1));
+}}
 
 validateLicense().then(() => {{
     console.log('[CodeVault] License verified. Starting application...');
-    require('./{normalized_entry}');
+    try {{
+        require('./{normalized_entry}');
+    }} catch (e) {{
+        exitWithError(e);
+    }}
 }}).catch(err => {{
-    console.error('[CodeVault] Startup error:', err);
-    process.exit(1);
+    exitWithError(err);
 }});
 """
             with open(bootstrap_entry, 'w', encoding='utf-8') as f:
@@ -351,8 +377,27 @@ validateLicense().then(() => {{
                         break
                     decoded_line = line.decode('utf-8', errors='replace').rstrip()
                     if decoded_line:
-                        await self.log(f"  pkg: {decoded_line}", log_callback)
-                        if "Cannot resolve" in decoded_line or "was not included" in decoded_line:
+                        # Filter out noisy warnings from test files and non-critical messages
+                        is_noisy = any([
+                            "Cannot find module" in decoded_line and "/test" in decoded_line,
+                            "Cannot find module 'tape'" in decoded_line,
+                            "Cannot find module 'mock-property'" in decoded_line,
+                            "Cannot find module 'for-each'" in decoded_line,
+                            "Cannot find module 'es-value-fixtures'" in decoded_line,
+                            "Cannot find module 'benchmark'" in decoded_line,
+                            "Cannot find module 'async'" in decoded_line,
+                            "Cannot find module 'core-js" in decoded_line,
+                            "Path must be a string" in decoded_line,
+                            "Non-javascript file is specified" in decoded_line,
+                            "Babel parse has failed" in decoded_line,
+                        ])
+                        
+                        # Only log non-noisy lines
+                        if not is_noisy:
+                            await self.log(f"  pkg: {decoded_line}", log_callback)
+                        
+                        # Track critical warnings (excluding test file issues)
+                        if ("Cannot resolve" in decoded_line or "was not included" in decoded_line) and "/test" not in decoded_line:
                             bundling_warnings.append(decoded_line)
                 
                 await process.wait()

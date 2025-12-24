@@ -1,8 +1,8 @@
 
 import logging
 from functools import wraps
-from typing import Optional, Callable
-from fastapi import HTTPException, Request, Depends
+from typing import Callable
+from fastapi import HTTPException
 
 from utils import get_user_tier_limits
 from database import get_db, release_db

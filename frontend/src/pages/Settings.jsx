@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Key, RefreshCw, Copy, Check, User, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { auth } from '../services/api';
 import { useToast } from '../components/Toast';
@@ -14,7 +14,7 @@ const Settings = () => {
     const [showKey, setShowKey] = useState(false);
     const [confirmDialog, setConfirmDialog] = useState({
         isOpen: false,
-        onConfirm: () => {}
+        onConfirm: () => { }
     });
 
     useEffect(() => {
@@ -110,7 +110,7 @@ const Settings = () => {
                 {/* Decorative element */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full 
                     blur-3xl -translate-y-1/2 translate-x-1/2" />
-                
+
                 <div className="relative">
                     <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
                         <Key size={20} className="text-primary" />
@@ -135,8 +135,8 @@ const Settings = () => {
                             className="flex-1 bg-transparent border-none font-mono text-sm 
                                 text-slate-300 focus:outline-none tracking-wider"
                         />
-                        <button 
-                            onClick={() => setShowKey(!showKey)} 
+                        <button
+                            onClick={() => setShowKey(!showKey)}
                             className="p-2 rounded-lg hover:bg-white/10 text-slate-400 
                                 hover:text-white transition-colors"
                             title={showKey ? 'Hide key' : 'Show key'}
@@ -156,7 +156,7 @@ const Settings = () => {
                             )}
                         </button>
                     </div>
-                    
+
                     <div className="flex items-center gap-3 mt-4">
                         <button
                             onClick={handleRegenerateKey}
@@ -194,7 +194,7 @@ const Settings = () => {
                     </code>
                 </pre>
             </div>
-            
+
             {/* Confirm Dialog */}
             <ConfirmDialog
                 isOpen={confirmDialog.isOpen}

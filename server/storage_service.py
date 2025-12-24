@@ -4,12 +4,11 @@ Handles file uploads and downloads using S3-compatible API.
 """
 
 import os
-import io
 import hashlib
 import secrets
 from pathlib import Path
-from typing import Optional, BinaryIO, Tuple
-from datetime import datetime, timedelta
+from typing import Optional, Tuple
+from datetime import datetime
 from dataclasses import dataclass
 
 import boto3

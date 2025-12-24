@@ -1,5 +1,5 @@
 import React from 'react';
-import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download } from 'lucide-react';
+import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle } from 'lucide-react';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -23,6 +23,7 @@ const Step5Build = ({
     projectPath,
     onBrowseProjectPath,
     onStartBuild,
+    onStopBuild,
     onOpenOutputFolder,
     // Distribution settings
     distributionType,
@@ -38,6 +39,7 @@ const Step5Build = ({
         switch (buildStatus) {
             case 'completed': return 'emerald';
             case 'failed': return 'red';
+            case 'cancelled': return 'amber';
             case 'running': return 'indigo';
             default: return 'slate';
         }
@@ -220,6 +222,8 @@ const Step5Build = ({
                                 <CheckCircle size={20} className="text-emerald-400" />
                             ) : buildStatus === 'failed' ? (
                                 <AlertCircle size={20} className="text-red-400" />
+                            ) : buildStatus === 'cancelled' ? (
+                                <XCircle size={20} className="text-amber-400" />
                             ) : (
                                 <Loader size={20} className="text-indigo-400 animate-spin" />
                             )}
@@ -227,7 +231,19 @@ const Step5Build = ({
                                 {buildStatus}
                             </span>
                         </div>
-                        <span className="text-sm text-slate-400">{buildProgress}%</span>
+                        <div className="flex items-center gap-3">
+                            {buildStatus === 'running' && onStopBuild && (
+                                <button
+                                    onClick={onStopBuild}
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm transition-colors"
+                                    title="Stop the build process"
+                                >
+                                    <Square size={12} fill="currentColor" />
+                                    Stop
+                                </button>
+                            )}
+                            <span className="text-sm text-slate-400">{buildProgress}%</span>
+                        </div>
                     </div>
 
                     {/* Progress Bar */}

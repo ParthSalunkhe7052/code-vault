@@ -2,7 +2,6 @@
 Utility functions for CodeVault API.
 """
 
-import os
 import re
 import time
 import secrets
@@ -75,7 +74,7 @@ def validate_project_id(project_id: str) -> bool:
         raise SecurityError("Invalid project ID: empty or not a string")
     
     if not PROJECT_ID_PATTERN.match(project_id):
-        raise SecurityError(f"Invalid project ID format: must be 32 hex characters")
+        raise SecurityError("Invalid project ID format: must be 32 hex characters")
     
     return True
 

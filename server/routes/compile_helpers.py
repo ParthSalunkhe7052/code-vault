@@ -10,7 +10,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, Callable
 
 from config import LICENSE_SERVER_URL
 from utils import utc_now, safe_join, validate_project_id, SecurityError
@@ -49,7 +48,7 @@ def safe_subprocess_run(cmd: list, cwd: Path, allowed_base: Path, **kwargs):
     # Security check: ensure cwd is within allowed base
     # Using str().startswith() pattern that CodeQL recognizes
     if not str(resolved_cwd).startswith(str(resolved_base) + os.sep) and resolved_cwd != resolved_base:
-        raise SecurityError(f"Working directory escapes allowed path")
+        raise SecurityError("Working directory escapes allowed path")
     
     # Execute subprocess with the validated, resolved path
     # lgtm[py/command-line-injection] - cmd comes from trusted internal code, cwd is validated above
@@ -470,7 +469,7 @@ def install_project_dependencies(project_dir: Path, dependencies: dict, logs: li
     
     if not venv_python.exists():
         venv_python = sys.executable
-        logs.append(f"   Warning: Using system Python (venv not found)")
+        logs.append("   Warning: Using system Python (venv not found)")
     
     logs.append(f"   Installing to: {venv_python.parent}")
     
@@ -488,10 +487,10 @@ def install_project_dependencies(project_dir: Path, dependencies: dict, logs: li
     )
     
     if result.returncode != 0:
-        logs.append(f"   ⚠️  Warning: Some packages may have failed to install")
+        logs.append("   ⚠️  Warning: Some packages may have failed to install")
         logs.append(f"   {result.stderr[:200]}")
     else:
-        logs.append(f"   ✅ Dependencies installed successfully")
+        logs.append("   ✅ Dependencies installed successfully")
 
 
 def inject_license_into_multi_folder(project_dir: Path, entry_point: str, license_key: str):

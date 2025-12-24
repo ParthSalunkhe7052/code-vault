@@ -370,7 +370,21 @@ async def init_database():
         """)
         print("[Migration] Synced users.plan with subscriptions.plan_tier")
 
-        print(f"[✓] Database initialized (PostgreSQL)")
+        # =============================================================================
+        # Patch A: Zombie Job Killer
+        # Reset any jobs stuck in 'running' state from previous session
+        # =============================================================================
+        await conn.execute("""
+            UPDATE compile_jobs 
+            SET status = 'failed', 
+                error_message = 'Job failed (Server Restarted)', 
+                completed_at = NOW(),
+                progress = 100
+            WHERE status = 'running'
+        """)
+        print("[Maintenance] Reset zombie jobs to failed status")
+
+        print("[✓] Database initialized (PostgreSQL)")
 
     finally:
         await db_pool.release(conn)

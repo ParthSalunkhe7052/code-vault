@@ -148,7 +148,7 @@ def detect_nodejs_entry_point(base_path: Path, files: list) -> dict:
                     'score': 200,
                     'reason': 'package.json main field'
                 })
-        except:
+        except Exception:
             pass
     
     for file_path in files:

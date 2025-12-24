@@ -1,9 +1,8 @@
-import React from 'react';
 import { Calendar } from 'lucide-react';
 
 const ExpiringLicense = ({ license }) => {
     const daysUntil = Math.ceil((new Date(license.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-    
+
     return (
         <div className="flex items-center gap-4 py-3 border-b border-white/5 last:border-0">
             <div className={`p-2 rounded-lg ${daysUntil <= 3 ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>

@@ -8,7 +8,6 @@ import time
 import secrets
 import asyncio
 from typing import Optional
-from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from starlette.concurrency import run_in_threadpool
@@ -61,7 +60,7 @@ def get_geo_from_ip(ip_address: str) -> dict:
             result["country"] = response.country.iso_code
             result["latitude"] = response.location.latitude
             result["longitude"] = response.location.longitude
-    except:
+    except Exception:
         pass
     
     return result
@@ -102,7 +101,7 @@ async def validate_license(request: Request, data: LicenseValidationRequest):
         if isinstance(features, str):
             try:
                 features = json.loads(features)
-            except:
+            except Exception:
                 features = []
         if not isinstance(features, list):
             features = []
@@ -191,7 +190,7 @@ async def list_licenses(user: dict = Depends(get_current_user), project_id: Opti
             if isinstance(features, str):
                 try:
                     features = json.loads(features)
-                except:
+                except Exception:
                     features = []
             if not isinstance(features, list):
                 features = []
@@ -348,5 +347,142 @@ async def delete_binding(license_id: str, binding_id: str, user: dict = Depends(
     try:
         await conn.execute("DELETE FROM hardware_bindings WHERE id = $1 AND license_id = $2", binding_id, license_id)
         return {"status": "deleted"}
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# HWID Reset Endpoints
+# =============================================================================
+
+@router.post("/licenses/{license_id}/reset-hwid")
+async def reset_hwid(license_id: str, user: dict = Depends(get_current_user), reason: Optional[str] = None):
+    """Reset all hardware bindings for a license."""
+    conn = await get_db()
+    try:
+        # Verify ownership
+        license_data = await conn.fetchrow("""
+            SELECT l.id, l.license_key, l.client_name, l.client_email, p.id as project_id, p.name as project_name
+            FROM licenses l JOIN projects p ON l.project_id = p.id
+            WHERE l.id = $1 AND p.user_id = $2
+        """, license_id, user['id'])
+        
+        if not license_data:
+            raise HTTPException(status_code=404, detail="License not found")
+        
+        # Count bindings being removed
+        binding_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM hardware_bindings WHERE license_id = $1 AND is_active = TRUE",
+            license_id
+        )
+        
+        # Delete all bindings
+        await conn.execute("DELETE FROM hardware_bindings WHERE license_id = $1", license_id)
+        
+        # Log the reset
+        reset_id = secrets.token_hex(16)
+        await conn.execute("""
+            INSERT INTO hwid_reset_logs (id, license_id, reset_by_user_id, bindings_removed, reason)
+            VALUES ($1, $2, $3, $4, $5)
+        """, reset_id, license_id, user['id'], binding_count, reason)
+        
+        # Trigger webhook
+        trigger_webhook = _get_trigger_webhook()
+        asyncio.create_task(trigger_webhook(user['id'], "hwid.reset", {
+            "license_id": license_data['id'],
+            "license_key": license_data['license_key'],
+            "project_id": license_data['project_id'],
+            "project_name": license_data['project_name'],
+            "client_name": license_data['client_name'],
+            "client_email": license_data['client_email'],
+            "bindings_removed": binding_count,
+            "reason": reason
+        }))
+        
+        return {
+            "status": "reset",
+            "bindings_removed": binding_count,
+            "message": f"Successfully removed {binding_count} hardware binding(s)"
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.get("/licenses/{license_id}/reset-history")
+async def get_reset_history(license_id: str, user: dict = Depends(get_current_user)):
+    """Get HWID reset history for a license."""
+    conn = await get_db()
+    try:
+        # Verify ownership
+        license_check = await conn.fetchrow("""
+            SELECT l.id FROM licenses l JOIN projects p ON l.project_id = p.id 
+            WHERE l.id = $1 AND p.user_id = $2
+        """, license_id, user['id'])
+        
+        if not license_check:
+            raise HTTPException(status_code=404, detail="License not found")
+        
+        rows = await conn.fetch("""
+            SELECT id, bindings_removed, reason, created_at
+            FROM hwid_reset_logs
+            WHERE license_id = $1
+            ORDER BY created_at DESC
+            LIMIT 50
+        """, license_id)
+        
+        return [
+            {
+                "id": r['id'],
+                "bindings_removed": r['bindings_removed'],
+                "reason": r['reason'],
+                "reset_at": r['created_at'].isoformat()
+            }
+            for r in rows
+        ]
+    finally:
+        await release_db(conn)
+
+
+@router.get("/licenses/{license_id}/reset-status")
+async def get_reset_status(license_id: str, user: dict = Depends(get_current_user)):
+    """Get current reset status for a license (binding count, can reset, etc.)."""
+    conn = await get_db()
+    try:
+        # Verify ownership and get license info
+        license_data = await conn.fetchrow("""
+            SELECT l.id, l.max_machines, l.status
+            FROM licenses l JOIN projects p ON l.project_id = p.id 
+            WHERE l.id = $1 AND p.user_id = $2
+        """, license_id, user['id'])
+        
+        if not license_data:
+            raise HTTPException(status_code=404, detail="License not found")
+        
+        # Get active bindings count
+        active_bindings = await conn.fetchval(
+            "SELECT COUNT(*) FROM hardware_bindings WHERE license_id = $1 AND is_active = TRUE",
+            license_id
+        )
+        
+        # Get last reset time
+        last_reset = await conn.fetchrow(
+            "SELECT created_at FROM hwid_reset_logs WHERE license_id = $1 ORDER BY created_at DESC LIMIT 1",
+            license_id
+        )
+        
+        # Get total reset count
+        reset_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM hwid_reset_logs WHERE license_id = $1",
+            license_id
+        )
+        
+        return {
+            "license_id": license_id,
+            "active_bindings": active_bindings,
+            "max_machines": license_data['max_machines'],
+            "can_reset": active_bindings > 0 and license_data['status'] == 'active',
+            "last_reset_at": last_reset['created_at'].isoformat() if last_reset else None,
+            "total_resets": reset_count
+        }
     finally:
         await release_db(conn)

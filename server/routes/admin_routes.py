@@ -3,11 +3,10 @@ Admin routes for CodeVault API.
 Extracted from main.py for modularity.
 """
 
-from datetime import timedelta
 
 from fastapi import APIRouter, Depends
 
-from utils import get_current_admin_user, utc_now
+from utils import get_current_admin_user
 from database import get_db, release_db
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])

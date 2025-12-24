@@ -60,7 +60,7 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
             if isinstance(events, str):
                 try:
                     events = json.loads(events)
-                except:
+                except Exception:
                     events = []
             
             if event not in events:
@@ -140,7 +140,7 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
             if isinstance(events, str):
                 try:
                     events = json.loads(events)
-                except:
+                except Exception:
                     events = []
             result.append({
                 "id": w['id'],
@@ -209,7 +209,7 @@ async def get_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
         if isinstance(events, str):
             try:
                 events = json.loads(events)
-            except:
+            except Exception:
                 events = []
         
         return {
@@ -267,7 +267,7 @@ async def update_webhook(webhook_id: str, data: WebhookUpdateRequest, user: dict
             param_count += 1
         
         if updates:
-            updates.append(f"updated_at = NOW()")
+            updates.append("updated_at = NOW()")
             params.append(webhook_id)
             await conn.execute(f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}", *params)
         

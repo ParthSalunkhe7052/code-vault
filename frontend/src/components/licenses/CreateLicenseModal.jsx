@@ -1,6 +1,21 @@
-import React, { useState } from 'react';
-import { Calendar, Tag, X } from 'lucide-react';
+import React, { useState, forwardRef } from 'react';
+import { Calendar, Tag, X, Check } from 'lucide-react';
 import Modal from '../Modal';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+
+// Custom input component for DatePicker that matches our styling
+const CustomDateInput = forwardRef(({ value, onClick, placeholder }, ref) => (
+    <button
+        type="button"
+        className="input flex-1 w-auto text-left cursor-pointer"
+        onClick={onClick}
+        ref={ref}
+    >
+        {value || <span className="text-slate-500">{placeholder}</span>}
+    </button>
+));
+CustomDateInput.displayName = 'CustomDateInput';
 
 const CreateLicenseModal = ({
     isOpen,
@@ -14,12 +29,10 @@ const CreateLicenseModal = ({
     onAddFeature,
     onRemoveFeature
 }) => {
+    const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
     const handleCreate = async (e) => {
         e.preventDefault();
-        const licenseData = {
-            ...newLicense,
-            expires_at: newLicense.expires_at ? new Date(newLicense.expires_at).toISOString() : null
-        };
         await onSubmit(e);
     };
 
@@ -29,6 +42,23 @@ const CreateLicenseModal = ({
             setNewLicense(prev => ({ ...prev, project_id: projects[0].id }));
         }
     }, [projects]);
+
+    // Parse the date string to Date object for DatePicker
+    const selectedDate = newLicense.expires_at ? new Date(newLicense.expires_at) : null;
+
+    const handleDateChange = (date) => {
+        if (date) {
+            // Format to datetime-local compatible string
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            setNewLicense({ ...newLicense, expires_at: `${year}-${month}-${day}T${hours}:${minutes}` });
+        } else {
+            setNewLicense({ ...newLicense, expires_at: '' });
+        }
+    };
 
     return (
         <Modal
@@ -98,13 +128,44 @@ const CreateLicenseModal = ({
                     </label>
                     <div className="flex items-center gap-3">
                         <Calendar size={20} className="text-slate-400" />
-                        <input
-                            type="datetime-local"
-                            value={newLicense.expires_at}
-                            onChange={(e) => setNewLicense({ ...newLicense, expires_at: e.target.value })}
-                            min={new Date().toISOString().slice(0, 16)}
-                            className="input flex-1 w-auto"
-                        />
+                        <DatePicker
+                            selected={selectedDate}
+                            onChange={handleDateChange}
+                            showTimeSelect
+                            timeFormat="HH:mm"
+                            timeIntervals={15}
+                            dateFormat="MMM d, yyyy h:mm aa"
+                            minDate={new Date()}
+                            placeholderText="Select expiration date..."
+                            customInput={<CustomDateInput />}
+                            open={isCalendarOpen}
+                            onInputClick={() => setIsCalendarOpen(true)}
+                            onClickOutside={() => setIsCalendarOpen(false)}
+                            calendarClassName="cv-datepicker"
+                            popperClassName="cv-datepicker-popper"
+                            wrapperClassName="flex-1"
+                        >
+                            <div className="flex justify-between items-center p-2 border-t border-slate-700 bg-slate-800">
+                                <button
+                                    type="button"
+                                    className="text-sm text-slate-400 hover:text-white px-3 py-1.5 rounded"
+                                    onClick={() => {
+                                        handleDateChange(null);
+                                        setIsCalendarOpen(false);
+                                    }}
+                                >
+                                    Clear
+                                </button>
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded font-medium"
+                                    onClick={() => setIsCalendarOpen(false)}
+                                >
+                                    <Check size={14} />
+                                    Done
+                                </button>
+                            </div>
+                        </DatePicker>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">Leave empty for a perpetual license</p>
                 </div>
@@ -187,3 +248,4 @@ const CreateLicenseModal = ({
 };
 
 export default CreateLicenseModal;
+
