@@ -1,81 +1,71 @@
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "license-wrapper"
-version = "1.0.0"
-description = "Wrap Python scripts with license protection and compile to executables"
-readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "License-Wrapper Team", email = "support@license-wrapper.com"}
-]
-requires-python = ">=3.9"
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Build Tools",
-    "Topic :: Security",
-]
-keywords = ["license", "protection", "drm", "executable", "nuitka", "compiler"]
-
-dependencies = [
-    "requests>=2.28.0",
-    "cryptography>=40.0.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "black>=23.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0",
-]
-compile = [
-    "nuitka>=2.0",
-    "ordered-set",
-    "zstandard",
-]
-
-[project.scripts]
-lw-compiler = "cli.lw_compiler:main"
-
-[project.urls]
-Homepage = "https://license-wrapper.com"
-Documentation = "https://docs.license-wrapper.com"
-Repository = "https://github.com/license-wrapper/license-wrapper"
-Issues = "https://github.com/license-wrapper/license-wrapper/issues"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cli*"]
-
-[tool.setuptools.package-dir]
-"" = "."
-
-[tool.black]
-line-length = 100
-target-version = ['py39', 'py310', 'py311']
+name = "CodeVaultV1"
+version = "0.1.0"
+description = "A Vibe Coding Project"
 
 [tool.ruff]
-line-length = 100
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
-ignore = ["E501"]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
 
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
+# Same as Black.
+line-length = 88
+indent-width = 4
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# E402: Module level import not at top of file
+# Intentionally ignored because these files have imports after setup code
+"server/main.py" = ["E402"]
+"server/routes/stripe_routes.py" = ["E402"]
+"server/storage_service.py" = ["E402"]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import { webhooks } from '../services/api';
 import { WebhookTable, WebhookFormModal, DeliveriesModal, EventsInfo } from '../components/webhooks';
 import { useToast } from '../components/Toast';
@@ -18,7 +18,7 @@ const Webhooks = () => {
     const [deliveries, setDeliveries] = useState([]);
     const [confirmDialog, setConfirmDialog] = useState({
         isOpen: false,
-        onConfirm: () => {}
+        onConfirm: () => { }
     });
     const [formData, setFormData] = useState({
         name: '',
@@ -151,11 +151,11 @@ const Webhooks = () => {
     };
 
     const openCreateModal = () => {
-        setFormData({ 
-            name: '', 
-            url: '', 
-            secret: '', 
-            events: ['license.validated', 'license.created', 'license.revoked'] 
+        setFormData({
+            name: '',
+            url: '',
+            secret: '',
+            events: ['license.validated', 'license.created', 'license.revoked']
         });
         setShowCreateModal(true);
     };
@@ -230,7 +230,7 @@ const Webhooks = () => {
                 webhookName={selectedWebhook?.name}
                 deliveries={deliveries}
             />
-            
+
             {/* Confirm Dialog */}
             <ConfirmDialog
                 isOpen={confirmDialog.isOpen}

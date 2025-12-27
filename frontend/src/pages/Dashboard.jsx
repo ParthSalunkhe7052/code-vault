@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight } from 'lucide-react';
 import { stats } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
-import Spinner from '../components/Spinner';
 
 const Dashboard = () => {
     const [dashboardStats, setDashboardStats] = useState(null);

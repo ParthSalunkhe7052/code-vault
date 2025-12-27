@@ -1,5 +1,6 @@
 import React from 'react';
-import { Folder, MoreVertical, Edit, Trash2, Shield, Cpu, Activity } from 'lucide-react';
+import { Folder, MoreVertical, Edit, Trash2, Shield, Cpu, Activity, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { useProjectBuild } from '../../contexts/BuildContext';
 
 const ProjectCard = ({
     project,
@@ -10,6 +11,49 @@ const ProjectCard = ({
     onDropdownToggle,
     onDelete
 }) => {
+    // Safety: Don't render if project is missing
+    if (!project || !project.id) {
+        return null;
+    }
+
+    // Get build state for this project
+    const { status: buildStatus } = useProjectBuild(project.id);
+
+    // Determine build status display
+    const getBuildStatusDisplay = () => {
+        switch (buildStatus) {
+            case 'running':
+            case 'pending':
+                return {
+                    text: 'Project wrapping under process...',
+                    color: 'text-emerald-400',
+                    bgColor: 'bg-emerald-500/10',
+                    borderColor: 'border-emerald-500/20',
+                    icon: <Loader2 size={12} className="animate-spin" />
+                };
+            case 'failed':
+                return {
+                    text: 'Build Failed',
+                    color: 'text-red-400',
+                    bgColor: 'bg-red-500/10',
+                    borderColor: 'border-red-500/20',
+                    icon: <XCircle size={12} />
+                };
+            case 'completed':
+                return {
+                    text: 'Build Ready',
+                    color: 'text-emerald-400',
+                    bgColor: 'bg-emerald-500/10',
+                    borderColor: 'border-emerald-500/20',
+                    icon: <CheckCircle size={12} />
+                };
+            default:
+                return null;
+        }
+    };
+
+    const buildStatusDisplay = getBuildStatusDisplay();
+
     return (
         <div
             onClick={() => onProjectClick(project)}
@@ -73,6 +117,14 @@ const ProjectCard = ({
                 </div>
             </div>
 
+            {/* Build Status Indicator */}
+            {buildStatusDisplay && (
+                <div className={`mt-3 pt-3 border-t border-white/5 flex items-center gap-2 text-xs ${buildStatusDisplay.color}`}>
+                    {buildStatusDisplay.icon}
+                    <span>{buildStatusDisplay.text}</span>
+                </div>
+            )}
+
             {/* Hover Glow Effect */}
             <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500 -z-10" />
         </div>
@@ -103,3 +155,4 @@ const ProjectDropdown = ({ dropdownRef, onConfigure, onDelete }) => (
 );
 
 export default ProjectCard;
+

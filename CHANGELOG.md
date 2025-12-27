@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - 27-12-2024
 
+### Fixed 🐛
+- **Mission Control Map**: Fixed broken map by integrating GeoIP database and fixing silent failures in `license_routes.py`.
+- **Localhost Geolocation**: Added "New York" dev coordinates for localhost testing.
+- **Node.js builds**: Fixed `pkg` module resolution issues.
+
+### Added ✨
+- **Performance**: Parallelized Dashboard SQL queries using `asyncio.gather` (3-4x faster load).
+- **Mock Data Generator**: Created `populate_mock_map.py` for instant map visualization.
+- **CLI Aesthetics**: Redesigned `Run CLI.bat` and `Run Web App.bat` with Cyberpunk ASCII art and better UX.
+
+### Changed 🔧
+- **Branding**: Renamed references to "CodeVault" in documentation.
+- **Architecture**: Clarified "Web + CLI" focus in `PROJECT_DOCUMENTATION.md`.
+- **Code Hygiene**: Formatted codebase with `ruff` (20+ files) and cleaned up dead code.
+
+---
+
+## [1.1.1-pre] - 27-12-2024
+
+### Fixed
+- CLI: Removed unused import `get_nodejs_wrapper` in `lw_compiler.py` (ruff F401)
+- CLI: Replaced bare `except:` with `except Exception:` in `wrappers.py` (2 locations)
+
+### Changed
+- Node.js builds: Using inline wrapper approach for better pkg compatibility
+- CLI UX: Improved build progress indicators with elapsed time spinner
+
+---
+
+## [Unreleased] - 23-12-2024
+
 ### Added ✨
 - **Mission Control Map**: Real-time license activation tracking with GeoIP integration
 - **Dashboard Performance**: Parallelized SQL queries using `asyncio.gather` (3-4x faster load times)

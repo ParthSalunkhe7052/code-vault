@@ -363,16 +363,14 @@ __all__ = ['get_license', 'validate_license_with_server', 'save_license', 'load_
 def get_license_dialog_code(api_url: str, app_name: str) -> str:
     """
     Get the license dialog code with placeholders replaced
-    
+
     Args:
         api_url: The license validation API endpoint
         app_name: The application name for display
-    
+
     Returns:
         Python code ready to be injected into the application
     """
-    return LICENSE_DIALOG_TEMPLATE.replace(
-        "{{API_URL}}", api_url
-    ).replace(
+    return LICENSE_DIALOG_TEMPLATE.replace("{{API_URL}}", api_url).replace(
         "{{APP_NAME}}", app_name
     )

@@ -1,0 +1,6 @@
+{
+  "api_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmZmM5MjA1YzMxOGI4OTAxOGQxNWEzNDMxYzllYjg5NyIsImVtYWlsIjoicGFydGguYWppdDcwNTJAZ21haWwuY29tIiwiZXhwIjoxNzY2OTE4MTEyLCJpYXQiOjE3NjY4MzE3MTJ9.I6dUEd6qUj-s5-PNg6dpZyupQMtEQev0qujRDNUXoHs",
+  "api_url": "http://localhost:8000/api/v1",
+  "email": "parth.ajit7052@gmail.com",
+  "user_name": "Parth Ajit (Admin)"
+}

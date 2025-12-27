@@ -11,17 +11,21 @@ from pydantic import BaseModel, EmailStr, Field
 # Authentication Models
 # =============================================================================
 
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     name: Optional[str] = None
 
+
 class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
+
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -33,6 +37,7 @@ class TokenResponse(BaseModel):
 # License Models
 # =============================================================================
 
+
 class LicenseValidationRequest(BaseModel):
     license_key: str = Field(..., min_length=5, max_length=50)
     hwid: str = Field(..., min_length=8, max_length=64)
@@ -40,6 +45,7 @@ class LicenseValidationRequest(BaseModel):
     nonce: str = Field(..., min_length=16, max_length=64)
     timestamp: int
     client_version: Optional[str] = None
+
 
 class LicenseValidationResponse(BaseModel):
     status: str
@@ -50,6 +56,7 @@ class LicenseValidationResponse(BaseModel):
     server_nonce: str
     timestamp: int
     signature: str
+
 
 class LicenseCreateRequest(BaseModel):
     project_id: str
@@ -65,11 +72,13 @@ class LicenseCreateRequest(BaseModel):
 # Project Models
 # =============================================================================
 
+
 class ProjectCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     language: str = Field(default="python", pattern="^(python|nodejs)$")
     compiler_options: dict = {}
+
 
 class ProjectConfigRequest(BaseModel):
     entry_file: Optional[str] = None
@@ -84,11 +93,13 @@ class ProjectConfigRequest(BaseModel):
 # Compilation Models
 # =============================================================================
 
+
 class CompileJobRequest(BaseModel):
     entry_file: Optional[str] = None
     output_name: Optional[str] = None
     options: Optional[dict] = None
     license_key: Optional[str] = None
+
 
 class CompileJobResponse(BaseModel):
     id: str
@@ -107,11 +118,13 @@ class CompileJobResponse(BaseModel):
 # Webhook Models
 # =============================================================================
 
+
 class WebhookCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     url: str = Field(..., min_length=10, max_length=500)
     events: List[str] = Field(default=["license.validated", "license.created"])
     secret: Optional[str] = None
+
 
 class WebhookUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
@@ -124,6 +137,7 @@ class WebhookUpdateRequest(BaseModel):
 # =============================================================================
 # Other Models
 # =============================================================================
+
 
 class HWIDResetRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)

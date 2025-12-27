@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Plus, Folder } from 'lucide-react';
 import { projects as projectApi, compile as compileApi, licenses as licensesApi } from '../services/api';
 import { ProjectCard, CreateProjectModal, ProjectWizard } from '../components/projects';
@@ -28,7 +28,6 @@ const Projects = () => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [compileStatus, setCompileStatus] = useState(null);
     const [isCompiling, setIsCompiling] = useState(false);
-    const [saveMessage, setSaveMessage] = useState(null);
     const [projectLicenses, setProjectLicenses] = useState([]);
     const [confirmDialog, setConfirmDialog] = useState({
         isOpen: false,
@@ -106,7 +105,6 @@ const Projects = () => {
         setConfigLoading(true);
         setIsConfigModalOpen(true);
         setCompileStatus(null);
-        setSaveMessage(null);
         setProjectLicenses([]);
 
         // Fetch licenses for this project

@@ -26,7 +26,9 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
 # CORS
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+).split(",")
 CORS_ALLOW_ALL = os.getenv("CORS_ALLOW_ALL", "false").lower() == "true"
 
 # Environment
@@ -35,9 +37,13 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 # Validate critical secrets in production
 if ENVIRONMENT == "production":
     if SECRET_KEY == "dev-secret-key-change-in-production":
-        raise ValueError("CRITICAL: SECRET_KEY must be set in production! Set it in .env file.")
+        raise ValueError(
+            "CRITICAL: SECRET_KEY must be set in production! Set it in .env file."
+        )
     if JWT_SECRET == "jwt-secret-change-in-production":
-        raise ValueError("CRITICAL: JWT_SECRET must be set in production! Set it in .env file.")
+        raise ValueError(
+            "CRITICAL: JWT_SECRET must be set in production! Set it in .env file."
+        )
 
 
 # Admin
@@ -52,7 +58,7 @@ CLI_VERSION = "1.0.0"
 CLI_DOWNLOAD_URLS = {
     "windows": os.getenv("CLI_DOWNLOAD_WINDOWS", ""),
     "macos": os.getenv("CLI_DOWNLOAD_MACOS", ""),
-    "linux": os.getenv("CLI_DOWNLOAD_LINUX", "")
+    "linux": os.getenv("CLI_DOWNLOAD_LINUX", ""),
 }
 
 # Stripe Configuration
@@ -100,7 +106,7 @@ TIER_LIMITS = {
         "team_seats": 5,
         "white_labeling": True,
         "node_support": True,
-    }
+    },
 }
 
 # Pricing Configuration
@@ -109,28 +115,39 @@ PRICING_CONFIG = {
         "name": "Free",
         "price": 0,
         "currency": "USD",
-        "features": ["1 Project", "5 Licenses/Project", "Basic Support"]
+        "features": ["1 Project", "5 Licenses/Project", "Basic Support"],
     },
     "pro": {
         "name": "Pro",
         "price": 20,
         "currency": "USD",
         "price_id": STRIPE_PRICE_PRO,
-        "features": ["10 Projects", "100 Licenses/Project", "Sell Licenses", "Cloud Compilation", "Analytics"]
+        "features": [
+            "10 Projects",
+            "100 Licenses/Project",
+            "Sell Licenses",
+            "Cloud Compilation",
+            "Analytics",
+        ],
     },
     "enterprise": {
         "name": "Enterprise",
         "price": 50,
         "currency": "USD",
         "price_id": STRIPE_PRICE_ENTERPRISE,
-        "features": ["Unlimited Projects", "Unlimited Licenses", "Priority Support", "White Labeling"]
-    }
+        "features": [
+            "Unlimited Projects",
+            "Unlimited Licenses",
+            "Priority Support",
+            "White Labeling",
+        ],
+    },
 }
 
 # Webhook Events
 WEBHOOK_EVENTS = [
     "license.created",
-    "license.validated", 
+    "license.validated",
     "license.revoked",
     "license.expired",
     "hwid.bound",
