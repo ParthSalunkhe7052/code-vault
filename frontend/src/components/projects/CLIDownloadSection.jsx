@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
-import { Download, Loader, Package } from 'lucide-react';
+import { Loader, Package, Terminal, Copy, Check } from 'lucide-react';
 import api from '../../services/api';
 
 const CLIDownloadSection = ({ project, licenses = [] }) => {
     const [selectedLicense, setSelectedLicense] = useState('');
     const [downloading, setDownloading] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     const activeLicenses = licenses.filter(l => l.status === 'active');
 
-    const handleDownloadPackage = async () => {
+    const handleDownloadBundle = async () => {
         if (!project?.id) return;
 
         setDownloading(true);
         try {
-            // Call the build-package endpoint
-            const params = selectedLicense ? `?license_key=${selectedLicense}` : '';
-            const response = await api.get(`/projects/${project.id}/build-package${params}`, {
+            // Call the build-bundle endpoint
+            const params = selectedLicense ? `?license_id=${selectedLicense}` : '';
+            const response = await api.get(`/projects/${project.id}/build-bundle${params}`, {
                 responseType: 'blob'
             });
 
@@ -24,16 +25,29 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `build_${project.name?.replace(/\s+/g, '_').toLowerCase() || 'project'}.zip`;
+            a.download = `${project.name?.replace(/\s+/g, '_').toLowerCase() || 'project'}_bundle.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         } catch (err) {
-            console.error('Failed to download build package:', err);
-            alert('Failed to download build package. Please try again.');
+            console.error('Failed to download build bundle:', err);
+            const errorMessage = err.response?.data?.detail || 'Failed to download build bundle. Please try again.';
+            alert(errorMessage);
         } finally {
             setDownloading(false);
+        }
+    };
+
+    const cliCommand = `codevault-cli build ${project?.id || '<project-id>'}${selectedLicense ? ` --license ${selectedLicense}` : ''}`;
+
+    const handleCopyCommand = async () => {
+        try {
+            await navigator.clipboard.writeText(cliCommand);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
         }
     };
 
@@ -46,7 +60,7 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                         <span className="text-lg font-bold text-purple-400">1</span>
                     </div>
                     <div>
-                        <h3 className="font-semibold text-white">Select License</h3>
+                        <h3 className="font-semibold text-white">Select License (Optional)</h3>
                         <p className="text-xs text-slate-400">Embed license protection in your build</p>
                     </div>
                 </div>
@@ -57,55 +71,90 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                         onChange={(e) => setSelectedLicense(e.target.value)}
                         className="input w-full text-base py-3"
                     >
-                        <option value="">No license (Demo mode)</option>
+                        <option value="">Generic Build (runtime license prompt)</option>
                         {activeLicenses.map(lic => (
-                            <option key={lic.id} value={lic.license_key}>
+                            <option key={lic.id} value={lic.id}>
                                 {lic.license_key} {lic.client_name ? `- ${lic.client_name}` : ''}
                             </option>
                         ))}
                     </select>
                 ) : (
                     <div className="text-sm text-slate-400 p-3 bg-white/5 rounded-lg border border-white/10">
-                        No licenses created yet.{' '}
+                        No licenses created yet. Build will use generic mode (license prompt at runtime).{' '}
                         <a href="/licenses" className="text-indigo-400 hover:underline">
-                            Create one →
+                            Create a license →
                         </a>
                     </div>
                 )}
             </div>
 
-            {/* Download Build Package */}
+            {/* CLI Command */}
+            <div className="bg-gradient-to-br from-cyan-500/10 to-blue-500/10 rounded-xl p-5 border border-cyan-500/20">
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                        <span className="text-lg font-bold text-cyan-400">2</span>
+                    </div>
+                    <div>
+                        <h3 className="font-semibold text-white">Run Build Command</h3>
+                        <p className="text-xs text-slate-400">Execute this in your terminal to compile locally</p>
+                    </div>
+                </div>
+
+                <div className="relative">
+                    <div className="bg-black/40 rounded-lg p-4 font-mono text-sm text-emerald-400 pr-12 break-all">
+                        {cliCommand}
+                    </div>
+                    <button
+                        onClick={handleCopyCommand}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg transition-colors"
+                        title="Copy command"
+                    >
+                        {copied ? (
+                            <Check size={18} className="text-emerald-400" />
+                        ) : (
+                            <Copy size={18} className="text-slate-400" />
+                        )}
+                    </button>
+                </div>
+
+                <div className="mt-3 text-xs text-slate-500">
+                    Don't have the CLI?{' '}
+                    <code className="bg-white/10 px-1.5 py-0.5 rounded">pip install codevault-cli</code>
+                </div>
+            </div>
+
+            {/* Alternative: Download Build Bundle */}
             <div className="bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 rounded-xl p-5 border border-emerald-500/20">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                        <span className="text-lg font-bold text-emerald-400">2</span>
+                        <Terminal size={20} className="text-emerald-400" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-white">Download Build Package</h3>
-                        <p className="text-xs text-slate-400">Extract, run build.bat, get your .exe</p>
+                        <h3 className="font-semibold text-white">Alternative: Download Bundle</h3>
+                        <p className="text-xs text-slate-400">Manual download if CLI isn't working</p>
                     </div>
                 </div>
 
                 <button
-                    onClick={handleDownloadPackage}
+                    onClick={handleDownloadBundle}
                     disabled={downloading}
-                    className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 text-white font-semibold text-lg hover:from-emerald-500 hover:to-cyan-500 transition-all shadow-lg shadow-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-all border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {downloading ? (
                         <>
-                            <Loader size={22} className="animate-spin" />
-                            Preparing Package...
+                            <Loader size={18} className="animate-spin" />
+                            Preparing Bundle...
                         </>
                     ) : (
                         <>
-                            <Package size={22} />
-                            Download Build Package
+                            <Package size={18} />
+                            Download Build Bundle (.zip)
                         </>
                     )}
                 </button>
 
-                <div className="mt-4 text-center text-xs text-slate-500">
-                    Requires Python 3.8+ • Windows only
+                <div className="mt-3 text-center text-xs text-slate-500">
+                    Extract the ZIP, then run: <code className="bg-white/10 px-1.5 py-0.5 rounded">python -m codevault_cli build .</code>
                 </div>
             </div>
         </div>
@@ -113,3 +162,4 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
 };
 
 export default CLIDownloadSection;
+

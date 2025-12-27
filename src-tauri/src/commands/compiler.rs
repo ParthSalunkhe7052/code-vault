@@ -2459,7 +2459,7 @@ pub async fn run_installer_build(
         stage: "api".to_string(),
     }).ok();
     
-    // Call the build API endpoint
+    // Call the build API endpoint (now async - returns job_id immediately)
     let client = reqwest::Client::new();
     let api_url = "http://localhost:8000/api/v1/build/installer";
     
@@ -2472,44 +2472,124 @@ pub async fn run_installer_build(
             if response.status().is_success() {
                 match response.json::<serde_json::Value>().await {
                     Ok(result) => {
-                        let success = result.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+                        // New async API returns job_id
+                        let backend_job_id = result.get("job_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         
-                        if success {
-                            let output_path = result.get("output_path")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
-                            let output_name = result.get("output_name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
-                            
-                            window.emit("compilation-progress", CompilationProgress {
-                                job_id: job_id.clone(),
-                                progress: 100,
-                                message: format!("Build completed: {}", output_name),
-                                stage: "completed".to_string(),
-                            }).ok();
-                            
-                            window.emit("compilation-result", CompilationResult {
-                                job_id: job_id.clone(),
-                                success: true,
-                                output_path: Some(output_path.to_string()),
-                                error_message: None,
-                            }).ok();
-                            
-                            Ok(job_id)
-                        } else {
-                            let error = result.get("error")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Unknown error");
-                            
+                        if backend_job_id.is_empty() {
+                            let error_msg = "API did not return job_id".to_string();
                             window.emit("compilation-result", CompilationResult {
                                 job_id: job_id.clone(),
                                 success: false,
                                 output_path: None,
-                                error_message: Some(error.to_string()),
+                                error_message: Some(error_msg.clone()),
                             }).ok();
+                            return Err(error_msg);
+                        }
+                        
+                        window.emit("compilation-progress", CompilationProgress {
+                            job_id: job_id.clone(),
+                            progress: 15,
+                            message: "Build job started, monitoring progress...".to_string(),
+                            stage: "building".to_string(),
+                        }).ok();
+                        
+                        // Poll for status updates
+                        let status_url = format!("http://localhost:8000/api/v1/build/installer/{}/status", backend_job_id);
+                        let mut last_progress: u32 = 15;
+                        let mut poll_count = 0;
+                        let max_polls = 600; // 10 minutes at 1 second intervals
+                        
+                        loop {
+                            if poll_count >= max_polls {
+                                let error_msg = "Build timed out after 10 minutes".to_string();
+                                window.emit("compilation-result", CompilationResult {
+                                    job_id: job_id.clone(),
+                                    success: false,
+                                    output_path: None,
+                                    error_message: Some(error_msg.clone()),
+                                }).ok();
+                                return Err(error_msg);
+                            }
                             
-                            Err(format!("Build failed: {}", error))
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            poll_count += 1;
+                            
+                            match client.get(&status_url).send().await {
+                                Ok(status_response) => {
+                                    if let Ok(status) = status_response.json::<serde_json::Value>().await {
+                                        let job_status = status.get("status")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown");
+                                        let progress = status.get("progress")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(0) as u32;
+                                        
+                                        // Only emit if progress changed
+                                        if progress > last_progress {
+                                            last_progress = progress;
+                                            
+                                            // Get latest log message
+                                            let logs = status.get("logs").and_then(|v| v.as_array());
+                                            let latest_log = logs
+                                                .and_then(|arr| arr.last())
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("Building...");
+                                            
+                                            window.emit("compilation-progress", CompilationProgress {
+                                                job_id: job_id.clone(),
+                                                progress,
+                                                message: latest_log.to_string(),
+                                                stage: job_status.to_string(),
+                                            }).ok();
+                                        }
+                                        
+                                        // Check if build completed
+                                        if job_status == "completed" {
+                                            let output_path = status.get("output_path")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown");
+                                            let output_filename = status.get("output_filename")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown");
+                                            
+                                            window.emit("compilation-progress", CompilationProgress {
+                                                job_id: job_id.clone(),
+                                                progress: 100,
+                                                message: format!("Build completed: {}", output_filename),
+                                                stage: "completed".to_string(),
+                                            }).ok();
+                                            
+                                            window.emit("compilation-result", CompilationResult {
+                                                job_id: job_id.clone(),
+                                                success: true,
+                                                output_path: Some(output_path.to_string()),
+                                                error_message: None,
+                                            }).ok();
+                                            
+                                            return Ok(job_id);
+                                        } else if job_status == "failed" {
+                                            let error = status.get("error_message")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("Unknown error");
+                                            
+                                            window.emit("compilation-result", CompilationResult {
+                                                job_id: job_id.clone(),
+                                                success: false,
+                                                output_path: None,
+                                                error_message: Some(error.to_string()),
+                                            }).ok();
+                                            
+                                            return Err(format!("Build failed: {}", error));
+                                        }
+                                    }
+                                },
+                                Err(_) => {
+                                    // Connection error during poll - continue trying
+                                    continue;
+                                }
+                            }
                         }
                     },
                     Err(e) => {

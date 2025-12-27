@@ -1,6 +1,8 @@
-# Code Vault
+# CodeVault
 
-A SaaS tool for wrapping Python and Node.js scripts with license protection and compiling to standalone executables.
+A professional **Software Monetization Platform** for wrapping Python and Node.js applications with license protection and compiling to standalone Windows executables.
+
+> **Architecture**: Web Dashboard + CLI Tool (no desktop app required)
 
 ## Features
 
@@ -23,9 +25,12 @@ A SaaS tool for wrapping Python and Node.js scripts with license protection and 
 - **pkg** - Runs automatically via `npx`
 - **javascript-obfuscator** - Optional, for code protection *(Coming Soon)*
 
-### Desktop App
-- Windows 10/11, macOS 10.15+, or Linux
-- Python 3.12+ installed and in PATH
+### GeoIP Setup (Optional - for Mission Control Map)
+1. Download `GeoLite2-City.mmdb` from [MaxMind](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)
+2. Place it in `CodeVaultV1/server/data/GeoLite2-City.mmdb`
+3. The Mission Control map will now show real-world locations of license validations
+
+> **Note**: For local development, the map will show a sample "New York" location for localhost requests.
 
 ## Quick Start
 

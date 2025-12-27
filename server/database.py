@@ -31,12 +31,12 @@ async def release_db(conn):
 async def init_database():
     """Initialize PostgreSQL database with all tables and indexes."""
     global db_pool
-    
+
     if not DATABASE_URL:
         raise Exception("DATABASE_URL not set")
-    
+
     db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    
+
     conn = await db_pool.acquire()
     try:
         # Create tables
@@ -53,7 +53,7 @@ async def init_database():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
@@ -65,7 +65,7 @@ async def init_database():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS licenses (
                 id TEXT PRIMARY KEY,
@@ -83,7 +83,7 @@ async def init_database():
                 last_validated_at TIMESTAMPTZ
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS hardware_bindings (
                 id TEXT PRIMARY KEY,
@@ -97,7 +97,7 @@ async def init_database():
                 UNIQUE(license_id, hwid)
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS validation_logs (
                 id SERIAL PRIMARY KEY,
@@ -110,7 +110,7 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS project_files (
                 id TEXT PRIMARY KEY,
@@ -124,7 +124,7 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS compile_jobs (
                 id TEXT PRIMARY KEY,
@@ -141,7 +141,7 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS webhooks (
                 id TEXT PRIMARY KEY,
@@ -157,7 +157,7 @@ async def init_database():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS webhook_deliveries (
                 id TEXT PRIMARY KEY,
@@ -171,7 +171,7 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS hwid_reset_logs (
                 id TEXT PRIMARY KEY,
@@ -182,7 +182,7 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Analytics events table for tracking usage
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS analytics_events (
@@ -196,15 +196,27 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Create indexes
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_validation_logs_created ON validation_logs(created_at)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_analytics_events_created ON analytics_events(created_at)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_analytics_events_user ON analytics_events(user_id)")
-        
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_logs_created ON validation_logs(created_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_events_created ON analytics_events(created_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_events_user ON analytics_events(user_id)"
+        )
+
         # Migrations for existing databases
         # Add role column if it doesn't exist
         try:
@@ -212,17 +224,20 @@ async def init_database():
             print("[Migration] Added 'role' column to users table")
         except Exception:
             pass  # Column already exists
-        
+
         # Grant admin role to configured email (from env var)
         if ADMIN_EMAIL:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE users SET role = 'admin' WHERE email = $1
-            """, ADMIN_EMAIL)
-        
+            """,
+                ADMIN_EMAIL,
+            )
+
         # =============================================================================
         # Stripe/Subscription Tables (Phase 1)
         # =============================================================================
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id TEXT PRIMARY KEY,
@@ -238,7 +253,7 @@ async def init_database():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS license_purchases (
                 id TEXT PRIMARY KEY,
@@ -254,13 +269,21 @@ async def init_database():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        
+
         # Create indexes for subscription tables
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe ON subscriptions(stripe_subscription_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_license_purchases_project ON license_purchases(project_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_license_purchases_session ON license_purchases(stripe_checkout_session_id)")
-        
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe ON subscriptions(stripe_subscription_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_license_purchases_project ON license_purchases(project_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_license_purchases_session ON license_purchases(stripe_checkout_session_id)"
+        )
+
         # Migrations for marketplace columns on projects table
         migration_columns = [
             ("projects", "is_public", "BOOLEAN DEFAULT FALSE"),
@@ -268,74 +291,98 @@ async def init_database():
             ("projects", "currency", "TEXT DEFAULT 'usd'"),
             ("projects", "store_slug", "TEXT UNIQUE"),
         ]
-        
+
         for table, column, column_type in migration_columns:
             try:
-                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+                await conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
+                )
                 print(f"[Migration] Added '{column}' column to {table} table")
             except Exception:
                 pass  # Column already exists
-        
+
         # Set up admin user with enterprise subscription if ADMIN_EMAIL is configured
         if ADMIN_EMAIL:
             admin_user = await conn.fetchrow(
                 "SELECT id FROM users WHERE email = $1", ADMIN_EMAIL
             )
             if admin_user:
-                admin_id = admin_user['id']
-                # Update user plan to enterprise 
-                await conn.execute("""
+                admin_id = admin_user["id"]
+                # Update user plan to enterprise
+                await conn.execute(
+                    """
                     UPDATE users SET plan = 'enterprise', role = 'admin' WHERE id = $1
-                """, admin_id)
-                
+                """,
+                    admin_id,
+                )
+
                 # Check if subscription exists
                 existing_sub = await conn.fetchrow(
                     "SELECT id FROM subscriptions WHERE user_id = $1", admin_id
                 )
-                
+
                 if not existing_sub:
                     # Create enterprise subscription for admin
                     sub_id = str(uuid.uuid4())
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO subscriptions (id, user_id, plan_tier, status)
                         VALUES ($1, $2, 'enterprise', 'active')
-                    """, sub_id, admin_id)
-                    print(f"[Migration] Created enterprise subscription for admin: {ADMIN_EMAIL}")
+                    """,
+                        sub_id,
+                        admin_id,
+                    )
+                    print(
+                        f"[Migration] Created enterprise subscription for admin: {ADMIN_EMAIL}"
+                    )
                 else:
                     # Update existing subscription to enterprise
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE subscriptions SET plan_tier = 'enterprise', status = 'active'
                         WHERE user_id = $1
-                    """, admin_id)
-        print(f"[Migration] Updated subscription to enterprise for admin: {ADMIN_EMAIL}")
+                    """,
+                        admin_id,
+                    )
+        print(
+            f"[Migration] Updated subscription to enterprise for admin: {ADMIN_EMAIL}"
+        )
 
         # =============================================================================
         # Migration 005: Tier Sync Improvements (Phase 1 Fix)
         # =============================================================================
         try:
-            await conn.execute("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS sync_source VARCHAR(20) DEFAULT 'stripe_webhook'")
+            await conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS sync_source VARCHAR(20) DEFAULT 'stripe_webhook'"
+            )
             print("[Migration] Added 'sync_source' column to subscriptions table")
         except Exception:
             pass
 
         # Create index
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
-        
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)"
+        )
+
         # =============================================================================
         # Migration: Node.js Support (Phase 2)
         # =============================================================================
         try:
-            await conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS language VARCHAR(20) DEFAULT 'python'")
+            await conn.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS language VARCHAR(20) DEFAULT 'python'"
+            )
             print("[Migration] Added 'language' column to projects table")
         except Exception:
             pass
 
         try:
-            await conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS compiler_options JSONB DEFAULT '{}'")
+            await conn.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS compiler_options JSONB DEFAULT '{}'"
+            )
             print("[Migration] Added 'compiler_options' column to projects table")
         except Exception:
             pass
-        
+
         # =============================================================================
         # Migration: Mission Control Live Map (Geolocation)
         # =============================================================================
@@ -345,17 +392,21 @@ async def init_database():
             ("validation_logs", "latitude", "DOUBLE PRECISION"),
             ("validation_logs", "longitude", "DOUBLE PRECISION"),
         ]
-        
+
         for table, column, column_type in geo_columns:
             try:
-                await conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {column_type}")
+                await conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {column_type}"
+                )
                 print(f"[Migration] Added '{column}' column to {table} table")
             except Exception:
                 pass
-        
+
         # Create index for geo queries
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_validation_logs_geo ON validation_logs(latitude, longitude) WHERE latitude IS NOT NULL")
-        
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_logs_geo ON validation_logs(latitude, longitude) WHERE latitude IS NOT NULL"
+        )
+
         # Sync users.plan with subscriptions.plan_tier (Critical Fix)
         # Only update if they are different
         await conn.execute("""
@@ -370,7 +421,21 @@ async def init_database():
         """)
         print("[Migration] Synced users.plan with subscriptions.plan_tier")
 
-        print(f"[✓] Database initialized (PostgreSQL)")
+        # =============================================================================
+        # Patch A: Zombie Job Killer
+        # Reset any jobs stuck in 'running' state from previous session
+        # =============================================================================
+        await conn.execute("""
+            UPDATE compile_jobs 
+            SET status = 'failed', 
+                error_message = 'Job failed (Server Restarted)', 
+                completed_at = NOW(),
+                progress = 100
+            WHERE status = 'running'
+        """)
+        print("[Maintenance] Reset zombie jobs to failed status")
+
+        print("[✓] Database initialized (PostgreSQL)")
 
     finally:
         await db_pool.release(conn)

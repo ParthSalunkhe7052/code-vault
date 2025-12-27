@@ -67,10 +67,10 @@ async def setup_admin():
                 WHERE email = $1
             """, "parth.ajit7052@gmail.com")
             print("    ✅ Account upgraded to Enterprise + Admin role")
-            print(f"    📧 Email: parth.ajit7052@gmail.com")
-            print(f"    👤 Name: Parth Ajit (Admin)")
-            print(f"    🏆 Plan: Enterprise")
-            print(f"    🔐 Role: Admin")
+            print("    📧 Email: parth.ajit7052@gmail.com")
+            print("    👤 Name: Parth Ajit (Admin)")
+            print("    🏆 Plan: Enterprise")
+            print("    🔐 Role: Admin")
             
             # Create or update subscription record
             existing_sub = await conn.fetchrow(

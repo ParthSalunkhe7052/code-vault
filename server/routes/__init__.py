@@ -11,11 +11,11 @@ from routes.admin_routes import router as admin_router
 from routes.analytics_routes import router as analytics_router
 
 __all__ = [
-    'stripe_router',
-    'auth_router', 
-    'webhook_router',
-    'trigger_webhook',
-    'license_router',
-    'admin_router',
-    'analytics_router',
+    "stripe_router",
+    "auth_router",
+    "webhook_router",
+    "trigger_webhook",
+    "license_router",
+    "admin_router",
+    "analytics_router",
 ]

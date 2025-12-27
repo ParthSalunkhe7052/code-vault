@@ -16,11 +16,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Try to import Resend
 try:
     import resend
+
     HAS_RESEND = True
 except ImportError:
     HAS_RESEND = False
@@ -29,6 +31,7 @@ except ImportError:
 try:
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import Mail, Email, To, Content
+
     HAS_SENDGRID = True
 except ImportError:
     HAS_SENDGRID = False
@@ -53,6 +56,7 @@ _executor = ThreadPoolExecutor(max_workers=2)
 @dataclass
 class EmailMessage:
     """Represents an email message."""
+
     to: str
     subject: str
     html_body: str
@@ -61,12 +65,12 @@ class EmailMessage:
 
 class EmailService:
     """Email service with Resend, SendGrid and SMTP support."""
-    
+
     def __init__(self):
         self.use_resend = False
         self.use_sendgrid = False
         self.use_smtp = False
-        
+
         # Check Resend first (preferred)
         if HAS_RESEND and RESEND_API_KEY:
             resend.api_key = RESEND_API_KEY
@@ -81,11 +85,11 @@ class EmailService:
             print("[Email] Using SMTP")
         else:
             print("[Email] No email provider configured")
-    
+
     def is_configured(self) -> bool:
         """Check if email service is properly configured."""
         return EMAIL_ENABLED and (self.use_resend or self.use_sendgrid or self.use_smtp)
-    
+
     def _send_via_resend(self, message: EmailMessage) -> bool:
         """Send email via Resend."""
         try:
@@ -93,78 +97,78 @@ class EmailService:
                 "from": f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>",
                 "to": [message.to],
                 "subject": message.subject,
-                "html": message.html_body
+                "html": message.html_body,
             }
             if message.text_body:
                 params["text"] = message.text_body
-            
+
             response = resend.Emails.send(params)
             return response.get("id") is not None
         except Exception as e:
             print(f"[Email] Resend error: {e}")
             return False
-    
+
     def _send_via_sendgrid(self, message: EmailMessage) -> bool:
         """Send email via SendGrid."""
-        if not hasattr(self, 'sendgrid_client'):
+        if not hasattr(self, "sendgrid_client"):
             return False
-        
+
         try:
             mail = Mail(
                 from_email=Email(EMAIL_FROM, EMAIL_FROM_NAME),
                 to_emails=To(message.to),
                 subject=message.subject,
-                html_content=Content("text/html", message.html_body)
+                html_content=Content("text/html", message.html_body),
             )
             response = self.sendgrid_client.send(mail)
             return response.status_code in [200, 201, 202]
         except Exception as e:
             print(f"[Email] SendGrid error: {e}")
             return False
-    
+
     def _send_via_smtp(self, message: EmailMessage) -> bool:
         """Send email via SMTP."""
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = message.subject
-            msg['From'] = f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>"
-            msg['To'] = message.to
-            
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = message.subject
+            msg["From"] = f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>"
+            msg["To"] = message.to
+
             if message.text_body:
-                msg.attach(MIMEText(message.text_body, 'plain'))
-            msg.attach(MIMEText(message.html_body, 'html'))
-            
+                msg.attach(MIMEText(message.text_body, "plain"))
+            msg.attach(MIMEText(message.html_body, "html"))
+
             if SMTP_USE_TLS:
                 server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
                 server.starttls()
             else:
                 server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT)
-            
+
             if SMTP_USER and SMTP_PASSWORD:
                 server.login(SMTP_USER, SMTP_PASSWORD)
-            
+
             server.sendmail(EMAIL_FROM, message.to, msg.as_string())
             server.quit()
             return True
         except Exception as e:
             print(f"[Email] SMTP error: {e}")
             return False
-    
+
     def send(self, message: EmailMessage) -> bool:
         """Send an email message."""
         if not self.is_configured():
             print("[Email] Email service not configured, skipping")
             return False
-        
+
         if self.use_resend:
             return self._send_via_resend(message)
         elif self.use_sendgrid:
             return self._send_via_sendgrid(message)
         elif self.use_smtp:
             return self._send_via_smtp(message)
-        
+
         return False
-    
+
     async def send_async(self, message: EmailMessage) -> bool:
         """Send email asynchronously."""
         loop = asyncio.get_event_loop()
@@ -178,6 +182,7 @@ email_service = EmailService()
 # =============================================================================
 # Email Templates
 # =============================================================================
+
 
 def _get_base_template(content: str, title: str) -> str:
     """Wrap content in base email template."""
@@ -306,12 +311,12 @@ def create_license_expiry_warning_email(
     license_key: str,
     project_name: str,
     expires_at: datetime,
-    days_remaining: int
+    days_remaining: int,
 ) -> EmailMessage:
     """Create email for license expiry warning."""
     content = f"""
     <div class="content">
-        <p>Hello {client_name or 'Customer'},</p>
+        <p>Hello {client_name or "Customer"},</p>
         
         <div class="alert alert-warning">
             <strong>⚠️ License Expiring Soon</strong><br>
@@ -331,7 +336,7 @@ def create_license_expiry_warning_email(
             </div>
             <div class="details-row">
                 <span class="details-label">Expires On</span>
-                <span class="details-value">{expires_at.strftime('%B %d, %Y at %H:%M UTC')}</span>
+                <span class="details-value">{expires_at.strftime("%B %d, %Y at %H:%M UTC")}</span>
             </div>
         </div>
         
@@ -340,12 +345,12 @@ def create_license_expiry_warning_email(
         <p>Best regards,<br>The CodeVault Team</p>
     </div>
     """
-    
+
     return EmailMessage(
         to=client_email,
         subject=f"⚠️ License Expiring in {days_remaining} Days - {project_name}",
         html_body=_get_base_template(content, "License Expiry Warning"),
-        text_body=f"Your license for {project_name} will expire in {days_remaining} days on {expires_at.strftime('%B %d, %Y')}. Please renew to continue using the software."
+        text_body=f"Your license for {project_name} will expire in {days_remaining} days on {expires_at.strftime('%B %d, %Y')}. Please renew to continue using the software.",
     )
 
 
@@ -354,12 +359,12 @@ def create_license_expired_email(
     client_email: str,
     license_key: str,
     project_name: str,
-    expired_at: datetime
+    expired_at: datetime,
 ) -> EmailMessage:
     """Create email for license expiration."""
     content = f"""
     <div class="content">
-        <p>Hello {client_name or 'Customer'},</p>
+        <p>Hello {client_name or "Customer"},</p>
         
         <div class="alert alert-danger">
             <strong>❌ License Expired</strong><br>
@@ -379,7 +384,7 @@ def create_license_expired_email(
             </div>
             <div class="details-row">
                 <span class="details-label">Expired On</span>
-                <span class="details-value">{expired_at.strftime('%B %d, %Y at %H:%M UTC')}</span>
+                <span class="details-value">{expired_at.strftime("%B %d, %Y at %H:%M UTC")}</span>
             </div>
         </div>
         
@@ -388,12 +393,12 @@ def create_license_expired_email(
         <p>Best regards,<br>The CodeVault Team</p>
     </div>
     """
-    
+
     return EmailMessage(
         to=client_email,
         subject=f"❌ License Expired - {project_name}",
         html_body=_get_base_template(content, "License Expired"),
-        text_body=f"Your license for {project_name} expired on {expired_at.strftime('%B %d, %Y')}. Please renew to restore access."
+        text_body=f"Your license for {project_name} expired on {expired_at.strftime('%B %d, %Y')}. Please renew to restore access.",
     )
 
 
@@ -402,14 +407,14 @@ def create_license_revoked_email(
     client_email: str,
     license_key: str,
     project_name: str,
-    reason: str = ""
+    reason: str = "",
 ) -> EmailMessage:
     """Create email for license revocation."""
     reason_text = f"<p><strong>Reason:</strong> {reason}</p>" if reason else ""
-    
+
     content = f"""
     <div class="content">
-        <p>Hello {client_name or 'Customer'},</p>
+        <p>Hello {client_name or "Customer"},</p>
         
         <div class="alert alert-danger">
             <strong>🚫 License Revoked</strong><br>
@@ -429,7 +434,7 @@ def create_license_revoked_email(
             </div>
             <div class="details-row">
                 <span class="details-label">Revoked On</span>
-                <span class="details-value">{datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}</span>
+                <span class="details-value">{datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")}</span>
             </div>
         </div>
         
@@ -438,12 +443,12 @@ def create_license_revoked_email(
         <p>Best regards,<br>The CodeVault Team</p>
     </div>
     """
-    
+
     return EmailMessage(
         to=client_email,
         subject=f"🚫 License Revoked - {project_name}",
         html_body=_get_base_template(content, "License Revoked"),
-        text_body=f"Your license for {project_name} has been revoked. Please contact support if you believe this is an error."
+        text_body=f"Your license for {project_name} has been revoked. Please contact support if you believe this is an error.",
     )
 
 
@@ -454,15 +459,17 @@ def create_new_license_email(
     project_name: str,
     expires_at: Optional[datetime],
     max_machines: int,
-    features: List[str]
+    features: List[str],
 ) -> EmailMessage:
     """Create email for new license issuance."""
-    expiry_text = expires_at.strftime('%B %d, %Y') if expires_at else "Never (Perpetual)"
+    expiry_text = (
+        expires_at.strftime("%B %d, %Y") if expires_at else "Never (Perpetual)"
+    )
     features_text = ", ".join(features) if features else "Standard"
-    
+
     content = f"""
     <div class="content">
-        <p>Hello {client_name or 'Customer'},</p>
+        <p>Hello {client_name or "Customer"},</p>
         
         <div class="alert alert-success">
             <strong>✅ License Activated</strong><br>
@@ -501,18 +508,19 @@ def create_new_license_email(
         <p>Best regards,<br>The CodeVault Team</p>
     </div>
     """
-    
+
     return EmailMessage(
         to=client_email,
         subject=f"✅ Your License for {project_name}",
         html_body=_get_base_template(content, "License Issued"),
-        text_body=f"Your license for {project_name} has been issued. License Key: {license_key}. Expires: {expiry_text}"
+        text_body=f"Your license for {project_name} has been issued. License Key: {license_key}. Expires: {expiry_text}",
     )
 
 
 # =============================================================================
 # Notification Functions (to be called from main.py)
 # =============================================================================
+
 
 async def notify_license_created(
     client_name: str,
@@ -521,15 +529,20 @@ async def notify_license_created(
     project_name: str,
     expires_at: Optional[datetime],
     max_machines: int,
-    features: List[str]
+    features: List[str],
 ) -> bool:
     """Send notification when a new license is created."""
     if not client_email:
         return False
-    
+
     message = create_new_license_email(
-        client_name, client_email, license_key, project_name,
-        expires_at, max_machines, features
+        client_name,
+        client_email,
+        license_key,
+        project_name,
+        expires_at,
+        max_machines,
+        features,
     )
     return await email_service.send_async(message)
 
@@ -539,12 +552,12 @@ async def notify_license_revoked(
     client_email: str,
     license_key: str,
     project_name: str,
-    reason: str = ""
+    reason: str = "",
 ) -> bool:
     """Send notification when a license is revoked."""
     if not client_email:
         return False
-    
+
     message = create_license_revoked_email(
         client_name, client_email, license_key, project_name, reason
     )
@@ -557,15 +570,14 @@ async def notify_license_expiring(
     license_key: str,
     project_name: str,
     expires_at: datetime,
-    days_remaining: int
+    days_remaining: int,
 ) -> bool:
     """Send notification when a license is about to expire."""
     if not client_email:
         return False
-    
+
     message = create_license_expiry_warning_email(
-        client_name, client_email, license_key, project_name,
-        expires_at, days_remaining
+        client_name, client_email, license_key, project_name, expires_at, days_remaining
     )
     return await email_service.send_async(message)
 
@@ -575,12 +587,12 @@ async def notify_license_expired(
     client_email: str,
     license_key: str,
     project_name: str,
-    expired_at: datetime
+    expired_at: datetime,
 ) -> bool:
     """Send notification when a license has expired."""
     if not client_email:
         return False
-    
+
     message = create_license_expired_email(
         client_name, client_email, license_key, project_name, expired_at
     )
@@ -588,7 +600,7 @@ async def notify_license_expired(
 
 
 # Testing
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Test email templates
     msg = create_license_expiry_warning_email(
         "John Doe",
@@ -596,7 +608,7 @@ if __name__ == '__main__':
         "LIC-XXXX-XXXX-XXXX",
         "My App",
         datetime.now(),
-        7
+        7,
     )
     print("Subject:", msg.subject)
     print("To:", msg.to)

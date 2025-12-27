@@ -1,32 +1,55 @@
-# License Wrapper CLI Compiler
+# CodeVault CLI
 
-A command-line tool for compiling Python applications with license protection locally on your machine.
+A command-line tool for compiling Python and Node.js applications with license protection locally on your machine.
+
+## 📦 Installation
+
+### From PyPI (Recommended)
+
+```bash
+pip install codevault-cli
+```
+
+### From Source
+
+```bash
+cd cli/
+pip install -e .
+```
+
+---
 
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
 
-Make sure you have Python 3.8+ and Nuitka installed:
+Make sure you have Python 3.8+ installed. For compilation you'll also need:
 
+**Python projects:**
 ```bash
-pip install nuitka requests
+pip install nuitka
+```
+
+**Node.js projects:**
+```bash
+npm install -g pkg
 ```
 
 ### 2. Check Status
 
 ```bash
-python lw_compiler.py status
+codevault-cli status
 ```
 
-This will show if you're logged in, if Nuitka is installed, and other environment info.
+This will show if you're logged in, if Nuitka/pkg is installed, and other environment info.
 
 ### 3. Login
 
 ```bash
-python lw_compiler.py login
+codevault-cli login
 ```
 
-Enter your License Wrapper account credentials when prompted.
+Enter your CodeVault account credentials when prompted.
 
 ### 4. Build a Project
 
