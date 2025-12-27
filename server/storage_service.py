@@ -17,6 +17,7 @@ from botocore.exceptions import ClientError
 
 # Import path security utilities
 import re
+from utils import sanitize_filename
 
 PROJECT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 
@@ -147,7 +148,8 @@ class StorageService:
         self, project_id: str, filename: str, prefix: str = "uploads"
     ) -> str:
         """Generate a unique storage key for a file."""
-        ext = Path(filename).suffix
+        safe_filename = sanitize_filename(filename)
+        ext = Path(safe_filename).suffix
         unique_id = secrets.token_hex(8)
         return f"{prefix}/{project_id}/{unique_id}{ext}"
 
@@ -216,7 +218,8 @@ class StorageService:
         project_dir = get_safe_project_dir(project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
 
-        ext = Path(filename).suffix
+        safe_filename = sanitize_filename(filename)
+        ext = Path(safe_filename).suffix
         unique_filename = f"{secrets.token_hex(8)}{ext}"
         file_path = project_dir / unique_filename
 

@@ -11,13 +11,14 @@ const ProjectCard = ({
     onDropdownToggle,
     onDelete
 }) => {
+    // Get build state for this project
+    // Fix: Hook must be called unconditionally before any early returns
+    const { status: buildStatus } = useProjectBuild(project?.id);
+
     // Safety: Don't render if project is missing
     if (!project || !project.id) {
         return null;
     }
-
-    // Get build state for this project
-    const { status: buildStatus } = useProjectBuild(project.id);
 
     // Determine build status display
     const getBuildStatusDisplay = () => {

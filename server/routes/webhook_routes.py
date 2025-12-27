@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 import httpx
 
-from utils import get_current_user, utc_now
+from utils import get_current_user, utc_now, sanitize_log_message
 from database import get_db, release_db
 from models import WebhookCreateRequest
 from middleware.tier_enforcement import requires_feature
@@ -151,10 +151,14 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
                 """,
                     webhook_id,
                 )
-                print(f"[Webhook] Failed to deliver {event} to {url}: {e}")
+                safe_url = sanitize_log_message(url)
+                safe_error = sanitize_log_message(str(e))
+                print(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
 
     except Exception as e:
-        print(f"[Webhook] Error triggering webhooks for {event}: {e}")
+        safe_event = sanitize_log_message(event)
+        safe_error = sanitize_log_message(str(e))
+        print(f"[Webhook] Error triggering webhooks for {safe_event}: {safe_error}")
     finally:
         await release_db(conn)
 

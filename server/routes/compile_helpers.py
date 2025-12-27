@@ -262,8 +262,9 @@ async def compile_multi_folder_project(
 
     job_cache[job_id]["logs"].append("🔨 Building with Nuitka...")
     # Security: Sanitize output_name to prevent command injection
+    from utils import sanitize_filename
     raw_output_name = data.output_name or "app"
-    output_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_output_name) or "app"
+    output_name = sanitize_filename(raw_output_name)
     entry_file = safe_join(project_dir, entry_point)
 
     nuitka_cmd = [
@@ -379,8 +380,9 @@ async def compile_single_file_project(
 
     job_cache[job_id]["logs"].append("🔨 Building with Nuitka...")
     # Security: Sanitize output_name to prevent command injection
+    from utils import sanitize_filename
     raw_output_name = data.output_name or source_file.stem
-    output_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_output_name) or "app"
+    output_name = sanitize_filename(raw_output_name)
 
     nuitka_cmd = [
         sys.executable,

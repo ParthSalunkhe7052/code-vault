@@ -27,7 +27,6 @@ const Projects = () => {
     const [uploadProgress, setUploadProgress] = useState(false);
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [compileStatus, setCompileStatus] = useState(null);
-    const [isCompiling, setIsCompiling] = useState(false);
     const [projectLicenses, setProjectLicenses] = useState([]);
     const [confirmDialog, setConfirmDialog] = useState({
         isOpen: false,
@@ -76,7 +75,7 @@ const Projects = () => {
                     const status = await compileApi.getStatus(compileStatus.id);
                     setCompileStatus(status);
                     if (status.status === 'completed' || status.status === 'failed') {
-                        setIsCompiling(false);
+                        // Compilation finished
                     }
                 } catch (error) {
                     console.error('Failed to fetch compile status:', error);
@@ -235,28 +234,7 @@ const Projects = () => {
         });
     };
 
-    const handleStartCompile = async () => {
-        // Check if either files or file_tree exists
-        if (!configData.files.length && !configData.file_tree) {
-            toast.warning('Please upload files or a ZIP before compiling.');
-            return;
-        }
 
-        setIsCompiling(true);
-        try {
-            const job = await compileApi.start(selectedProject.id, {
-                entry_file: configData.entry_file,
-                output_name: configData.output_name || selectedProject.name,
-                options: configData.nuitka_options
-            });
-            setCompileStatus(job);
-            toast.info('Compilation started...');
-        } catch (error) {
-            console.error('Failed to start compilation:', error);
-            toast.error('Failed to start compilation');
-            setIsCompiling(false);
-        }
-    };
 
     const handleDeleteProject = async (projectId) => {
         setConfirmDialog({

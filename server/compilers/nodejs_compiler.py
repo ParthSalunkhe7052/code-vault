@@ -229,14 +229,16 @@ class NodeJSCompiler:
 
         try:
             # STEP 1: Validate entry file and tools before copying
-            # Security: Validate entry_file doesn't escape source_dir
-            entry_path = (source_dir / entry_file).resolve()
-            source_resolved = source_dir.resolve()
-            if (
-                not str(entry_path).startswith(str(source_resolved) + os.sep)
-                and entry_path != source_resolved
-            ):
-                raise Exception("Entry file path is invalid - path traversal detected")
+            # Security: Validate entry_file doesn't escape source_dir using centralized validator
+            # Note: We do a runtime import to avoid potential circular imports if utils imports this file
+            try:
+                from utils import validate_safe_path
+            except ImportError:
+                # Fallback if running from a different context
+                from server.utils import validate_safe_path
+
+            entry_path = validate_safe_path(source_dir, entry_file)
+            
             if not entry_path.exists():
                 raise Exception("Entry file not found")
 
