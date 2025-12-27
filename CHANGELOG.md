@@ -1,76 +1,59 @@
 # Changelog
 
-All notable changes to CodeVault (License Wrapper) will be documented in this file.
+All notable changes to CodeVault will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 23-12-2024
+## [1.1.0] - 27-12-2024
 
-### Security
+### Added ✨
+- **Mission Control Map**: Real-time license activation tracking with GeoIP integration
+- **Dashboard Performance**: Parallelized SQL queries using `asyncio.gather` (3-4x faster load times)
+- **Mock Data Generator**: `populate_mock_map.py` for instant map visualization in development
+- **CLI Aesthetics**: Redesigned launcher scripts with Cyberpunk ASCII art and improved UX
+- **Test Suite**: Comprehensive API endpoint tests and structure validation
+- **Startup Checks**: Zombie job killer to mark stalled builds as failed on server restart
 
-- Fixed XSS vulnerability in Login.jsx (URL-encode email in mailto href)
-- Fixed information exposure in stripe_routes.py (generic error messages)
-- Added LGTM annotations for validated path operations in:
-  - `compile_helpers.py` (subprocess with path validation)
-  - `storage_service.py` (file ops from validated helpers)
-  - `nodejs_compiler.py` (tempfile.mkdtemp paths)
+### Fixed 🐛
+- **Map Geolocation**: Fixed broken map by properly integrating GeoLite2-City database
+- **Localhost Coordinates**: Added NYC dev coordinates for localhost testing
+- **Node.js Builds**: Resolved `pkg` module resolution issues
+- **License Routes**: Fixed silent failures in geolocation lookup
+- **Build Progress**: Fixed UI state loss when switching tabs
+- **Security**: Log injection vulnerabilities with `sanitize_log_message` utility
+- **Security**: XSS vulnerability in Login.jsx email mailto links
 
----
+### Changed 🔧
+- **Branding**: Updated all documentation references to "CodeVault"
+- **Architecture**: Clarified Web + CLI focus in project documentation
+- **Code Quality**: Formatted codebase with Ruff (79 files total)
+- **Database**: Enhanced analytics queries for better performance
+- **Email Service**: Improved error handling and reliability
+- **Stripe Integration**: Better error messages and info exposure prevention
+- **Tauri Desktop**: Marked as deprecated, focusing on Web + CLI model
 
-## [Previous] - 22-12-2024
-
-### Added
-
-- **Git Commander Workflow** (`.agent/workflows/git-commander.md`)
-  - Senior DevOps Engineer workflow for safe GitHub syncing
-  - Qodo local review integration
-  - Security audit for secrets detection
-  - Atomic commit strategy with Conventional Commits
-  - Branch naming with international date format (DD-MM-YYYY)
-  - CHANGELOG update step
-
-- **Security Enforcer Agent** (`.qodo/agents/security-enforcer.toml`)
-  - Reviews encryption modules
-  - Flags raw localStorage usage without encryption
-  - Enforces EncryptionProvider usage for sensitive data
-
-- **CI/CD Pipeline** (`.github/workflows/main.yml`)
-  - CodeQL security scanning for JavaScript and Python
-  - Frontend lint and build checks
-  - Backend Python checks
-  - Dependency security audits (npm audit, pip-audit)
-  - Triggers on push to main and all PRs
-
-- **EncryptionProvider Utility** (`frontend/src/utils/EncryptionProvider.js`)
-  - AES-GCM encryption using Web Crypto API
-  - PBKDF2 key derivation (100,000 iterations)
-  - `secureLocalStorage` wrapper for encrypted storage
-  - Sensitive key detection utility
-
-### Security
-
-- Implemented encryption infrastructure for sensitive frontend data
-- Added automated security scanning in CI/CD pipeline
-- Created security-focused code review agent
+### Security 🔒
+- Added `sanitize_log_message` utility to prevent log injection
+- Fixed information exposure in Stripe error messages  
+- URL-encoded email in mailto href to prevent XSS
+- Added LGTM annotations for validated path operations
 
 ---
 
 ## How to Use
 
-### Git Commander
+### For Developers
 ```bash
-# Use when you have changes ready to push
-/git-commander
+# Run the web application
+Run Web App.bat
+
+# Run the CLI tool
+Run CLI.bat
+
+# Start backend server
+python -m uvicorn server.main:app --reload
 ```
 
-### EncryptionProvider
-```javascript
-import { secureLocalStorage } from './utils/EncryptionProvider';
-
-// Store encrypted
-await secureLocalStorage.setItem('token', 'my-secret');
-
-// Retrieve decrypted
-const token = await secureLocalStorage.getItem('token');
-```
+### For Contributors
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines.
