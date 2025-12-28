@@ -1,0 +1,61 @@
+# Security Enforcer Agent
+# This agent reviews encryption modules and flags unencrypted localStorage usage.
+
+[agent]
+name = "security-enforcer"
+description = "Reviews encryption modules and ensures sensitive data is properly encrypted"
+trigger = "on_review"
+
+[rules]
+# Primary Security Rules
+
+[[rules.encryption]]
+description = "Ensure all sensitive data passes through EncryptionProvider"
+severity = "high"
+pattern = """
+Flag any direct use of:
+- localStorage.setItem() with sensitive keys (token, user, password, api_key)
+- localStorage.getItem() with sensitive keys
+Without first encrypting via EncryptionProvider
+"""
+
+[[rules.localstorage]]
+description = "Flag raw localStorage usage that isn't encrypted"
+severity = "medium"
+pattern = """
+Look for localStorage usage in:
+- api.js (auth tokens)
+- SettingsContext.jsx (user settings)
+- BuildPresetsManager.jsx (build configs)
+- DirectBuildSection.jsx (auth tokens)
+
+Flag as: "Consider using secureLocalStorage from EncryptionProvider instead of raw localStorage"
+"""
+
+[[rules.secrets]]
+description = "Never commit secrets or environment variables"
+severity = "critical"
+pattern = """
+Block commits containing:
+- .env files with actual values
+- Hardcoded API keys
+- Private encryption keys
+- Database connection strings with passwords
+"""
+
+[behavior]
+# What the agent should do when reviewing
+
+on_high_severity = "block_and_report"
+on_medium_severity = "warn_and_continue"
+on_low_severity = "log_only"
+
+[focus_files]
+# Files this agent should pay special attention to
+paths = [
+    "frontend/src/services/api.js",
+    "frontend/src/contexts/*.jsx",
+    "frontend/src/utils/EncryptionProvider.js",
+    "server/config.py",
+    ".env*"
+]

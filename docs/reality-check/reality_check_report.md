@@ -87,6 +87,7 @@ Position is stronger than expected. No direct competitor offers this **exact** c
 8. **HWID Reset**: Allows customers to change hardware (critical for real-world use)
 9. **Build Presets**: Demo mode, excluded packages, Nuitka options
 10. **API-First Design**: 96+ endpoints, full REST API
+11. **CLI Obfuscation**: Native JavaScript protection via `javascript-obfuscator` integration
 
 ### 🗑️ Useless/Bloat Features to Remove
 - **Generic "Active Machines" widget**: If it's not showing real data, remove it or fix it

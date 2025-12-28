@@ -6,6 +6,10 @@
 .env
 .env.*
 *.env
+data/
+*Keys.txt
+*keys.txt
+*secrets*
 
 # ----- Python -----
 __pycache__/
@@ -17,7 +21,6 @@ venv/
 .venv/
 ENV/
 *.egg-info/
-dist/
 build/
 
 # ----- Node.js -----
@@ -27,6 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .npm
 
+# ----- Tauri/Rust -----
+target/
+Cargo.lock
+*.pdb
+
 # ----- Build Outputs -----
 dist/
 *.exe
@@ -34,7 +42,6 @@ dist/
 *.so
 *.dylib
 output/
-src-tauri/target/
 
 # ----- IDE & Editors -----
 .vscode/
@@ -47,6 +54,7 @@ src-tauri/target/
 # ----- Uploads & User Data -----
 server/uploads/
 uploads/
+test_projects/
 
 # ----- Database -----
 *.db
@@ -68,3 +76,6 @@ htmlcov/
 *.tmp
 *.temp
 Thumbs.db
+
+# ----- Backup folders (temporary) -----
+_backup*/
