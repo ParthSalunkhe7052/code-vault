@@ -312,18 +312,253 @@ The CLI reads from `config.json` inside project folders, but can be overridden b
 
 Base URL: `http://localhost:8000/api/v1`
 
+### Authentication
+
+All management endpoints (except `/license/validate`) require JWT authentication.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+The JWT token is obtained during login and stored in `~/.lw_cli_config.json`.
+
+---
+
 ### Validation Endpoint (Public)
+
 **POST** `/license/validate`
+
+Validates a license key and returns activation status.
+
+**Request Body:**
 ```json
 {
-  "license_key": "LIC-...",
-  "hwid": "...",
-  "nonce": "...",
-  "timestamp": 123456789
+  "license_key": "LIC-XXXX-XXXX-XXXX-XXXX",
+  "hwid": "hardware-identifier-string",
+  "nonce": "random-nonce-string",
+  "timestamp": 1234567890
 }
 ```
 
+**Request Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `license_key` | string | Yes | The license key to validate |
+| `hwid` | string | Yes | Hardware identifier for machine binding |
+| `nonce` | string | Yes | Random string for replay protection |
+| `timestamp` | integer | Yes | Unix timestamp for request validation |
+
+**Response (200 OK):**
+```json
+{
+  "valid": true,
+  "license_key": "LIC-XXXX-XXXX-XXXX-XXXX",
+  "status": "active",
+  "expires_at": "2025-12-31T23:59:59Z",
+  "offline_lease": {
+    "allowed": true,
+    "duration_hours": 168,
+    "lease_token": "base64-encoded-hmac-token"
+  }
+}
+```
+
+**Response (400 Bad Request):**
+```json
+{
+  "detail": "Invalid license key format"
+}
+```
+
+**Response (401 Unauthorized):**
+```json
+{
+  "detail": "License key not found or inactive"
+}
+```
+
+**Response (403 Forbidden):**
+```json
+{
+  "detail": "Hardware ID mismatch"
+}
+```
+
+**Error Codes:**
+- `400` - Invalid request format or missing required fields
+- `401` - License key invalid, expired, or not found
+- `403` - Hardware binding mismatch or license suspended
+- `429` - Too many validation requests (rate limited)
+- `500` - Internal server error
+
+---
+
 ### Management Endpoints (Auth Required)
-- **GET** `/projects`: List projects
-- **POST** `/licenses`: Create license
-- **DELETE** `/licenses/{id}`: Revoke license
+
+#### List Projects
+
+**GET** `/projects`
+
+Returns all projects for the authenticated user.
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "projects": [
+    {
+      "id": "abc-123-def-456",
+      "name": "My Application",
+      "type": "multi-folder",
+      "created_at": "2024-01-15T10:30:00Z",
+      "license_count": 5,
+      "build_count": 12
+    }
+  ]
+}
+```
+
+**Error Codes:**
+- `401` - Invalid or expired authentication token
+- `500` - Internal server error
+
+---
+
+#### List Licenses
+
+**GET** `/licenses?project_id=<project_id>`
+
+Returns all licenses for a specific project.
+
+**Query Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project_id` | string | Yes | The project ID to fetch licenses for |
+
+**Response (200 OK):**
+```json
+{
+  "licenses": [
+    {
+      "id": "lic-uuid-1",
+      "license_key": "LIC-XXXX-XXXX-XXXX-XXXX",
+      "status": "active",
+      "client_name": "John Doe",
+      "expires_at": "2025-12-31T23:59:59Z",
+      "hwid": "bound-hardware-id",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+**Error Codes:**
+- `400` - Missing or invalid project_id parameter
+- `401` - Invalid or expired authentication token
+- `404` - Project not found
+- `500` - Internal server error
+
+---
+
+#### Create License
+
+**POST** `/licenses`
+
+Creates a new license for a project.
+
+**Request Body:**
+```json
+{
+  "project_id": "abc-123-def-456",
+  "client_name": "John Doe",
+  "expires_at": "2025-12-31T23:59:59Z",
+  "max_activations": 1,
+  "offline_lease_hours": 168
+}
+```
+
+**Request Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project_id` | string | Yes | The project to create license for |
+| `client_name` | string | No | Name of the license holder |
+| `expires_at` | string | No | ISO 8601 expiration timestamp |
+| `max_activations` | integer | No | Maximum hardware bindings (default: 1) |
+| `offline_lease_hours` | integer | No | Offline lease duration in hours (default: 168) |
+
+**Response (201 Created):**
+```json
+{
+  "id": "lic-uuid-1",
+  "license_key": "LIC-XXXX-XXXX-XXXX-XXXX",
+  "project_id": "abc-123-def-456",
+  "status": "active",
+  "client_name": "John Doe",
+  "expires_at": "2025-12-31T23:59:59Z",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Error Codes:**
+- `400` - Invalid request parameters
+- `401` - Invalid or expired authentication token
+- `404` - Project not found
+- `500` - Internal server error
+
+---
+
+#### Revoke License
+
+**DELETE** `/licenses/{license_id}`
+
+Revokes (deactivates) a license.
+
+**Path Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `license_id` | string | Yes | The license ID to revoke |
+
+**Response (200 OK):**
+```json
+{
+  "message": "License revoked successfully",
+  "license_id": "lic-uuid-1",
+  "status": "inactive"
+}
+```
+
+**Error Codes:**
+- `401` - Invalid or expired authentication token
+- `404` - License not found
+- `500` - Internal server error
+
+---
+
+### Common Error Response Format
+
+All endpoints return errors in this format:
+
+```json
+{
+  "detail": "Human-readable error message",
+  "error_code": "ERROR_CODE_CONSTANT",
+  "timestamp": 1234567890
+}
+```
+
+### Rate Limiting
+
+- License validation endpoint: 60 requests per minute per IP
+- Management endpoints: 300 requests per minute per user
+
+**Rate Limit Headers:**
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 45
+X-RateLimit-Reset: 1234567890
+```
