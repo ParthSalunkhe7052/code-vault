@@ -120,7 +120,7 @@ lw-compiler login
 - `LW_API_URL` - Override the default API server URL
 
 **Notes:**
-- Credentials are stored in `~/.lw_cli_config.json`
+- Credentials and configuration are stored in `~/.lw_cli_config.json`
 - The API URL defaults to `http://localhost:8000/api/v1`
 
 ---
@@ -214,7 +214,7 @@ lw-compiler build /path/to/app.js
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-l, --license <key>` | License key to embed in the executable | Prompts at runtime |
+| `-l, --license <key>` | License key to embed in the executable | Generic mode (executable prompts user) |
 | `--generic` | Build in generic mode (prompts user for license at runtime) | false |
 | `--open` | Build without any license protection | false |
 | `--language <lang>` | Force language selection: `python` or `nodejs` | Auto-detect |
@@ -284,9 +284,10 @@ lw-compiler build ./app.py --demo --demo-duration 30
 6. Copies output to Desktop or specified path
 
 **Output:**
-- Default: `~/Desktop/<project_name>.exe` (or `~/OneDrive/Desktop/` if OneDrive is active)
+- Default: `~/Desktop/<project_name>.exe` (Windows) or `~/OneDrive/Desktop/` if OneDrive is active
 - Custom: Path specified with `--output` flag
 - File size and license mode are displayed after successful build
+- Note: The CLI currently targets Windows executables (.exe)
 
 ---
 
