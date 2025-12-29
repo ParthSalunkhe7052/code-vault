@@ -1,5 +1,5 @@
 ---
-description: The history keeper. Manages version control, sqaushing, and releases.
+description: The history keeper. Manages version control, squashing, and releases.
 ---
 # 🎖️ The Git-Commander Workflow
 

@@ -1,2 +1,2 @@
-﻿// Test if the wrapper shows error messages properly
+﻿// EXPECTED FAILURE: This intentionally requires a non-existent module to test wrapper error display functionality
 require('nonexistent_module');

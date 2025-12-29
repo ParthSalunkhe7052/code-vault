@@ -1,9 +1,12 @@
+const crypto = require('crypto');
+
 function add(a, b) {
     return a + b;
 }
 
 function generateId() {
-    return Math.random().toString(36).substring(7);
+    // Use cryptographically secure random UUID generation
+    return crypto.randomUUID();
 }
 
 module.exports = {

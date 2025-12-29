@@ -9,8 +9,8 @@ const utils = require('./utils');
 // Configuration
 // ========================================
 const APP_VERSION = '2.0.0';
-const SECRET_API_KEY = 'sk_live_VERY_SECRET_KEY_12345';
-const DATABASE_URL = 'mongodb://admin:password123@localhost:27017/mydb';
+const SECRET_API_KEY = process.env.SECRET_API_KEY || 'YOUR_API_KEY_HERE';
+const DATABASE_URL = process.env.DATABASE_URL || 'YOUR_DATABASE_URL_HERE';
 
 // ========================================
 // Test Functions
