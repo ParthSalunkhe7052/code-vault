@@ -102,24 +102,209 @@ The `lw-compiler` is the heart of the build process. It supports:
 - **Obfuscation**: Automatically protects Node.js code.
 - **Build Reporting**: Syncs build history to your Web Dashboard.
 
-### Commands
+### Commands Reference
 
+#### `lw-compiler login`
+Log in to your CodeVault account and save credentials locally.
+
+**Usage:**
 ```bash
-# Login to your account
 lw-compiler login
+```
 
-# List your projects
+**Interactive prompts:**
+- Email address
+- Password
+
+**Environment variables:**
+- `LW_API_URL` - Override the default API server URL
+
+**Notes:**
+- Credentials and configuration are stored in `~/.lw_cli_config.json`
+- The API URL defaults to `http://localhost:8000/api/v1`
+
+---
+
+#### `lw-compiler logout`
+Log out and clear saved credentials.
+
+**Usage:**
+```bash
+lw-compiler logout
+```
+
+---
+
+#### `lw-compiler status`
+Display current login status, API configuration, and check dependencies.
+
+**Usage:**
+```bash
+lw-compiler status
+```
+
+**Shows:**
+- Login status and user email
+- API server URL
+- Nuitka version and availability
+- Node.js version and availability
+- Python version
+
+---
+
+#### `lw-compiler projects`
+List all projects in your account.
+
+**Usage:**
+```bash
 lw-compiler projects
+```
 
-# Build a project interactively
+**Output includes:**
+- Project name
+- Project ID
+- Project type (single file or multi-folder)
+
+---
+
+#### `lw-compiler licenses <project_id>`
+List all licenses for a specific project.
+
+**Usage:**
+```bash
+lw-compiler licenses <project_id>
+```
+
+**Arguments:**
+- `project_id` (required) - The unique identifier of the project
+
+**Output includes:**
+- License key
+- Status (active/inactive)
+- Client name (if set)
+- Expiration date (if set)
+
+---
+
+#### `lw-compiler build [project_id] [options]`
+Build a project into a license-protected executable. Supports both server-based and local file builds.
+
+**Usage:**
+```bash
+# Interactive mode (prompts for project selection)
 lw-compiler build
 
-# Build specific project with clear flags
-lw-compiler build <project_id> --license <key> --output my_app.exe
+# Build specific project from server
+lw-compiler build <project_id>
+
+# Build with specific license key
+lw-compiler build <project_id> --license <license_key>
+
+# Build local file without server
+lw-compiler build /path/to/script.py
+lw-compiler build /path/to/app.js
 ```
+
+**Arguments:**
+- `project_id` (optional) - Project ID from server OR path to local file (.py or .js)
+  - If omitted, enters interactive mode
+  - If a file path, performs local build without server communication
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-l, --license <key>` | License key to embed in the executable | Generic mode (executable prompts user) |
+| `--generic` | Build in generic mode (prompts user for license at runtime) | false |
+| `--open` | Build without any license protection | false |
+| `--language <lang>` | Force language selection: `python` or `nodejs` | Auto-detect |
+| `--output <path>` | Custom output path for the executable | Desktop/output folder |
+| `--api-url <url>` | Override API URL (local build only) | From config |
+| `--demo` | Build in demo mode (local build only) | false |
+| `--demo-duration <mins>` | Demo duration in minutes (local build only) | 60 |
+
+**Build Modes:**
+
+1. **Fixed License Mode** (default with `--license`)
+   ```bash
+   lw-compiler build <project_id> --license ABC-123-XYZ
+   ```
+   The license key is embedded in the executable.
+
+2. **Generic Mode** (with `--generic` or no `--license`)
+   ```bash
+   lw-compiler build <project_id> --generic
+   ```
+   The executable prompts the user for a license key at runtime.
+
+3. **Open Build Mode** (with `--open`)
+   ```bash
+   lw-compiler build <project_id> --open
+   ```
+   No license protection is added.
+
+4. **Local Build Mode** (file path instead of project_id)
+   ```bash
+   lw-compiler build /path/to/script.py --license ABC-123
+   lw-compiler build /path/to/app.js --output ./dist/app.exe
+   ```
+   Builds a local file without fetching from the server.
+
+**Examples:**
+
+```bash
+# Interactive build (prompts for project and license)
+lw-compiler build
+
+# Build with embedded license key
+lw-compiler build abc-123-def-456 --license MY-LICENSE-KEY-123
+
+# Build with runtime license prompt (generic mode)
+lw-compiler build abc-123-def-456 --generic
+
+# Build without license protection
+lw-compiler build abc-123-def-456 --open
+
+# Build local Python script with custom output
+lw-compiler build ./my_script.py --license MY-KEY --output ./dist/app.exe
+
+# Force Node.js build for .js file
+lw-compiler build abc-123-def-456 --language nodejs
+
+# Build local file in demo mode
+lw-compiler build ./app.py --demo --demo-duration 30
+```
+
+**Build Process:**
+1. Fetches project configuration from server (or uses local file)
+2. Downloads project bundle (for server builds)
+3. Extracts source files
+4. Injects license protection wrapper
+5. Compiles with Nuitka (Python) or pkg (Node.js)
+6. Copies output to Desktop or specified path
+
+**Output:**
+- Default: `~/Desktop/<project_name>.exe` (Windows) or `~/OneDrive/Desktop/` if OneDrive is active
+- Custom: Path specified with `--output` flag
+- File size and license mode are displayed after successful build
+- Note: The CLI currently targets Windows executables (.exe)
+
+---
 
 ### Configuration
 The CLI reads from `config.json` inside project folders, but can be overridden by flags.
+
+**Config file location:** `~/.lw_cli_config.json`
+
+**Config file format:**
+```json
+{
+  "api_key": "your-jwt-token",
+  "api_url": "http://localhost:8000/api/v1",
+  "email": "your@email.com",
+  "user_name": "Your Name"
+}
+```
 
 ---
 
