@@ -1,0 +1,345 @@
+<!--
+License Activation Dialog for Node.js Applications
+Opens in browser for a clean, modern license activation experience
+
+Placeholders replaced at compile time:
+- {{API_URL}} - License validation API endpoint
+- {{APP_NAME}} - Application name
+- {{PORT}} - Local server port
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{APP_NAME}} - License Activation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(22, 33, 62, 0.9);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 100px rgba(233, 69, 96, 0.1);
+            border: 1px solid rgba(233, 69, 96, 0.2);
+        }
+
+        .icon {
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #e94560;
+            font-size: 24px;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #aaaaaa;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .app-name {
+            color: #e94560;
+            font-weight: 500;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #888888;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: #0f0f23;
+            border: 2px solid #2a2a4e;
+            border-radius: 8px;
+            color: #ffffff;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #e94560;
+            box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.2);
+        }
+
+        input[type="text"]::placeholder {
+            color: #555555;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+
+        .status.error {
+            display: block;
+            background: rgba(233, 69, 96, 0.15);
+            border: 1px solid rgba(233, 69, 96, 0.3);
+            color: #e94560;
+        }
+
+        .status.success {
+            display: block;
+            background: rgba(0, 204, 102, 0.15);
+            border: 1px solid rgba(0, 204, 102, 0.3);
+            color: #00cc66;
+        }
+
+        .status.loading {
+            display: block;
+            background: rgba(74, 144, 217, 0.15);
+            border: 1px solid rgba(74, 144, 217, 0.3);
+            color: #4a90d9;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(74, 144, 217, 0.3);
+            border-top-color: #4a90d9;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .footer {
+            margin-top: 25px;
+            text-align: center;
+            color: #555555;
+            font-size: 12px;
+        }
+
+        .footer a {
+            color: #e94560;
+            text-decoration: none;
+        }
+
+        .success-icon {
+            font-size: 64px;
+            text-align: center;
+            animation: pulse 0.5s ease;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(0);
+            }
+
+            50% {
+                transform: scale(1.2);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        .success-message {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .success-message h2 {
+            color: #00cc66;
+            font-size: 22px;
+            margin-bottom: 10px;
+        }
+
+        .success-message p {
+            color: #aaaaaa;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container" id="activationForm">
+        <div class="icon">🔐</div>
+        <h1>License Activation</h1>
+        <p class="subtitle">Enter your license key to activate <span class="app-name">{{APP_NAME}}</span></p>
+
+        <form id="licenseForm">
+            <div class="input-group">
+                <label for="licenseKey">License Key</label>
+                <input type="text" id="licenseKey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" autofocus>
+            </div>
+
+            <button type="submit" id="submitBtn">
+                ✓ Activate License
+            </button>
+        </form>
+
+        <div class="status" id="status"></div>
+
+        <div class="footer">
+            Protected by <a href="#">CodeVault</a>
+        </div>
+    </div>
+
+    <div class="container" id="successView" style="display: none;">
+        <div class="success-icon">✅</div>
+        <div class="success-message">
+            <h2>License Activated!</h2>
+            <p>You can close this window. The application will start automatically.</p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '{{API_URL}}';
+        const PORT = {{ PORT }};
+
+        const form = document.getElementById('licenseForm');
+        const input = document.getElementById('licenseKey');
+        const submitBtn = document.getElementById('submitBtn');
+        const status = document.getElementById('status');
+        const activationForm = document.getElementById('activationForm');
+        const successView = document.getElementById('successView');
+
+        function setStatus(message, type) {
+            status.className = 'status ' + type;
+            if (type === 'loading') {
+                status.innerHTML = '<span class="spinner"></span>' + message;
+            } else {
+                status.textContent = message;
+            }
+        }
+
+        function showSuccess() {
+            activationForm.style.display = 'none';
+            successView.style.display = 'block';
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const licenseKey = input.value.trim();
+
+            if (!licenseKey) {
+                setStatus('⚠️ Please enter a license key', 'error');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Validating...';
+            setStatus('Connecting to license server...', 'loading');
+
+            try {
+                // Send to local validation endpoint
+                const response = await fetch(`http://localhost:${PORT}/validate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ license_key: licenseKey })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    setStatus('✅ ' + result.message, 'success');
+                    setTimeout(showSuccess, 500);
+
+                    // Notify the app that activation is complete
+                    setTimeout(() => {
+                        fetch(`http://localhost:${PORT}/activation-complete`, {
+                            method: 'POST'
+                        }).catch(() => { });
+                    }, 1500);
+                } else {
+                    setStatus('❌ ' + result.message, 'error');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '✓ Activate License';
+                }
+            } catch (error) {
+                setStatus('❌ Connection error. Please try again.', 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '✓ Activate License';
+            }
+        });
+
+        // Auto-format license key input (optional)
+        input.addEventListener('input', (e) => {
+            let value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+            e.target.value = value;
+        });
+    </script>
+</body>
+
+</html>

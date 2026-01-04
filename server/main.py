@@ -1,0 +1,125 @@
+"""
+License Server API - Production Version (PostgreSQL + R2)
+FastAPI-based license validation and management server.
+
+NOTE: This file has been refactored. Core functionality is now in:
+- config.py - Configuration settings
+- database.py - Database connection pool
+- models.py - Pydantic models
+- utils.py - Utility functions
+- routes/ - API route modules
+"""
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+import re
+
+# =============================================================================
+# Logging Filter to reduce /status endpoint spam
+# =============================================================================
+class BuildStatusEndpointFilter(logging.Filter):
+    """Filter out noisy /status polling requests from uvicorn access logs."""
+
+    _pattern = re.compile(r"GET /api/v1/build/installer/[a-f0-9]+/status")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        # Return False to DROP the log, True to KEEP it
+        if self._pattern.search(message):
+            return False
+        return True
+
+
+# Apply filter to uvicorn access logger
+logging.getLogger("uvicorn.access").addFilter(BuildStatusEndpointFilter())
+
+# Import from refactored modules
+from config import (
+    CORS_ORIGINS,
+    CORS_ALLOW_ALL,
+    ENVIRONMENT,
+)
+from startup_checks import run_startup_checks
+from database import lifespan
+
+# Import background tasks from routers
+from routes.build_routes import cleanup_compile_cache
+
+
+# =============================================================================
+# FastAPI App Initialization
+# =============================================================================
+
+
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    try:
+        run_startup_checks()
+    except Exception as e:
+        if ENVIRONMENT == "production":
+            raise e
+
+    async with lifespan(app):
+        import asyncio
+
+        asyncio.create_task(cleanup_compile_cache())
+        yield
+
+
+app = FastAPI(
+    title="CodeVault API",
+    description="API for CodeVault License Management SaaS",
+    version="1.0.0",
+    lifespan=app_lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if CORS_ALLOW_ALL else CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =============================================================================
+# Include Route Modules
+# =============================================================================
+
+from routes.stripe_routes import router as stripe_router
+from routes.auth_routes import router as auth_router
+from routes.webhook_routes import router as webhook_router
+from routes.license_routes import router as license_router
+from routes.admin_routes import router as admin_router
+from routes.analytics_routes import router as analytics_router
+from routes.project_routes import router as project_router
+from routes.build_routes import router as build_router
+from routes.system_routes import router as system_router
+
+app.include_router(stripe_router)
+app.include_router(auth_router)
+app.include_router(webhook_router)
+app.include_router(license_router)
+app.include_router(admin_router)
+app.include_router(analytics_router)
+app.include_router(project_router)
+app.include_router(build_router)
+app.include_router(system_router)
+
+if __name__ == '__main__':
+    import uvicorn
+    from email_service import email_service
+    from storage_service import storage_service
+
+    print(f'\n{'=' * 60}\n  License-Wrapper API Server ({ENVIRONMENT})\n{'=' * 60}')
+    print('  Database: PostgreSQL')
+    print(
+        f'  Storage: {'Cloudflare R2' if storage_service.is_cloud_enabled() else 'Local'}'
+    )
+    print(f'  Email: {'Enabled' if email_service.is_configured() else 'Disabled'}')
+    print(f'  API Docs: http://localhost:8000/docs\n{'=' * 60}\n')
+    uvicorn.run(app, host='0.0.0.0', port=8000)
+

@@ -1,0 +1,30 @@
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic[email]>=2.5.0
+python-multipart>=0.0.6
+bcrypt>=4.1.0
+PyJWT>=2.8.0
+httpx>=0.25.0  # Required for webhooks and geographic analytics
+
+# Database
+psycopg2-binary>=2.9.0    # PostgreSQL sync driver
+asyncpg>=0.29.0           # PostgreSQL async driver
+databases[postgresql]>=0.8.0  # Async database wrapper
+
+# Redis (Upstash)
+redis>=5.0.0
+
+# Cloud Storage (Cloudflare R2)
+boto3>=1.34.0
+
+# Email (Resend)
+resend>=0.7.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Payments (Stripe)
+stripe>=7.0.0
+
+# Geolocation (Mission Control Map)
+geoip2>=4.8.0
