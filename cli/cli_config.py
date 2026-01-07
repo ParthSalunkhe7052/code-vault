@@ -127,8 +127,10 @@ def _load_config_file() -> dict:
 
 def _save_config_file(config: dict) -> None:
     """Save non-sensitive configuration to file."""
-    # Remove api_key from config before saving (it goes to keyring)
-    safe_config = {k: v for k, v in config.items() if k != "api_key"}
+    # Remove all sensitive keys (api_key and obfuscated variant) before saving
+    # Tokens should only be stored via keyring or _save_config_file_with_token()
+    sensitive_keys = {"api_key", "_obf_api_key"}
+    safe_config = {k: v for k, v in config.items() if k not in sensitive_keys}
     CONFIG_FILE.write_text(json.dumps(safe_config, indent=2))
     _set_restrictive_permissions(CONFIG_FILE)
 
