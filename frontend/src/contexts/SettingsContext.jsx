@@ -69,12 +69,16 @@ export const SettingsProvider = ({ children }) => {
         if (loaded) {
             const html = document.documentElement;
 
-            // Remove existing theme classes
-            html.classList.remove('dark-matter');
+            // Clean up ALL potential theme classes
+            html.classList.remove('light', 'dark', 'dark-matter');
 
             // Add current theme class
             if (settings.theme === 'dark-matter') {
                 html.classList.add('dark-matter');
+            } else if (settings.theme === 'dark') {
+                html.classList.add('dark');
+            } else if (settings.theme === 'light') {
+                html.classList.add('light');
             }
 
             // Set data attribute for CSS selectors

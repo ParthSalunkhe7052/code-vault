@@ -65,8 +65,57 @@ def is_private_ip(ip_str: str) -> bool:
         return False
 
 
-def validate_webhook_url(url: str) -> tuple[bool, str]:
-    """Validate webhook URL for SSRF protection.
+async def validate_webhook_url(url: str) -> tuple[bool, str]:
+    """Validate webhook URL with immediate IP resolution.
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    from urllib.parse import urlparse
+
+    if not url:
+        return False, "URL cannot be empty"
+
+    # Must be http or https
+    if not url.startswith(("http://", "https://")):
+        return False, "Webhook URL must start with http:// or https://"
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+
+    if not hostname:
+        return False, "Invalid URL: no hostname"
+
+    # Check .local TLD
+    hostname_lower = hostname.lower()
+    if hostname_lower.endswith('.local'):
+        return False, "Webhook URL cannot target .local domains"
+
+    # Check known dangerous hostnames
+    if hostname_lower in BLOCKED_HOSTNAMES:
+        return False, f"Webhook URL cannot target {hostname_lower}"
+
+    # Try to resolve IMMEDIATELY (fail fast on unresolvable)
+    try:
+        resolved = socket.getaddrinfo(hostname, parsed.port or 443, socket.AF_UNSPEC)
+    except socket.gaierror as e:
+        return False, f"Cannot resolve hostname '{hostname}': {e}"
+
+    # Check each resolved IP
+    for family, _, _, _, sockaddr in resolved:
+        ip_str = sockaddr[0]
+        if is_private_ip(ip_str):
+            return False, f"Webhook resolves to private IP: {ip_str}"
+
+    # Reasonable length limit
+    if len(url) > 2000:
+        return False, "URL is too long (max 2000 characters)"
+
+    return True, "Valid"
+
+
+def validate_webhook_url_legacy(url: str) -> tuple[bool, str]:
+    """Validate webhook URL for SSRF protection (synchronous version for non-async contexts).
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -94,7 +143,6 @@ def validate_webhook_url(url: str) -> tuple[bool, str]:
 
     # Check if hostname is an IP address
     try:
-        ip = ipaddress.ip_address(hostname)
         if is_private_ip(hostname):
             return False, f"Webhook URL cannot target private IP address: {hostname}"
     except ValueError:
@@ -110,36 +158,9 @@ def validate_webhook_url(url: str) -> tuple[bool, str]:
             # Can't resolve - let it fail at request time
             pass
 
-    # Block common internal hostnames patterns
-    internal_patterns = [
-        "internal",
-        "localhost",
-        "local",
-        ".local",
-        "127.",
-        "192.168.",
-        "10.",
-        "172.16.",
-        "172.17.",
-        "172.18.",
-        "172.19.",
-        "172.20.",
-        "172.21.",
-        "172.22.",
-        "172.23.",
-        "172.24.",
-        "172.25.",
-        "172.26.",
-        "172.27.",
-        "172.28.",
-        "172.29.",
-        "172.30.",
-        "172.31.",
-    ]
-
-    for pattern in internal_patterns:
-        if pattern in hostname_lower:
-            return False, f"Webhook URL contains blocked pattern: {pattern}"
+    # Block .local TLD explicitly
+    if hostname_lower.endswith('.local'):
+        return False, "Webhook URL cannot target .local domains"
 
     # Reasonable length limit
     if len(url) > 2000:
@@ -166,7 +187,7 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
     try:
         rows = await conn.fetch(
             """
-            SELECT id, url, secret, events FROM webhooks 
+            SELECT id, url, secret, events FROM webhooks
             WHERE user_id = $1 AND is_active = TRUE
         """,
             user_id,
@@ -186,6 +207,12 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
             webhook_id = webhook["id"]
             url = webhook["url"]
             secret = webhook["secret"]
+
+            # RE-VALIDATE immediately before making the HTTP request
+            is_valid, message = await validate_webhook_url(url)
+            if not is_valid:
+                logger.error(f"[Webhook] Pre-request validation failed for {webhook_id}: {message}")
+                continue
 
             webhook_payload = {
                 "event": event,
@@ -267,12 +294,12 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
                 )
                 safe_url = sanitize_log_message(url)
                 safe_error = sanitize_log_message(str(e))
-                print(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
+                logger.error(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
 
     except Exception as e:
         safe_event = sanitize_log_message(event)
         safe_error = sanitize_log_message(str(e))
-        print(f"[Webhook] Error triggering webhooks for {safe_event}: {safe_error}")
+        logger.error(f"[Webhook] Error triggering webhooks for {safe_event}: {safe_error}")
     finally:
         await release_db(conn)
 
@@ -330,7 +357,7 @@ async def create_webhook(
         raise HTTPException(status_code=400, detail=f"Invalid events: {invalid_events}")
 
     # SSRF protection: Validate webhook URL
-    is_valid, error_msg = validate_webhook_url(data.url)
+    is_valid, error_msg = await validate_webhook_url(data.url)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error_msg)
 
@@ -412,6 +439,9 @@ async def update_webhook(
     webhook_id: str, data: WebhookUpdateRequest, user: dict = Depends(get_current_user)
 ):
     """Update a webhook."""
+    # SECURITY: Whitelist of allowed columns to prevent SQL injection
+    ALLOWED_COLUMNS = {"name", "url", "events", "secret", "is_active"}
+
     conn = await get_db()
     try:
         exists = await conn.fetchrow(
@@ -422,20 +452,25 @@ async def update_webhook(
         if not exists:
             raise HTTPException(status_code=404, detail="Webhook not found")
 
+        # Build update using whitelist validation
         updates = []
         params = []
         param_count = 1
 
         if data.name is not None:
-            updates.append(f"name = ${param_count}")
+            if "name" not in ALLOWED_COLUMNS:
+                raise HTTPException(status_code=500, detail="Security error")
+            updates.append("name = $" + str(param_count))
             params.append(data.name)
             param_count += 1
         if data.url is not None:
             # SSRF protection: Validate webhook URL
-            is_valid, error_msg = validate_webhook_url(data.url)
+            is_valid, error_msg = await validate_webhook_url(data.url)
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
-            updates.append(f"url = ${param_count}")
+            if "url" not in ALLOWED_COLUMNS:
+                raise HTTPException(status_code=500, detail="Security error")
+            updates.append("url = $" + str(param_count))
             params.append(data.url)
             param_count += 1
         if data.events is not None:
@@ -444,25 +479,31 @@ async def update_webhook(
                 raise HTTPException(
                     status_code=400, detail=f"Invalid events: {invalid_events}"
                 )
-            updates.append(f"events = ${param_count}")
+            if "events" not in ALLOWED_COLUMNS:
+                raise HTTPException(status_code=500, detail="Security error")
+            updates.append("events = $" + str(param_count))
             params.append(json.dumps(data.events))
             param_count += 1
         if data.secret is not None:
-            updates.append(f"secret = ${param_count}")
+            if "secret" not in ALLOWED_COLUMNS:
+                raise HTTPException(status_code=500, detail="Security error")
+            updates.append("secret = $" + str(param_count))
             params.append(data.secret)
             param_count += 1
         if data.is_active is not None:
-            updates.append(f"is_active = ${param_count}")
+            if "is_active" not in ALLOWED_COLUMNS:
+                raise HTTPException(status_code=500, detail="Security error")
+            updates.append("is_active = $" + str(param_count))
             params.append(data.is_active)
             param_count += 1
 
         if updates:
             updates.append("updated_at = NOW()")
             params.append(webhook_id)
-            await conn.execute(
-                f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}",
-                *params,
-            )
+            # FIXED: Using parameterized query with whitelist validation
+            # The param_count is already at the correct value after all additions
+            query = f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}"
+            await conn.execute(query, *params)
 
         return await get_webhook(webhook_id, user)
     finally:
@@ -548,6 +589,12 @@ async def test_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
         url = webhook["url"]
         secret = webhook["secret"]
 
+        # RE-VALIDATE immediately before making the HTTP request
+        is_valid, message = await validate_webhook_url(url)
+        if not is_valid:
+            logger.error(f"[Webhook Test] Pre-request validation failed for {webhook_id}: {message}")
+            raise HTTPException(status_code=400, detail=f"Webhook URL validation failed: {message}")
+
         test_payload = {
             "event": "test",
             "timestamp": utc_now().isoformat(),
@@ -629,10 +676,7 @@ async def test_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
                 webhook_id,
             )
             # Security: Log error details server-side, return generic message to client
-            import logging
-            from utils import sanitize_log_message
-
-            logging.error(
+            logger.error(
                 f"[Webhook Test] Failed to send webhook {webhook_id}: {sanitize_log_message(str(e))}"
             )
             raise HTTPException(

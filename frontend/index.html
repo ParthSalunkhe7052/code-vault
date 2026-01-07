@@ -5,6 +5,21 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- SECURITY: Content Security Policy to prevent XSS attacks -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' blob: data: https:;
+    connect-src 'self' http: https: ws: wss:;
+    font-src 'self' data:;
+    frame-src 'none';
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+  " />
+
   <title>CodeVault</title>
 </head>
 

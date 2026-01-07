@@ -21,8 +21,13 @@ const Layout = () => {
 
     useEffect(() => {
         const loadUser = async () => {
-            const userData = await auth.getUser();
-            setUser(userData);
+            try {
+                const userData = await auth.getUser();
+                setUser(userData);
+            } catch (error) {
+                console.error('Failed to load user:', error);
+                // Could show error message or redirect
+            }
         };
         loadUser();
 
@@ -40,8 +45,8 @@ const Layout = () => {
     const planColor = userPlan === 'enterprise' ? 'text-amber-400' : userPlan === 'pro' ? 'text-violet-400' : 'text-slate-400';
     const planBg = userPlan === 'enterprise' ? 'bg-amber-500/10 border-amber-500/20' : userPlan === 'pro' ? 'bg-violet-500/10 border-violet-500/20' : 'bg-slate-800 border-white/10';
 
-    const handleLogout = () => {
-        auth.logout();
+    const handleLogout = async () => {
+        await auth.logout();
         navigate('/login');
     };
 

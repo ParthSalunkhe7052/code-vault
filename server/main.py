@@ -11,8 +11,10 @@ NOTE: This file has been refactored. Core functionality is now in:
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import re
 
@@ -34,6 +36,42 @@ class BuildStatusEndpointFilter(logging.Filter):
 
 # Apply filter to uvicorn access logger
 logging.getLogger("uvicorn.access").addFilter(BuildStatusEndpointFilter())
+
+
+# =============================================================================
+# Security Headers Middleware
+# =============================================================================
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+
+        # HSTS - Force HTTPS (only in production)
+        if ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+
+        # Prevent MIME sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+
+        # Referrer Policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Permissions Policy (restrict browser features)
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=()"
+        )
+
+        # Remove server fingerprinting headers
+        response.headers.pop("Server", None)
+        response.headers.pop("X-Powered-By", None)
+
+        return response
+
 
 # Import from refactored modules
 from config import (
@@ -89,7 +127,14 @@ app = FastAPI(
     lifespan=app_lifespan,
 )
 
-# CORS middleware - SECURITY FIX: Don't allow wildcard with credentials
+# =============================================================================
+# Security Middleware (Order matters!)
+# =============================================================================
+
+# 1. Security Headers - Add first to protect all responses
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 2. CORS middleware - SECURITY FIX: Don't allow wildcard with credentials
 # When allow_origins is ["*"], credentials must be False per CORS spec
 if CORS_ALLOW_ALL:
     # Development mode: Allow all origins but NO credentials

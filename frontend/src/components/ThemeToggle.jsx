@@ -17,7 +17,7 @@ const ThemeToggle = () => {
 
     return (
         <div className="flex items-center gap-3 select-none">
-            {/* Theme Label - Shows current theme */}
+            {/* Default theme label */}
             <div className="flex items-center gap-2 text-xs font-medium">
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-all ${!isDarkMatter
                     ? 'bg-[var(--cv-primary)]/15 text-[var(--cv-primary)] border-[var(--cv-primary)]/30'
@@ -62,7 +62,7 @@ const ThemeToggle = () => {
                 </span>
             </button>
 
-            {/* Theme Label - Shows current theme */}
+            {/* Dark Matter theme label */}
             <div className="flex items-center gap-2 text-xs font-medium">
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-all ${isDarkMatter
                     ? 'bg-[var(--cv-primary)]/15 text-[var(--cv-primary)] border-[var(--cv-primary)]/30'

@@ -52,8 +52,8 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
-    # No network access except to API
     networks:
+      - default          # For backend API communication
       - build_network
     volumes:
       - build_workspace:/workspace

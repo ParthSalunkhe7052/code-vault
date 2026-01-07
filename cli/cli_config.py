@@ -247,7 +247,8 @@ def check_token_expiry() -> Optional[dict]:
         # Decode the payload (middle part)
         # Add padding if needed
         payload_b64 = parts[1]
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        padding_needed = (4 - len(payload_b64) % 4) % 4
+        payload_b64 += "=" * padding_needed
 
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
 

@@ -327,7 +327,7 @@ class TestRateLimiting:
         try:
             from middleware.rate_limiter import login_rate_limit
             assert login_rate_limit is not None
-            assert login_rate_limit.requests > 0
+            assert login_rate_limit.max_requests > 0
             assert login_rate_limit.window_seconds > 0
         except ImportError:
             pytest.skip("Rate limiter not found")

@@ -136,9 +136,9 @@ const Projects = () => {
                 nuitka_options: config.nuitka_options || {},
                 files: config.files || [],
                 file_tree: config.settings?.file_tree || null,
-                // Build options - load from server
-                skip_obfuscation: config.skip_obfuscation,
-                enable_lease: config.enable_lease,
+                // Build options - load from server with defensive defaults
+                skip_obfuscation: config.skip_obfuscation ?? true,
+                enable_lease: config.enable_lease ?? false,
                 compiler_options: config.compiler_options || {}
             });
         } catch (error) {
@@ -161,11 +161,13 @@ const Projects = () => {
 
     const handleConfigSave = async () => {
         try {
-            console.log('[CONFIG SAVE] Saving config:', {
-                skip_obfuscation: configData.skip_obfuscation,
-                enable_lease: configData.enable_lease,
-                compiler_options: configData.compiler_options
-            });
+            if (import.meta.env.DEV) {
+                console.log('[CONFIG SAVE] Saving config:', {
+                    skip_obfuscation: configData.skip_obfuscation,
+                    enable_lease: configData.enable_lease,
+                    compiler_options: configData.compiler_options
+                });
+            }
 
             await projectApi.updateConfig(selectedProject.id, {
                 entry_file: configData.entry_file,
@@ -220,7 +222,9 @@ const Projects = () => {
         setUploadProgress(true);
         try {
             const uploaded = await projectApi.uploadFiles(selectedProject.id, files);
-            console.log('Upload response:', uploaded);
+            if (import.meta.env.DEV) {
+                console.log('Upload response:', uploaded);
+            }
             if (uploaded && Array.isArray(uploaded)) {
                 setConfigData(prev => ({
                     ...prev,

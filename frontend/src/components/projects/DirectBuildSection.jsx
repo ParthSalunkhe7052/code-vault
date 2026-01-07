@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Loader, Hammer, FolderOpen, CheckCircle, XCircle, AlertCircle, Download, Settings, ChevronDown, ChevronUp, FileText, Lock } from 'lucide-react';
+import { auth } from '../../services/api';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -242,11 +243,11 @@ const DirectBuildSection = ({
                 console.log(`Download: ${stage} - ${message}`);
             });
 
-            // Download the project
+            // Download the project - FIXED: Use auth service instead of hardcoded localStorage access
             const extractedPath = await invoke('download_and_prepare_for_compile', {
                 projectId: project.id,
                 serverUrl: serverUrl,
-                authToken: localStorage.getItem('auth_token') || '',
+                authToken: auth.getToken() || '',
                 targetDir: null
             });
 

@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,13 +13,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@/components': path.resolve(__dirname, './src/components'),
-      '@/pages': path.resolve(__dirname, './src/pages'),
-      '@/contexts': path.resolve(__dirname, './src/contexts'),
-      '@/hooks': path.resolve(__dirname, './src/hooks'),
-      '@/utils': path.resolve(__dirname, './src/utils'),
-      '@/services': path.resolve(__dirname, './src/services'),
-      '@/types': path.resolve(__dirname, './src/types'),
     },
   },
 
@@ -34,7 +30,7 @@ export default defineConfig({
 
   // Build optimizations
   build: {
-    // Generate source maps for production debugging
+    // Disable source maps for smaller bundle size
     sourcemap: false,
 
     // Target modern browsers for smaller bundle size

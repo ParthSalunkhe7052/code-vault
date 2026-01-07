@@ -16,7 +16,7 @@ const TrendIndicator = ({ value }) => {
     );
 };
 
-const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
+const StatCard = ({ title, value, icon: Icon, subtitle, trend }) => (
     <div
         className="relative overflow-hidden rounded-2xl p-6 group transition-all duration-300
             shadow-lg shadow-black/20 hover:shadow-xl hover:shadow-black/30"
@@ -36,7 +36,7 @@ const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
         <div className="relative z-10">
             <div className="flex items-start justify-between mb-4">
                 <div
-                    className={`p-3 rounded-xl ${color} group-hover:scale-110 transition-transform duration-300`}
+                    className="p-3 rounded-xl group-hover:scale-110 transition-transform duration-300"
                     style={{
                         backgroundColor: 'var(--cv-bg-elevated)',
                         border: '1px solid var(--cv-border)'

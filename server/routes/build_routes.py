@@ -2,6 +2,7 @@ import os
 import json
 import secrets
 import time
+import logging
 
 import zipfile
 import re
@@ -19,7 +20,9 @@ from utils import get_current_user, safe_join, validate_project_id, SecurityErro
 from storage_service import LOCAL_UPLOAD_DIR as UPLOAD_DIR
 from config import LICENSE_SERVER_URL, CLI_VERSION
 from compilers import check_build_prerequisites, get_build_orchestrator, BuildConfig
+from middleware.rate_limiter import RateLimitDependency
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["build"])
 
 # =============================================================================
@@ -42,7 +45,7 @@ async def cleanup_compile_cache():
         for job_id in to_remove:
             del compile_jobs_cache[job_id]
         if to_remove:
-            print(f"[Cache Cleanup] Removed {len(to_remove)} old compile jobs")
+            logger.info(f"[Cache Cleanup] Removed {len(to_remove)} old compile jobs")
 
 # =============================================================================
 # Models
@@ -75,7 +78,10 @@ async def get_build_prerequisites():
 
 
 @router.post("/build/installer")
-async def build_installer(data: InstallerBuildRequest):
+async def build_installer(
+    data: InstallerBuildRequest,
+    _rate_limit: None = Depends(RateLimitDependency(max_requests=3, window_seconds=300, prefix="build:installer")),
+):
     """Start a professional Windows installer build job (async)."""
 
     job_id = secrets.token_hex(16)
@@ -151,7 +157,7 @@ async def _run_installer_build_job(job_id: str, data: InstallerBuildRequest):
                 compile_jobs_cache[job_id]["progress"] = max(
                     compile_jobs_cache[job_id]["progress"], 90
                 )
-        print(f"[Build {job_id[:8]}] {msg}")
+        logger.debug(f"[Build {job_id[:8]}] {msg}")
 
     try:
         output_path = await orchestrator.build(config, log_callback)
@@ -166,9 +172,7 @@ async def _run_installer_build_job(job_id: str, data: InstallerBuildRequest):
         compile_jobs_cache[job_id]["completed_time"] = time.time()
 
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"[Build {job_id[:8]}] Build failed with exception", exc_info=True)
         compile_jobs_cache[job_id]["status"] = "failed"
         # Always expose full error for debugging (logged server-side anyway)
         compile_jobs_cache[job_id]["error_message"] = str(e)
@@ -337,11 +341,11 @@ async def get_build_bundle(
             else (project["compiler_options"] or {})
         )
 
-        # Debug: Print settings to console
-        print(f"\n[BUNDLE DEBUG] Project {project_id}")
-        print(f"  Settings from DB: {settings}")
-        print(f"  skip_obfuscation: {settings.get('skip_obfuscation')}")
-        print(f"  enable_lease: {settings.get('enable_lease')}\n", flush=True)
+        # Debug: Log settings
+        logger.debug(
+            "[BUNDLE DEBUG] Project %s: Settings from DB=%s, skip_obfuscation=%s, enable_lease=%s",
+            project_id, settings, settings.get('skip_obfuscation'), settings.get('enable_lease')
+        )
 
         language = (
             project.get("language", "python")
@@ -361,7 +365,7 @@ async def get_build_bundle(
         license_key = None
         if license_id:
             license_row = await conn.fetchrow(
-                """SELECT license_key FROM licenses 
+                """SELECT license_key FROM licenses
                    WHERE id = $1 AND project_id = $2""",
                 license_id,
                 project_id,
@@ -396,10 +400,11 @@ async def get_build_bundle(
             "enable_lease": settings.get("enable_lease", False),
         }
 
-        # Debug: Print final config being written to bundle
-        print(f"[BUNDLE DEBUG] Final config for bundle:")
-        print(f"  skip_obfuscation: {config['skip_obfuscation']}")
-        print(f"  enable_lease: {config['enable_lease']}\n", flush=True)
+        # Debug: Log final config being written to bundle
+        logger.debug(
+            "[BUNDLE DEBUG] Final config for bundle: skip_obfuscation=%s, enable_lease=%s",
+            config['skip_obfuscation'], config['enable_lease']
+        )
 
         with tempfile.NamedTemporaryFile(
             mode="wb", suffix=".zip", delete=False

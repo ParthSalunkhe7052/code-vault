@@ -97,7 +97,9 @@ const ProjectWizard = ({
                         const state = JSON.parse(saved);
                         // Check if not expired (24 hours)
                         if (Date.now() - state.timestamp < EXPIRY_MS) {
-                            console.log('[Wizard] Restoring saved state:', state);
+                            if (import.meta.env.DEV) {
+                                console.log('[Wizard] Restoring saved state:', state);
+                            }
                             setCurrentStep(state.currentStep || 1);
                             setCompletedSteps(state.completedSteps || []);
                             if (state.protectionMode) setProtectionMode(state.protectionMode);
@@ -109,7 +111,9 @@ const ProjectWizard = ({
                         }
                     }
                 } catch (e) {
-                    console.warn('[Wizard] Failed to restore state:', e);
+                    if (import.meta.env.DEV) {
+                        console.warn('[Wizard] Failed to restore state:', e);
+                    }
                 }
 
                 // PRIORITY 3: Default - check if files exist
@@ -139,19 +143,23 @@ const ProjectWizard = ({
                     timestamp: Date.now()
                 }));
             } catch (e) {
-                console.warn('[Wizard] Failed to save state:', e);
+                if (import.meta.env.DEV) {
+                    console.warn('[Wizard] Failed to save state:', e);
+                }
             }
         }
     }, [isOpen, project?.id, currentStep, completedSteps, protectionMode, projectPath]);
 
     // Sync local state to configData for saving
     useEffect(() => {
-        console.log('[WIZARD SYNC] Syncing to configData:', {
-            enableObfuscation,
-            enableLease,
-            resulting_skip_obfuscation: !enableObfuscation,
-            resulting_enable_lease: enableLease
-        });
+        if (import.meta.env.DEV) {
+            console.log('[WIZARD SYNC] Syncing to configData:', {
+                enableObfuscation,
+                enableLease,
+                resulting_skip_obfuscation: !enableObfuscation,
+                resulting_enable_lease: enableLease
+            });
+        }
 
         setConfigData(prev => ({
             ...prev,
@@ -216,7 +224,9 @@ const ProjectWizard = ({
                     setDetectedDataFolders(structure.data_dirs);
                 }
             } catch (error) {
-                console.error('Failed to scan project:', error);
+                if (import.meta.env.DEV) {
+                    console.error('Failed to scan project:', error);
+                }
                 setEnvValues({});
                 setDetectedDataFolders([]);
             }
@@ -280,13 +290,27 @@ const ProjectWizard = ({
         if (currentStep < 5 && canProceed()) {
             // Auto-save config when leaving Step 3 (Configure) to persist settings
             if (currentStep === 3) {
-                console.log('[WIZARD] Auto-saving config when leaving Step 3');
+                if (import.meta.env.DEV) {
+                    console.log('[WIZARD] Auto-saving config when leaving Step 3');
+                }
                 try {
                     await onConfigSave();
-                    console.log('[WIZARD] Config saved successfully');
+                    if (import.meta.env.DEV) {
+                        console.log('[WIZARD] Config saved successfully');
+                    }
                 } catch (error) {
-                    console.error('[WIZARD] Failed to auto-save config:', error);
-                    // Continue anyway - don't block navigation
+                    if (import.meta.env.DEV) {
+                        console.error('[WIZARD] Failed to auto-save config:', error);
+                    }
+                    // Show user feedback for save failure
+                    if (window.showToast) {
+                        window.showToast('Failed to save configuration', 'error');
+                    } else {
+                        const confirmLeave = confirm('Save failed. Leave configuration anyway?');
+                        if (!confirmLeave) {
+                            return; // Don't navigate
+                        }
+                    }
                 }
             }
 
@@ -319,7 +343,9 @@ const ProjectWizard = ({
                 setProjectPath(selected);
             }
         } catch (error) {
-            console.error('Failed to open folder picker:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to open folder picker:', error);
+            }
         }
     };
 
@@ -379,7 +405,9 @@ const ProjectWizard = ({
                         if (normalizedEntry.startsWith(suffix + '/')) {
                             // Found overlap! Extract just the remaining file path
                             entryFileName = normalizedEntry.slice(suffix.length + 1);
-                            console.log(`Path alignment: adjusted entry from "${normalizedEntry}" to "${entryFileName}"`);
+                            if (import.meta.env.DEV) {
+                                console.log(`Path alignment: adjusted entry from "${normalizedEntry}" to "${entryFileName}"`);
+                            }
                             break;
                         }
                     }
@@ -414,7 +442,9 @@ const ProjectWizard = ({
                     projectBuild.addLog('✅ Entry file found');
                 } catch (fsError) {
                     // If fs check fails, try anyway (permission issues)
-                    console.warn('Could not check file existence:', fsError);
+                    if (import.meta.env.DEV) {
+                        console.warn('Could not check file existence:', fsError);
+                    }
                     projectBuild.addLog('⚠️ Could not verify file, attempting build anyway...');
                 }
 
@@ -462,7 +492,9 @@ const ProjectWizard = ({
                 projectBuild.complete('N/A - Web Mode');
             }
         } catch (error) {
-            console.error('Build error:', error);
+            if (import.meta.env.DEV) {
+                console.error('Build error:', error);
+            }
             projectBuild.addLog(`❌ Error: ${error.message || error}`);
             projectBuild.fail(error.message || String(error));
         }
@@ -477,13 +509,24 @@ const ProjectWizard = ({
     const handleClose = async () => {
         // Save config if we're on or past Step 3 (where settings are configured)
         if (currentStep >= 3 && configData.entry_file) {
-            console.log('[WIZARD] Auto-saving config before closing');
+            if (import.meta.env.DEV) {
+                console.log('[WIZARD] Auto-saving config before closing');
+            }
             try {
                 await onConfigSave();
-                console.log('[WIZARD] Config saved before close');
+                if (import.meta.env.DEV) {
+                    console.log('[WIZARD] Config saved before close');
+                }
             } catch (error) {
-                console.error('[WIZARD] Failed to save on close:', error);
-                // Continue closing anyway
+                if (import.meta.env.DEV) {
+                    console.error('[WIZARD] Failed to save on close:', error);
+                }
+                // Show user feedback
+                if (window.showToast) {
+                    window.showToast('Failed to save configuration', 'error');
+                } else {
+                    alert('Failed to save configuration. Changes may be lost.');
+                }
             }
         }
         onClose();
@@ -498,7 +541,9 @@ const ProjectWizard = ({
             const folderPath = lastSep > 0 ? outputPath.substring(0, lastSep) : outputPath;
             await invoke('open_output_folder', { path: folderPath });
         } catch (error) {
-            console.error('Failed to open folder:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to open folder:', error);
+            }
         }
     };
 
@@ -520,7 +565,9 @@ const ProjectWizard = ({
                 projectBuild.cancel();
             }
         } catch (error) {
-            console.error('Failed to cancel build:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to cancel build:', error);
+            }
             // Still mark as cancelled locally via context
             projectBuild.cancel();
         }

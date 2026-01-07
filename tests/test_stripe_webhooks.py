@@ -172,7 +172,9 @@ class TestStripeErrorHandling:
 
         # Should not return 500 (internal error)
         # Unknown events should be ignored gracefully
-        assert response.status_code != 500 or response.status_code in [400, 403]
+        assert response.status_code != 500, (
+            f"Unknown events should not cause 500 errors, got {response.status_code}"
+        )
 
 
 @pytest.mark.integration

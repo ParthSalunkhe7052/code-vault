@@ -12,9 +12,9 @@ import sys
 import secrets
 import tempfile
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Generator, Dict, Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from typing import Generator, Dict, Any
+from unittest.mock import AsyncMock, MagicMock
 
 # Add server directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
@@ -42,17 +42,14 @@ def client(app):
 
 
 @pytest.fixture
-def async_client(app):
+async def async_client(app):
     """Create an async test client for the FastAPI app."""
     try:
         from httpx import AsyncClient, ASGITransport
 
-        async def get_client():
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                yield client
-
-        return get_client()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
     except ImportError:
         pytest.skip("httpx not installed - install with: pip install httpx")
 
@@ -71,7 +68,7 @@ def mock_user() -> Dict[str, Any]:
         "role": "user",
         "tier": "free",
         "stripe_customer_id": None,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "api_key": secrets.token_hex(32),
     }
 
@@ -86,7 +83,7 @@ def mock_admin_user() -> Dict[str, Any]:
         "role": "admin",
         "tier": "enterprise",
         "stripe_customer_id": f"cus_{secrets.token_hex(14)}",
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "api_key": secrets.token_hex(32),
     }
 
@@ -102,8 +99,8 @@ def auth_token(mock_user) -> str:
             "sub": mock_user["id"],
             "email": mock_user["email"],
             "role": mock_user["role"],
-            "exp": datetime.utcnow() + timedelta(hours=24),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+            "iat": datetime.now(timezone.utc),
         }
         return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
     except ImportError:
@@ -121,8 +118,8 @@ def admin_auth_token(mock_admin_user) -> str:
             "sub": mock_admin_user["id"],
             "email": mock_admin_user["email"],
             "role": "admin",
-            "exp": datetime.utcnow() + timedelta(hours=24),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+            "iat": datetime.now(timezone.utc),
         }
         return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
     except ImportError:
@@ -334,7 +331,7 @@ def mock_stripe_event() -> Dict[str, Any]:
         "id": f"evt_{secrets.token_hex(12)}",
         "object": "event",
         "type": "checkout.session.completed",
-        "created": int(datetime.utcnow().timestamp()),
+        "created": int(datetime.now(timezone.utc).timestamp()),
         "data": {
             "object": {
                 "id": f"cs_{secrets.token_hex(12)}",

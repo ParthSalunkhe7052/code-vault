@@ -109,8 +109,7 @@ def validate_output_name(output_name: str) -> str:
     output_name = output_name.replace(' ', '_')
 
     # Replace multiple consecutive underscores with single underscore
-    import re as _re
-    output_name = _re.sub(r'_+', '_', output_name)
+    output_name = re.sub(r'_+', '_', output_name)
 
     # Remove leading/trailing underscores and dots
     output_name = output_name.strip('_.')

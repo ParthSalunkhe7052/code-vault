@@ -95,7 +95,7 @@ async def login(
         )
 
         if not user:
-            print(f"[Login] User not found: {data.email}")
+            logger.warning(f"[Login] User not found: {data.email[:3]}***")
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         try:
@@ -103,14 +103,14 @@ async def login(
                 data.password.encode(), user["password_hash"].encode()
             )
             if not password_match:
-                print(f"[Login] Password mismatch for user: {data.email}")
+                logger.warning(f"[Login] Password mismatch for user ID: {user['id'][:8]}...")
                 raise HTTPException(status_code=401, detail="Invalid email or password")
         except Exception as e:
-            print(f"[Login] Password verification error: {str(e)}")
+            logger.error(f"[Login] Password verification error: {str(e)}")
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        print(
-            f"[Login] Successful login: {data.email} (role: {user.get('role', 'user')})"
+        logger.info(
+            f"[Login] Successful login for user ID: {user['id'][:8]}... (role: {user.get('role', 'user')})"
         )
         token = create_jwt_token(user["id"], user["email"])
         return {
@@ -183,10 +183,30 @@ async def reset_password(
     user: dict = Depends(get_current_user),
     _rate_limit: None = Depends(password_reset_rate_limit)
 ):
-    """Reset password for logged-in user"""
-    password_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
+    """Reset password for logged-in user - FIXED: Requires current password for security."""
     conn = await get_db()
     try:
+        # SECURITY FIX: Verify current password before allowing reset
+        current_user = await conn.fetchrow(
+            "SELECT password_hash FROM users WHERE id = $1",
+            user["id"],
+        )
+
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Verify current password
+        try:
+            password_match = bcrypt.checkpw(
+                data.current_password.encode(), current_user["password_hash"].encode()
+            )
+            if not password_match:
+                raise HTTPException(status_code=401, detail="Current password is incorrect")
+        except Exception:
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+        # Hash and update new password
+        password_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
         await conn.execute(
             "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
             password_hash,

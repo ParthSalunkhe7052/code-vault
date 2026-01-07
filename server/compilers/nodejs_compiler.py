@@ -538,7 +538,14 @@ validateLicense().then(() => {{
         failed_files = []
 
         try:
-            for js_file in js_files:
+            for idx, js_file in enumerate(js_files, 1):
+                # Log progress every 10 files
+                if idx % 10 == 0:
+                    await self.log(
+                        f"   Progress: {idx}/{len(js_files)} files processed",
+                        log_callback
+                    )
+
                 # Build command: javascript-obfuscator <input> --output <output> <options>
                 cmd = [
                     str(self.obfuscator_bin),
@@ -571,7 +578,9 @@ validateLicense().then(() => {{
                                 )
                                 # Show error details for debugging
                                 if stderr:
-                                    error_msg = stderr.decode("utf-8", errors="replace")[:200]
+                                    error_msg = stderr.decode("utf-8", errors="replace")
+                                    if len(error_msg) > 200:
+                                        error_msg = error_msg[:200] + "... (truncated)"
                                     await self.log(f"      Error: {error_msg}", log_callback)
                     except asyncio.TimeoutError:
                         failed_files.append(js_file.name)

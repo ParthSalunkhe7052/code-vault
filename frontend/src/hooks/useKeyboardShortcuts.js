@@ -71,9 +71,9 @@ export function useKeyboardShortcuts(shortcuts, options = {}) {
         ? event.altKey
         : !event.altKey;
 
-      // Special case: if no modifiers specified, just check the key
-      const noModifiersRequired = !shortcut.ctrl && !shortcut.shift && !shortcut.alt;
-      const modifiersMatch = noModifiersRequired || (ctrlMatch && shiftMatch && altMatch);
+      // ctrlMatch/shiftMatch/altMatch already handle the case where modifier is not required
+      // They check: shortcut.ctrl ? event.ctrlKey : !event.ctrlKey
+      const modifiersMatch = ctrlMatch && shiftMatch && altMatch;
 
       if (keyMatches && modifiersMatch) {
         if (shortcut.preventDefault !== false) {
