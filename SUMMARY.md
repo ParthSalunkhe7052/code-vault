@@ -33,7 +33,7 @@ redis.__version__ = 7.1.0
 # Email service now shows: [Email] Using Resend (Configured)
 EMAIL_ENABLED = True
 EMAIL_PROVIDER = resend
-RESEND_API_KEY = re_AR1WYHWZ_PMQ7u6Xezww8NNcnndeDzkeB
+
 ```
 
 ### 3. Stripe Price IDs Missing
