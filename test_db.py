@@ -5,7 +5,7 @@ async def test_connection():
     try:
         print("Testing database connection...")
         conn = await asyncpg.connect(
-            'postgresql://neondb_owner:npg_E7W1VshlrmqO@ep-solitary-lab-a15xogjj-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require',
+            'postgresql://neondb_owner:@ep-solitary-lab-a15xogjj-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require',
             timeout=10
         )
         print("SUCCESS: Connected successfully!")
