@@ -21,7 +21,7 @@ const defaultSettings = {
     defaultExcludePackages: ['tkinter', 'test', 'unittest'],
 
     // Server Settings
-    defaultServerUrl: 'http://localhost:8000',
+    defaultServerUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 
     // Distribution Defaults (NSIS Installer System)
     defaultDistributionType: 'installer', // 'portable' or 'installer'

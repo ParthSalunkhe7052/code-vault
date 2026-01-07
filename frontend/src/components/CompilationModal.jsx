@@ -97,7 +97,7 @@ const CompilationModal = ({
                     output_name: outputName || entryFile.replace(/\.(py|js|ts|mjs|cjs)$/, ''),
                     output_dir: outputDir || null,
                     license_key: licenseKey || null,
-                    server_url: 'http://localhost:8000', // License server URL
+                    server_url: import.meta.env.VITE_API_URL || 'http://localhost:8000', // License server URL
                     onefile: true,
                     console: showConsole,
                     icon_path: null,

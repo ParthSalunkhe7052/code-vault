@@ -14,14 +14,9 @@ Test Matrix:
 
 import pytest
 import sys
-import os
-import tempfile
-import json
-import base64
 import hashlib
 import time
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))

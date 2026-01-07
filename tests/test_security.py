@@ -13,9 +13,6 @@ This module contains comprehensive security tests including:
 import pytest
 import sys
 import os
-import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 # Add directories to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))

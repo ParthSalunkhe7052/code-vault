@@ -473,7 +473,7 @@ const ProjectWizard = ({
                         publisher: publisher,
                         language: language,
                         license_key: null,  // Generic build - no embedded key
-                        server_url: 'http://localhost:8000',
+                        server_url: import.meta.env.VITE_API_URL || 'http://localhost:8000',
                         license_mode: protectionMode === 'none' ? null : protectionMode === 'demo' ? 'demo' : 'generic',
                         distribution_type: distributionType,
                         create_desktop_shortcut: createDesktopShortcut,
@@ -557,7 +557,7 @@ const ProjectWizard = ({
 
         try {
             // Call the server cancel endpoint
-            const response = await fetch(`http://localhost:8000/api/v1/build/installer/${currentJobId}/cancel`, {
+            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/build/installer/${currentJobId}/cancel`, {
                 method: 'DELETE'
             });
 

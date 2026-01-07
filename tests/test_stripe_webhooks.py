@@ -12,10 +12,8 @@ import pytest
 import sys
 import os
 import json
-import hmac
-import hashlib
 import time
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 # Add server directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
@@ -199,7 +197,7 @@ class TestStripeProductionRequirements:
     def test_webhook_secret_required_in_production(self):
         """Test that STRIPE_WEBHOOK_SECRET is required in production."""
         try:
-            from config import ENVIRONMENT, STRIPE_WEBHOOK_SECRET
+            from config import ENVIRONMENT
 
             if ENVIRONMENT == "production":
                 # In production, the secret should be set
