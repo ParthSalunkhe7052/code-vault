@@ -6,20 +6,26 @@ import asyncio
 import asyncpg
 from config import DATABASE_URL
 
+
 async def diagnose():
     print("=== Database Connection Diagnostic ===\n")
 
-    print(f"1. Testing direct connection...")
-    try:
-        conn = await asyncpg.connect(DATABASE_URL, timeout=10)
-        print("   SUCCESS: Direct connection works")
-        await conn.close()
-    except Exception as e:
-        print(f"   ERROR: {e}")
+    # Validate DATABASE_URL exists
+    if not DATABASE_URL:
+        print("   ERROR: DATABASE_URL is not configured")
+        print("   Set DATABASE_URL in your .env file")
         return
 
-    print(f"\n2. Testing pool creation...")
+    pool = None
     try:
+        # Test 1: Direct connection
+        print("1. Testing direct connection...")
+        conn = await asyncpg.connect(DATABASE_URL, timeout=10)
+        await conn.close()
+        print("   SUCCESS: Direct connection works")
+
+        # Test 2: Pool
+        print("\n2. Testing pool creation...")
         pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=1,
@@ -29,27 +35,30 @@ async def diagnose():
         )
         print("   SUCCESS: Pool created")
 
-        print(f"\n3. Testing pool acquire...")
+        # Test 3: Acquire
+        print("\n3. Testing pool acquire...")
         conn = await pool.acquire(timeout=5)
-        print("   SUCCESS: Connection acquired from pool")
+        print("   SUCCESS: Connection acquired")
 
-        print(f"\n4. Testing simple query...")
+        # Test 4: Query
+        print("\n4. Testing simple query...")
         result = await conn.fetchval("SELECT 1")
         print(f"   SUCCESS: Query returned {result}")
 
         await pool.release(conn)
         print("\n5. Connection released")
 
-        await pool.close()
-        print("6. Pool closed")
-
         print("\n=== All checks passed! ===")
 
     except asyncio.TimeoutError:
-        print("   ERROR: Timeout while acquiring connection from pool")
-        print("   This suggests the pool is exhausted or deadlocked")
+        print("   ERROR: Timeout while acquiring connection")
     except Exception as e:
         print(f"   ERROR: {e}")
+    finally:
+        if pool:
+            await pool.close()
+            print("6. Pool closed")
+
 
 if __name__ == "__main__":
     asyncio.run(diagnose())

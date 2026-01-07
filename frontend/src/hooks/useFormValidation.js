@@ -182,19 +182,17 @@ export function useFormValidation(initialValues, validationSchema, options = {})
    * Validate a single field
    */
   const validateField = useCallback((name, value, allValues = values) => {
-    const fieldValidators = validationSchema[name];
-    if (!fieldValidators) return null;
+    const fieldRules = validationSchema[name];
+    if (!fieldRules) return null;
 
-    const validators = Array.isArray(fieldValidators)
-      ? fieldValidators
-      : [fieldValidators];
+    const rules = Array.isArray(fieldRules) ? fieldRules : [fieldRules];
 
-    for (const validator of validators) {
-      const error = validator(value, allValues);
+    for (const rule of rules) {
+      const error = rule(value, allValues);
       if (error) return error;
     }
     return null;
-  }, [validationSchema, values]);
+  }, [validationSchema]);
 
   /**
    * Validate all fields
@@ -241,11 +239,14 @@ export function useFormValidation(initialValues, validationSchema, options = {})
    * Set a specific field value programmatically
    */
   const setValue = useCallback((name, value) => {
-    setValues(prev => ({ ...prev, [name]: value }));
-    if (validateOnChange && touched[name]) {
-      const error = validateField(name, value);
-      setErrors(prevErrors => ({ ...prevErrors, [name]: error }));
-    }
+    setValues(prev => {
+      const newValues = { ...prev, [name]: value };
+      if (validateOnChange && touched[name]) {
+        const error = validateField(name, value, newValues);
+        setErrors(prevErrors => ({ ...prevErrors, [name]: error }));
+      }
+      return newValues;
+    });
   }, [touched, validateField, validateOnChange]);
 
   /**

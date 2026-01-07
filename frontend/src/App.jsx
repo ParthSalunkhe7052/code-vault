@@ -79,11 +79,16 @@ const AdminRoute = ({ children }) => {
 
     useEffect(() => {
         async function loadUser() {
-            if (isAuthenticated) {
-                const userData = await auth.getUser();
-                setUser(userData);
+            try {
+                if (isAuthenticated) {
+                    const userData = await auth.getUser();
+                    setUser(userData);
+                }
+            } catch (error) {
+                console.error('Failed to load user:', error);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
         loadUser();
     }, [isAuthenticated]);
@@ -123,9 +128,14 @@ function App() {
 
     useEffect(() => {
         // Initialize auth from encrypted storage on app startup
-        initializeAuth().then(() => {
-            setAuthInitialized(true);
-        });
+        initializeAuth()
+            .catch((error) => {
+                console.error('Auth initialization failed:', error);
+                // Could show a toast notification here
+            })
+            .finally(() => {
+                setAuthInitialized(true);
+            });
     }, []);
 
     // Show loading screen while initializing auth

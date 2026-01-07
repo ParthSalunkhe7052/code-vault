@@ -168,6 +168,7 @@ async def create_or_get_stripe_customer(user_id: str, email: str, conn) -> str:
     Create a Stripe customer or return existing customer ID.
     FIX C3: Added exception handling
     FIX C4: Persists customer ID immediately to prevent race conditions
+    FIXED: Add idempotency key to prevent duplicate customer creation
     """
     # Check if user already has a Stripe customer ID
     sub = await get_user_subscription(user_id, conn)
@@ -175,8 +176,16 @@ async def create_or_get_stripe_customer(user_id: str, email: str, conn) -> str:
         return sub["stripe_customer_id"]
 
     try:
+        # FIXED: Add idempotency key for customer creation
+        import hashlib
+        idempotency_key = f"customer_{hashlib.sha256(user_id.encode()).hexdigest()[:24]}"
+
         # Create new Stripe customer
-        customer = stripe.Customer.create(email=email, metadata={"user_id": user_id})
+        customer = stripe.Customer.create(
+            email=email,
+            metadata={"user_id": user_id},
+            idempotency_key=idempotency_key,
+        )
 
         # FIX C4: Persist customer ID immediately to prevent duplicate customers
         existing = await conn.fetchrow(
@@ -186,7 +195,7 @@ async def create_or_get_stripe_customer(user_id: str, email: str, conn) -> str:
         if existing:
             await conn.execute(
                 """
-                UPDATE subscriptions SET stripe_customer_id = $1, updated_at = NOW() 
+                UPDATE subscriptions SET stripe_customer_id = $1, updated_at = NOW()
                 WHERE user_id = $2
             """,
                 customer.id,
@@ -294,7 +303,11 @@ async def create_checkout_session(
         cancel_url = data.cancel_url or f"{base_url}/pricing?canceled=true"
 
         try:
-            # Create checkout session (FIX C3: wrapped in try-except)
+            # FIXED: Add idempotency key to prevent duplicate charges on retries
+            # Use user_id + price_id to ensure consistent idempotency per user/plan
+            import hashlib
+            idempotency_key = f"checkout_{user['id']}_{hashlib.sha256(data.price_id.encode()).hexdigest()[:16]}"
+
             session = stripe.checkout.Session.create(
                 customer=customer_id,
                 payment_method_types=["card"],
@@ -306,6 +319,7 @@ async def create_checkout_session(
                 allow_promotion_codes=True,
                 billing_address_collection="auto",
                 payment_method_collection="always",
+                idempotency_key=idempotency_key,
             )
 
             return {"checkout_url": session.url, "session_id": session.id}
@@ -343,9 +357,14 @@ async def create_customer_portal(
         return_url = data.return_url or f"{base_url}/billing"
 
         try:
-            # Create portal session (FIX C3: wrapped in try-except)
+            # FIXED: Add idempotency key to prevent duplicate portal sessions
+            import hashlib
+            idempotency_key = f"portal_{user['id']}_{hashlib.sha256(return_url.encode()).hexdigest()[:16]}"
+
             session = stripe.billing_portal.Session.create(
-                customer=sub["stripe_customer_id"], return_url=return_url
+                customer=sub["stripe_customer_id"],
+                return_url=return_url,
+                idempotency_key=idempotency_key,
             )
 
             return {"portal_url": session.url}
@@ -374,6 +393,9 @@ async def stripe_webhook(
 
     SECURITY: Webhook signature verification is REQUIRED in production.
     In development mode only, unsigned webhooks are allowed with a warning.
+
+    FIXED: Added idempotency checking to prevent duplicate event processing.
+    FIXED: Return 500 on errors so Stripe will retry.
     """
     payload = await request.body()
 
@@ -433,44 +455,75 @@ async def stripe_webhook(
         logger.error(f"[Stripe Webhook] Error constructing event: {e}")
         raise HTTPException(status_code=400, detail="Webhook error")
 
+    # CRITICAL FIX: Idempotency check - prevent duplicate event processing
+    # Get the event ID from Stripe
+    event_id = event.id if hasattr(event, "id") else None
+
     conn = await get_db()
     try:
+        # Check if this event was already processed
+        if event_id:
+            already_processed = await conn.fetchval(
+                "SELECT event_id FROM processed_webhook_events WHERE event_id = $1",
+                event_id
+            )
+            if already_processed:
+                logger.info(f"[Stripe Webhook] Idempotency: Event {event_id} already processed, skipping")
+                return {"status": "success", "message": "Event already processed"}
+
         async with conn.transaction():
             logger.info(f"[Stripe Webhook] Processing event: {event.type}")
 
-            # Handle checkout completion - route to appropriate handler
-            if event.type == "checkout.session.completed":
-                session = event.data.object
-                if getattr(session, "mode", None) == "subscription":
-                    await handle_subscription_checkout_completed(session, conn)
-                elif getattr(session, "mode", None) == "payment":
-                    await handle_license_purchase_completed(session, conn)
-                else:
-                    # Default to subscription if mode not specified
-                    await handle_subscription_checkout_completed(session, conn)
+            try:
+                # Handle checkout completion - route to appropriate handler
+                if event.type == "checkout.session.completed":
+                    session = event.data.object
+                    if getattr(session, "mode", None) == "subscription":
+                        await handle_subscription_checkout_completed(session, conn)
+                    elif getattr(session, "mode", None) == "payment":
+                        await handle_license_purchase_completed(session, conn)
+                    else:
+                        # Default to subscription if mode not specified
+                        await handle_subscription_checkout_completed(session, conn)
 
-            elif event.type == "customer.subscription.updated":
-                await handle_subscription_updated(event.data.object, conn)
+                elif event.type == "customer.subscription.updated":
+                    await handle_subscription_updated(event.data.object, conn)
 
-            elif event.type == "customer.subscription.deleted":
-                await handle_subscription_deleted(event.data.object, conn)
+                elif event.type == "customer.subscription.deleted":
+                    await handle_subscription_deleted(event.data.object, conn)
 
-            elif event.type == "invoice.payment_succeeded":
-                await handle_invoice_paid(event.data.object, conn)
+                elif event.type == "invoice.payment_succeeded":
+                    await handle_invoice_paid(event.data.object, conn)
 
-            elif event.type == "invoice.payment_failed":
-                await handle_invoice_failed(event.data.object, conn)
+                elif event.type == "invoice.payment_failed":
+                    await handle_invoice_failed(event.data.object, conn)
 
-            return {"status": "success"}
+                # FIXED: Handle refund events (Issue #5)
+                elif event.type == "charge.refunded":
+                    await handle_charge_refunded(event.data.object, conn)
+
+                # Store event ID for idempotency
+                if event_id:
+                    await conn.execute(
+                        "INSERT INTO processed_webhook_events (event_id, event_type) VALUES ($1, $2)",
+                        event_id,
+                        event.type
+                    )
+
+                return {"status": "success"}
+
+            except Exception as handler_error:
+                logger.error(f"[Stripe Webhook] Handler error for {event.type}: {handler_error}")
+                # Re-raise to trigger the outer exception handler and return 500
+                raise handler_error
+
     except Exception as e:
-        # Security: Log full error server-side, return generic message to client
-        logger.error(f"[Stripe Webhook] Error processing event: {e}")
-        # Return success to prevent Stripe from retrying endlessly (we logged the error)
-        # In a real production system, you might want to return 500 for retryable errors
-        return {
-            "status": "error",
-            "message": "An internal error occurred processing this webhook",
-        }
+        # FIXED: Return 500 so Stripe will retry (Issue #4)
+        logger.error(f"[Stripe Webhook] Critical error processing event {event_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error processing webhook"
+        )
     finally:
         await release_db(conn)
 
@@ -770,6 +823,87 @@ async def handle_invoice_failed(invoice, conn):
         )
 
 
+async def handle_charge_refunded(charge, conn):
+    """
+    FIXED: Handle charge refund events (Issue #5).
+    Revokes access for refunded subscription/license purchases.
+    """
+    # Get subscription ID from charge
+    subscription_id = None
+    if hasattr(charge, "subscription"):
+        subscription_id = charge.subscription
+
+    # Get customer ID from charge
+    customer_id = None
+    if hasattr(charge, "customer"):
+        customer_id = charge.customer
+
+    # Get refund amount
+    refund_amount = None
+    if hasattr(charge, "amount_refunded"):
+        refund_amount = charge.amount_refunded
+
+    logger.info(f"[Stripe Webhook] Processing refund: {charge.id} (amount: {refund_amount})")
+
+    # Handle subscription refunds
+    if subscription_id:
+        # Downgrade subscription to free tier
+        await conn.execute(
+            """
+            UPDATE subscriptions SET
+                status = 'refunded',
+                plan_tier = 'free',
+                updated_at = NOW()
+            WHERE stripe_subscription_id = $1
+        """,
+            subscription_id,
+        )
+
+        # Get user ID for syncing
+        user_id = await conn.fetchval(
+            "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = $1",
+            subscription_id,
+        )
+        if user_id:
+            await sync_user_tier(user_id, "free", conn)
+
+        logger.info(f"[Stripe Webhook] Subscription refunded and downgraded: {subscription_id}")
+
+    # Handle one-time license purchase refunds
+    elif customer_id:
+        # Find any license purchases tied to this customer
+        purchases = await conn.fetch(
+            """
+            SELECT id, license_id FROM license_purchases
+            WHERE stripe_payment_intent_id = $1 OR stripe_checkout_session_id = $2
+        """,
+            getattr(charge, "payment_intent", None),
+            getattr(charge, "checkout_session", None),
+        )
+
+        for purchase in purchases:
+            # Revoke the license if it exists
+            if purchase["license_id"]:
+                await conn.execute(
+                    """
+                    UPDATE licenses SET status = 'revoked', updated_at = NOW()
+                    WHERE id = $1
+                """,
+                    purchase["license_id"],
+                )
+                logger.info(f"[Stripe Webhook] Revoked license for refunded purchase: {purchase['license_id']}")
+
+            # Mark purchase as refunded
+            await conn.execute(
+                """
+                UPDATE license_purchases SET status = 'refunded' WHERE id = $1
+            """,
+                purchase["id"],
+            )
+
+    logger.info(f"[Stripe Webhook] Refund processing completed for charge: {charge.id}")
+
+
 # =============================================================================
 # Public Store Endpoints (for end-user license purchases - NO AUTH REQUIRED)
 # =============================================================================
@@ -848,7 +982,12 @@ async def create_license_purchase(data: PublicPurchaseRequest, request: Request)
         purchase_id = str(uuid.uuid4())
 
         try:
-            # Create Stripe checkout session for one-time payment (FIX C3: wrapped in try-except)
+            # FIXED: Add idempotency key to prevent duplicate license purchases
+            import hashlib
+            # Use project_id + buyer_email + timestamp hash for idempotency
+            unique_str = f"{project['id']}_{data.buyer_email}_{data.buyer_name or ''}"
+            idempotency_key = f"license_purchase_{hashlib.sha256(unique_str.encode()).hexdigest()[:32]}"
+
             session = stripe.checkout.Session.create(
                 payment_method_types=["card"],
                 line_items=[
@@ -874,6 +1013,7 @@ async def create_license_purchase(data: PublicPurchaseRequest, request: Request)
                     "buyer_email": data.buyer_email,
                     "buyer_name": data.buyer_name or "",
                 },
+                idempotency_key=idempotency_key,
             )
 
             # Save purchase record

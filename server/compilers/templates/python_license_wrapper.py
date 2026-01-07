@@ -231,9 +231,6 @@ def _cv_get_license_key_path():
         print(f"[CodeVault] Error determining license path: {e}")
         home_dir = _cv_os.path.expanduser("~")
         return _cv_os.path.join(home_dir, "license.key")
-        # Final fallback
-        home_dir = _cv_os.path.expanduser("~")
-        return _cv_os.path.join(home_dir, "license.key")
 
 def _cv_get_lease_path():
     """Get path to license.lease file next to the executable."""

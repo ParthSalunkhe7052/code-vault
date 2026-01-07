@@ -12,12 +12,11 @@ import hashlib
 from typing import Optional, Callable
 from datetime import datetime, timezone
 from functools import wraps
+from urllib.parse import urlparse
 
-from fastapi import HTTPException, Request, Depends
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Request
 import redis.asyncio as redis
 
-from config import ENVIRONMENT
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +37,9 @@ async def init_rate_limiter(redis_url: str) -> None:
         return
 
     try:
-        # Check if this is Upstash URL and handle connection issues
-        if "upstash.io" in redis_url:
+        # Check if this is Upstash URL and handle connection issues using hostname parsing
+        parsed = urlparse(redis_url)
+        if parsed.hostname and parsed.hostname.endswith(".upstash.io"):
             logger.info("[RateLimiter] Upstash Redis detected - testing connection...")
 
         _redis_client = redis.from_url(

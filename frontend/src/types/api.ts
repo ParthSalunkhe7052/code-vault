@@ -323,11 +323,12 @@ export interface AdminUser extends User {
 // =============================================================================
 
 export interface SubscriptionStatus {
-  tier: "free" | "pro" | "enterprise";
+  plan_tier: string;  // Changed from 'tier' to 'plan_tier' to match backend
   status: "active" | "canceled" | "past_due" | "trialing" | null;
-  current_period_end?: string;
+  current_period_end?: string | Date | null;  // More flexible type for backend responses
   cancel_at_period_end?: boolean;
   stripe_customer_id?: string;
+  limits: Record<string, number>;  // Added from backend response
 }
 
 export interface PricingTier {

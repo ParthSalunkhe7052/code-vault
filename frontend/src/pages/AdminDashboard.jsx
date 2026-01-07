@@ -8,6 +8,7 @@ import {
 import { admin } from '../services/api';
 import { useToast } from '../components/Toast';
 import { SkeletonCard, SkeletonChart } from '../components/Skeleton';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 
 // StatCard component
@@ -44,6 +45,7 @@ const AdminDashboard = () => {
     const [activeTab, setActiveTab] = useState('overview');
     const [userSearch, setUserSearch] = useState('');
     const [actionLoading, setActionLoading] = useState(null);
+    const [banConfirm, setBanConfirm] = useState({ open: false, userId: null, email: '' });
     const { showToast } = useToast();
 
     const tabs = [
@@ -111,10 +113,14 @@ const AdminDashboard = () => {
     };
 
     const handleBanUser = async (userId, email) => {
-        if (!confirm(`Are you sure you want to ban ${email}? This will revoke all their licenses.`)) {
-            return;
-        }
+        setBanConfirm({ open: true, userId, email });
+    };
+
+    const confirmBanUser = async () => {
+        const { userId, email } = banConfirm;
+        setBanConfirm({ open: false, userId: null, email: '' });
         setActionLoading(userId);
+
         try {
             await admin.banUser(userId);
             showToast(`User ${email} has been banned`, 'success');
@@ -594,6 +600,15 @@ const AdminDashboard = () => {
                     )}
                 </div>
             )}
+
+            {/* Ban User Confirmation Dialog */}
+            <ConfirmDialog
+                open={banConfirm.open}
+                title="Ban User"
+                message={`Are you sure you want to ban ${banConfirm.email}? This will revoke all their licenses.`}
+                onConfirm={confirmBanUser}
+                onCancel={() => setBanConfirm({ open: false, userId: null, email: '' })}
+            />
         </div>
     );
 };

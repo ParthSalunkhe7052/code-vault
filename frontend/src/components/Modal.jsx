@@ -132,9 +132,10 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
                     </h3>
                     <button
                         onClick={onClose}
-                        className="p-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2"
+                        className="p-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-70"
                         style={{
                             color: 'var(--cv-text-muted)',
+                            '--tw-ring-color': 'var(--cv-accent, currentColor)',
                         }}
                         aria-label="Close modal"
                     >

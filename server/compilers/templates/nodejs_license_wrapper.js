@@ -9,6 +9,16 @@ const child_process = require('child_process');
 const LICENSE_KEY = '{{LICENSE_KEY}}';
 const API_URL = '{{API_URL}}'; // e.g. https://api.codevault.com/api/v1/license/validate
 
+// Track temp files for cleanup
+const tempFiles = new Set();
+
+// Cleanup temp files on exit
+process.on('exit', () => {
+    for (const file of tempFiles) {
+        try { fs.unlinkSync(file); } catch (e) { /* ignore */ }
+    }
+});
+
 // ============================================================
 // UTILITY FUNCTIONS
 // ============================================================
@@ -351,10 +361,11 @@ if ($result -eq 'OK' -and $form.Tag) {
         // Execute PowerShell script
         const tempDir = os.tmpdir();
         const scriptPath = path.join(tempDir, `cv_license_${crypto.randomBytes(8).toString('hex')}.ps1`);
-        
+        tempFiles.add(scriptPath); // Track temp file
+
         try {
             fs.writeFileSync(scriptPath, psScript, 'utf-8');
-            
+
             const ps = child_process.spawn('powershell.exe', [
                 '-ExecutionPolicy', 'Bypass',
                 '-NoProfile',
@@ -379,7 +390,8 @@ if ($result -eq 'OK' -and $form.Tag) {
             ps.on('close', (code) => {
                 // Cleanup
                 try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
-                
+                tempFiles.delete(scriptPath);
+
                 const licenseKey = output.trim();
                 if (licenseKey && licenseKey.length > 0) {
                     resolve(licenseKey);
@@ -391,12 +403,14 @@ if ($result -eq 'OK' -and $form.Tag) {
             ps.on('error', (err) => {
                 console.error('[CodeVault] PowerShell error:', err.message);
                 try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+                tempFiles.delete(scriptPath);
                 resolve(null);
             });
 
         } catch (err) {
             console.error('[CodeVault] Failed to create GUI dialog:', err.message);
             try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+            tempFiles.delete(scriptPath);
             resolve(null);
         }
     });

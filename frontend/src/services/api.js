@@ -57,8 +57,8 @@ api.interceptors.response.use(
         if (error.response?.status === 401) {
             // Clear cached token and encrypted storage
             cachedToken = null;
-            secureLocalStorage.removeItem(TOKEN_KEY);
-            secureLocalStorage.removeItem(USER_KEY);
+            await secureLocalStorage.removeItem(TOKEN_KEY);
+            await secureLocalStorage.removeItem(USER_KEY);
             window.location.href = '/login';
         }
         return Promise.reject(error);
@@ -86,10 +86,10 @@ export const auth = {
         cachedToken = access_token;
         return user;
     },
-    logout: () => {
+    logout: async () => {
         cachedToken = null;
-        secureLocalStorage.removeItem(TOKEN_KEY);
-        secureLocalStorage.removeItem(USER_KEY);
+        await secureLocalStorage.removeItem(TOKEN_KEY);
+        await secureLocalStorage.removeItem(USER_KEY);
     },
     isAuthenticated: () => {
         return !!cachedToken;

@@ -2,6 +2,7 @@ import json
 import secrets
 import shutil
 import zipfile
+import logging
 
 from typing import List
 from pathlib import Path
@@ -13,7 +14,9 @@ from utils import get_current_user, utc_now, safe_join, validate_project_id, Sec
 from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
+from middleware.rate_limiter import RateLimitDependency
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 # Local upload directory
@@ -181,11 +184,11 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
 async def update_project_config(
     project_id: str, data: ProjectConfigRequest, user: dict = Depends(get_current_user)
 ):
-    # Debug: Print what we're receiving
-    print(f"\n[CONFIG SAVE] Project {project_id}")
-    print(f"  Received skip_obfuscation: {data.skip_obfuscation}")
-    print(f"  Received enable_lease: {data.enable_lease}")
-    print(f"  Received compiler_options: {data.compiler_options}\n", flush=True)
+    # Debug: Log what we're receiving
+    logger.debug(
+        "Saving config for project %s: skip_obfuscation=%s, enable_lease=%s, compiler_options=%s",
+        project_id, data.skip_obfuscation, data.enable_lease, data.compiler_options
+    )
 
     conn = await get_db()
     try:
@@ -236,6 +239,7 @@ async def upload_files(
     project_id: str,
     files: List[UploadFile] = File(...),
     user: dict = Depends(get_current_user),
+    _rate_limit: None = Depends(RateLimitDependency(max_requests=10, window_seconds=60, prefix="project:upload")),
 ):
     conn = await get_db()
     try:
@@ -358,6 +362,7 @@ async def upload_project_zip(
     project_id: str,
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
+    _rate_limit: None = Depends(RateLimitDependency(max_requests=5, window_seconds=60, prefix="project:upload-zip")),
 ):
     """Upload an entire project as a ZIP file."""
     conn = await get_db()

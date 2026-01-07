@@ -4,11 +4,14 @@ Extracted from main.py for modularity.
 """
 
 import uuid
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from utils import get_current_admin_user
 from database import get_db, release_db, db_pool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
@@ -307,42 +310,43 @@ async def update_user_plan(
 
     conn = await get_db()
     try:
-        # Verify user exists
-        user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+        async with conn.transaction():
+            # Verify user exists
+            user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
 
-        # Update users table
-        await conn.execute(
-            "UPDATE users SET plan = $1, updated_at = NOW() WHERE id = $2",
-            data.plan,
-            user_id,
-        )
-
-        # Update or create subscription
-        existing = await conn.fetchrow(
-            "SELECT id FROM subscriptions WHERE user_id = $1", user_id
-        )
-        if existing:
+            # Update users table
             await conn.execute(
-                """
-                UPDATE subscriptions SET plan_tier = $1, status = 'active',
-                sync_source = 'admin_override', updated_at = NOW()
-                WHERE user_id = $2
-                """,
+                "UPDATE users SET plan = $1, updated_at = NOW() WHERE id = $2",
                 data.plan,
                 user_id,
             )
-        else:
-            await conn.execute(
-                """
-                INSERT INTO subscriptions (id, user_id, plan_tier, status, sync_source)
-                VALUES ($1, $2, $3, 'active', 'admin_override')
-                """,
-                str(uuid.uuid4()),
-                user_id,
-                data.plan,
+
+            # Update or create subscription
+            existing = await conn.fetchrow(
+                "SELECT id FROM subscriptions WHERE user_id = $1", user_id
             )
+            if existing:
+                await conn.execute(
+                    """
+                    UPDATE subscriptions SET plan_tier = $1, status = 'active',
+                    sync_source = 'admin_override', updated_at = NOW()
+                    WHERE user_id = $2
+                    """,
+                    data.plan,
+                    user_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO subscriptions (id, user_id, plan_tier, status, sync_source)
+                    VALUES ($1, $2, $3, 'active', 'admin_override')
+                    """,
+                    str(uuid.uuid4()),
+                    user_id,
+                    data.plan,
+                )
 
         return {"message": f"User plan updated to {data.plan}"}
     finally:
@@ -371,6 +375,12 @@ async def update_user_role(
             data.role,
             user_id,
         )
+
+        logger.info(
+            f"[Admin] Role changed to '{data.role}' for user ID: {user_id[:8]}... "
+            f"(by admin: {admin['id'][:8]}...)"
+        )
+
         return {"message": f"User role updated to {data.role}"}
     finally:
         await release_db(conn)
@@ -384,43 +394,46 @@ async def ban_user(
     """Admin: Ban a user - revoke all licenses, disable account."""
     conn = await get_db()
     try:
-        # Verify user exists
-        user = await conn.fetchrow("SELECT id, email FROM users WHERE id = $1", user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+        async with conn.transaction():
+            # Verify user exists with role
+            user = await conn.fetchrow("SELECT id, email, role FROM users WHERE id = $1", user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
 
-        # Don't allow banning yourself
-        if user_id == admin["id"]:
-            raise HTTPException(status_code=400, detail="Cannot ban yourself")
+            # Security checks
+            if user_id == admin["id"]:
+                raise HTTPException(status_code=400, detail="Cannot ban yourself")
+            if user.get("role") == "admin":
+                raise HTTPException(status_code=400, detail="Cannot ban another admin")
 
-        # Revoke all user's licenses
-        await conn.execute(
-            """
-            UPDATE licenses l SET status = 'revoked'
-            FROM projects p
-            WHERE l.project_id = p.id AND p.user_id = $1
-            """,
-            user_id,
-        )
+            # Revoke all user's licenses
+            await conn.execute(
+                """
+                UPDATE licenses l SET status = 'revoked'
+                FROM projects p
+                WHERE l.project_id = p.id AND p.user_id = $1
+                """,
+                user_id,
+            )
 
-        # Set plan to free and role to banned
-        await conn.execute(
-            """
-            UPDATE users SET plan = 'free', role = 'banned', updated_at = NOW()
-            WHERE id = $1
-            """,
-            user_id,
-        )
+            # Set plan to free and role to banned
+            await conn.execute(
+                """
+                UPDATE users SET plan = 'free', role = 'banned', updated_at = NOW()
+                WHERE id = $1
+                """,
+                user_id,
+            )
 
-        # Update subscription to inactive
-        await conn.execute(
-            """
-            UPDATE subscriptions SET status = 'canceled', plan_tier = 'free',
-            sync_source = 'admin_ban', updated_at = NOW()
-            WHERE user_id = $1
-            """,
-            user_id,
-        )
+            # Update subscription to inactive
+            await conn.execute(
+                """
+                UPDATE subscriptions SET status = 'canceled', plan_tier = 'free',
+                sync_source = 'admin_ban', updated_at = NOW()
+                WHERE user_id = $1
+                """,
+                user_id,
+            )
 
         return {"message": f"User {user['email']} has been banned"}
     finally:

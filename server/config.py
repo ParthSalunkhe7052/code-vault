@@ -34,23 +34,15 @@ CORS_ALLOW_ALL = os.getenv("CORS_ALLOW_ALL", "false").lower() == "true"
 # Environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
-# Validate critical secrets in production
-if ENVIRONMENT == "production":
-    if SECRET_KEY == "dev-secret-key-change-in-production":
-        raise ValueError(
-            "CRITICAL: SECRET_KEY must be set in production! Set it in .env file."
-        )
-    if JWT_SECRET == "jwt-secret-change-in-production":
-        raise ValueError(
-            "CRITICAL: JWT_SECRET must be set in production! Set it in .env file."
-        )
-    if not STRIPE_WEBHOOK_SECRET:
-        raise ValueError(
-            "CRITICAL: STRIPE_WEBHOOK_SECRET must be set in production! "
-            "Without it, Stripe webhooks cannot be verified and payments will fail. "
-            "Get your webhook secret from the Stripe Dashboard > Developers > Webhooks."
-        )
+# =============================================================================
+# Load All Environment Variables FIRST (before validation)
+# =============================================================================
 
+# Security
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET", "jwt-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
 
 # Redis (Upstash)
 UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
@@ -96,6 +88,64 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 # Stripe Price IDs
 STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "")
 STRIPE_PRICE_ENTERPRISE = os.getenv("STRIPE_PRICE_ENTERPRISE", "")
+
+# =============================================================================
+# SECURITY VALIDATION (Startup Checks)
+# =============================================================================
+
+# Track configuration issues
+config_issues = []
+
+# Validate ENVIRONMENT setting
+valid_environments = {"development", "staging", "production"}
+if ENVIRONMENT not in valid_environments:
+    config_issues.append(
+        f"ENVIRONMENT must be one of {valid_environments}, got '{ENVIRONMENT}'"
+    )
+
+# Validate database URL
+if not DATABASE_URL:
+    config_issues.append("DATABASE_URL is not set")
+
+# Validate secrets in production
+if ENVIRONMENT == "production":
+    if SECRET_KEY == "dev-secret-key-change-in-production":
+        config_issues.append(
+            "SECRET_KEY must be changed from default in production!"
+        )
+    if JWT_SECRET == "jwt-secret-change-in-production":
+        config_issues.append(
+            "JWT_SECRET must be changed from default in production!"
+        )
+    if not STRIPE_WEBHOOK_SECRET:
+        config_issues.append(
+            "STRIPE_WEBHOOK_SECRET must be set in production for secure webhooks!"
+        )
+
+    # Additional production security checks
+    if CORS_ALLOW_ALL:
+        config_issues.append(
+            "CORS_ALLOW_ALL=true is insecure in production. Use specific origins."
+        )
+
+# Warn in development, fail in production
+if config_issues:
+    if ENVIRONMENT == "production":
+        error_msg = "\n".join([
+            "CRITICAL CONFIGURATION ERRORS:",
+            *config_issues,
+            "",
+            "Server cannot start in production with these issues."
+        ])
+        raise ValueError(error_msg)
+    else:
+        print("\n[Config] ⚠️  DEVELOPMENT MODE: Configuration warnings:")
+        for issue in config_issues:
+            print(f"  - {issue}")
+        print()
+
+# Log current environment for visibility
+print(f"[Config] Environment: {ENVIRONMENT}")
 
 # Subscription Tier Limits
 # -1 means unlimited
