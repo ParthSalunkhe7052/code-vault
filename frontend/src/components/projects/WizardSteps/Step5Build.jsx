@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package } from 'lucide-react';
+import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key } from 'lucide-react';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -24,6 +24,7 @@ const Step5Build = ({
     onStartBuild,
     onStopBuild,
     onOpenOutputFolder,
+    onViewLicenses,
     // Distribution settings
     distributionType,
     setDistributionType,
@@ -195,6 +196,17 @@ const Step5Build = ({
                         <p className="text-xs text-slate-500 mt-2">
                             ⏱️ First build takes 5-10 minutes to download compilers
                         </p>
+                        
+                        {/* View License Key Button */}
+                        {onViewLicenses && (
+                            <button
+                                onClick={onViewLicenses}
+                                className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600/20 to-purple-600/20 hover:from-indigo-600/30 hover:to-purple-600/30 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 hover:text-indigo-200 rounded-lg transition-all font-medium"
+                            >
+                                <Key size={18} />
+                                View License Keys
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -549,6 +561,17 @@ const Step5Build = ({
                 <p className="text-center text-amber-400 text-sm">
                     ⚠️ Please select your project folder above
                 </p>
+            )}
+
+            {/* View License Key Button */}
+            {onViewLicenses && (
+                <button
+                    onClick={onViewLicenses}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600/20 to-purple-600/20 hover:from-indigo-600/30 hover:to-purple-600/30 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 hover:text-indigo-200 rounded-lg transition-all font-medium"
+                >
+                    <Key size={18} />
+                    View License Keys
+                </button>
             )}
         </div>
     );

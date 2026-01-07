@@ -18,9 +18,10 @@ def run_local_build(args):
 
     print("[BUILD] License Wrapper - Local Build Mode", flush=True)
 
-    # Get lease and obfuscate flags (default OFF)
-    lease_enabled = getattr(args, "lease", False)
-    obfuscate_enabled = getattr(args, "obfuscate", False)
+    # Check for obfuscation and lease flags from command-line arguments
+    # If not provided, defaults are OFF
+    lease_enabled = getattr(args, 'enable_lease', False)
+    obfuscate_enabled = getattr(args, 'obfuscate', False)
 
     config = {
         "project_name": entry_path.stem,
@@ -45,13 +46,13 @@ def run_local_build(args):
         config["demo_duration"] = args.demo_duration or 60
         print(f"[BUILD] Demo Mode: {config['demo_duration']} minutes", flush=True)
 
-    # Display advanced options state
+    # Display build options
     print()
-    print(f"[BUILD] {Colors.CYAN}Advanced Options:{Colors.RESET}")
+    print(f"[BUILD] {Colors.CYAN}Build Options (from project settings):{Colors.RESET}")
     lease_status = f"{Colors.GREEN}ON{Colors.RESET}" if lease_enabled else f"{Colors.DIM}OFF{Colors.RESET}"
     obfuscate_status = f"{Colors.GREEN}ON{Colors.RESET}" if obfuscate_enabled else f"{Colors.DIM}OFF{Colors.RESET}"
-    print(f"        Offline Lease (24h): [{lease_status}]")
-    print(f"        Code Obfuscation:    [{obfuscate_status}]")
+    print(f"  Offline Lease (24h): [{lease_status}]")
+    print(f"  Code Obfuscation:    [{obfuscate_status}]")
     print()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,10 +157,6 @@ def cmd_build(args):
     project_id = args.project_id
     license_key = args.license
 
-    # Get lease and obfuscate flags (default OFF)
-    lease_enabled = getattr(args, "lease", False)
-    obfuscate_enabled = getattr(args, "obfuscate", False)
-
     if getattr(args, "open", False):
         license_key = None
         color_print("🔓 Open Build Mode: No license protection", Colors.YELLOW)
@@ -187,14 +184,6 @@ def cmd_build(args):
 
     print_header("CodeVault CLI - Local Compilation")
 
-    # Display advanced options state
-    print(f"{Colors.CYAN}Advanced Options:{Colors.RESET}")
-    lease_status = f"{Colors.GREEN}ON{Colors.RESET}" if lease_enabled else f"{Colors.DIM}OFF{Colors.RESET}"
-    obfuscate_status = f"{Colors.GREEN}ON{Colors.RESET}" if obfuscate_enabled else f"{Colors.DIM}OFF{Colors.RESET}"
-    print(f"  Offline Lease (24h): [{lease_status}]")
-    print(f"  Code Obfuscation:    [{obfuscate_status}]")
-    print()
-
     try:
         color_print("[1/5] Fetching project configuration...", Colors.BLUE)
         params = {}
@@ -212,10 +201,14 @@ def cmd_build(args):
             return
 
         config = resp.json()
-        config["lease_enabled"] = lease_enabled
-        config["obfuscate_enabled"] = obfuscate_enabled
 
-        print(f"      Project: {config['project_name']}")
+        # Convert server naming to CLI naming
+        # Server: skip_obfuscation (True = don't obfuscate), enable_lease
+        # CLI: obfuscate_enabled (True = obfuscate), lease_enabled
+        config["obfuscate_enabled"] = not config.get("skip_obfuscation", True)
+        config["lease_enabled"] = config.get("enable_lease", False)
+
+        print(f"\n      Project: {config['project_name']}")
         print(f"      Entry file: {config['entry_file']}")
         print(f"      Output: {config['output_name']}.exe")
 
@@ -284,8 +277,25 @@ def cmd_build(args):
                     for key in ["license_key", "api_url", "server_url", "language"]:
                         if key in bundle_config and bundle_config[key]:
                             config[key] = bundle_config[key]
+                    
+                    # Load build options from bundle config
+                    # Convert server naming to CLI naming
+                    # Server: skip_obfuscation (True = don't obfuscate), enable_lease
+                    # CLI: obfuscate_enabled (True = obfuscate), lease_enabled
+                    if "skip_obfuscation" in bundle_config:
+                        config["obfuscate_enabled"] = not bundle_config["skip_obfuscation"]
+                    if "enable_lease" in bundle_config:
+                        config["lease_enabled"] = bundle_config["enable_lease"]
                 except Exception:
                     pass
+
+            # Display build options loaded from bundle
+            print(f"\n{Colors.CYAN}Build Options (from project settings):{Colors.RESET}")
+            lease_status = f"{Colors.GREEN}ON{Colors.RESET}" if config.get("lease_enabled", False) else f"{Colors.DIM}OFF{Colors.RESET}"
+            obfuscate_status = f"{Colors.GREEN}ON{Colors.RESET}" if config.get("obfuscate_enabled", False) else f"{Colors.DIM}OFF{Colors.RESET}"
+            print(f"  Offline Lease (24h): [{lease_status}]")
+            print(f"  Code Obfuscation:    [{obfuscate_status}]")
+            print()
 
             source_dir = project_dir / "source"
             if not source_dir.exists():

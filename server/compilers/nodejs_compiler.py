@@ -490,42 +490,114 @@ validateLicense().then(() => {{
     async def _run_obfuscation(
         self, build_dir: Path, log_callback: Optional[Callable] = None
     ):
-        """Run JavaScript obfuscation on the build directory."""
-        await self.log("🔒 Obfuscating JavaScript code (in-place)...", log_callback)
+        """Run JavaScript obfuscation on the build directory.
 
-        cmd = [
-            str(self.obfuscator_bin),
-            str(build_dir),
-            "--output",
-            str(build_dir),
-            "--ignore-require-imports",
-            "true",
-            "--compact",
-            "true",
-            "--control-flow-flattening",
-            "true",
-            "--string-array",
-            "true",
-            "--string-array-encoding",
-            "rc4",
-            "--exclude",
-            "**/node_modules/**",
-            "--exclude",
-            "node_modules/**",
+        Uses optimized settings for faster builds while maintaining strong protection.
+        Key protections: string array encryption, identifier renaming, minification.
+        Skipped for speed: control-flow-flattening (very slow), dead-code-injection.
+
+        Processes files individually for better reliability.
+        """
+        await self.log("🔒 Obfuscating JavaScript code...", log_callback)
+
+        # Find all JS files to obfuscate (excluding node_modules)
+        js_files = []
+        for js_file in build_dir.rglob("*.js"):
+            if "node_modules" in str(js_file):
+                continue
+            js_files.append(js_file)
+
+        if not js_files:
+            await self.log("⚠️ No JavaScript files found to obfuscate.", log_callback)
+            return
+
+        await self.log(f"📄 Obfuscating {len(js_files)} JS files...", log_callback)
+
+        # Obfuscation settings optimized for speed + protection
+        # Valid options for javascript-obfuscator@4.1.0
+        obfuscate_args = [
+            # Core obfuscation (fast, good protection)
+            "--compact", "true",
+            "--rename-globals", "true",
+            "--rename-properties", "false",  # Can break code, keep off
+            # String protection (good protection, moderate speed)
+            "--string-array", "true",
+            "--string-array-threshold", "0.75",
+            "--string-array-encoding", "base64",  # Faster than rc4
+            "--string-array-shuffle", "true",
+            # Identifier obfuscation
+            "--identifier-names-generator", "hexadecimal",
+            # Disable slow options for faster builds
+            "--control-flow-flattening", "false",  # Very slow, skip for speed
+            "--dead-code-injection", "false",
+            "--self-defending", "false",
+            # Preserve require/import statements
+            "--ignore-imports", "true",
         ]
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+        failed_files = []
 
-            if process.returncode != 0:
-                error_output = stderr.decode("utf-8", errors="replace")
-                await self.log(f"⚠️ Obfuscation warning: {error_output}", log_callback)
-                await self.log("Continuing without obfuscation...", log_callback)
-            else:
-                await self.log("✓ Obfuscation completed.", log_callback)
+        try:
+            for js_file in js_files:
+                # Build command: javascript-obfuscator <input> --output <output> <options>
+                cmd = [
+                    str(self.obfuscator_bin),
+                    str(js_file),  # Input file
+                    "--output", str(js_file),  # Output (in-place obfuscation)
+                ] + obfuscate_args
+
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=str(build_dir)
+                    )
+
+                    # Wait with timeout (30 seconds per file)
+                    try:
+                        stdout, stderr = await asyncio.wait_for(
+                            process.communicate(),
+                            timeout=30.0
+                        )
+
+                        if process.returncode != 0:
+                            failed_files.append(js_file.name)
+                            # Only log first 3 failures to avoid spam
+                            if len(failed_files) <= 3:
+                                await self.log(
+                                    f"   Warning: Failed to obfuscate {js_file.name}",
+                                    log_callback
+                                )
+                                # Show error details for debugging
+                                if stderr:
+                                    error_msg = stderr.decode("utf-8", errors="replace")[:200]
+                                    await self.log(f"      Error: {error_msg}", log_callback)
+                    except asyncio.TimeoutError:
+                        failed_files.append(js_file.name)
+                        process.kill()
+                        await self.log(
+                            f"   Warning: Timeout obfuscating {js_file.name}",
+                            log_callback
+                        )
+
+                except Exception as file_error:
+                    failed_files.append(js_file.name)
+                    if len(failed_files) <= 3:
+                        await self.log(
+                            f"   Warning: Error obfuscating {js_file.name}: {file_error}",
+                            log_callback
+                        )
+
+            # Report summary
+            if failed_files:
+                await self.log(
+                    f"   {len(failed_files)}/{len(js_files)} files had obfuscation warnings",
+                    log_callback
+                )
+
+            await self.log("✓ Obfuscation complete", log_callback)
+
         except Exception as e:
             await self.log(
                 f"⚠️ Obfuscation failed: {e}. Continuing without obfuscation.",

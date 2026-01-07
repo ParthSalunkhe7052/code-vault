@@ -195,8 +195,10 @@ def _cv_get_license_key_path():
     """Get path to license.key file next to the executable."""
     try:
         if getattr(_cv_sys, 'frozen', False):
+            # Running as compiled exe (Nuitka/PyInstaller)
             exe_dir = _cv_os.path.dirname(_cv_sys.executable)
         else:
+            # Running as script
             exe_dir = _cv_os.path.dirname(_cv_os.path.abspath(__file__))
         
         # Try executable directory first
@@ -208,16 +210,27 @@ def _cv_get_license_key_path():
             with open(test_file, 'w') as f:
                 f.write("test")
             _cv_os.remove(test_file)
+            print(f"[CodeVault] License will be saved to: {key_path}")
             return key_path
-        except Exception:
+        except Exception as write_err:
             # Fall back to user's home directory if exe dir is not writable
-            print(f"[CodeVault] Warning: Cannot write to {exe_dir}, using home directory")
+            print(f"[CodeVault] Cannot write to exe directory: {exe_dir}")
+            print(f"[CodeVault] Reason: {write_err}")
             home_dir = _cv_os.path.expanduser("~")
             app_data_dir = _cv_os.path.join(home_dir, ".codevault")
-            _cv_os.makedirs(app_data_dir, exist_ok=True)
-            return _cv_os.path.join(app_data_dir, "license.key")
+            try:
+                _cv_os.makedirs(app_data_dir, exist_ok=True)
+            except Exception:
+                pass
+            fallback_path = _cv_os.path.join(app_data_dir, "license.key")
+            print(f"[CodeVault] Using fallback path: {fallback_path}")
+            return fallback_path
             
-    except Exception:
+    except Exception as e:
+        # Final fallback
+        print(f"[CodeVault] Error determining license path: {e}")
+        home_dir = _cv_os.path.expanduser("~")
+        return _cv_os.path.join(home_dir, "license.key")
         # Final fallback
         home_dir = _cv_os.path.expanduser("~")
         return _cv_os.path.join(home_dir, "license.key")
@@ -225,18 +238,15 @@ def _cv_get_license_key_path():
 def _cv_get_lease_path():
     """Get path to license.lease file next to the executable."""
     try:
-        if getattr(_cv_sys, 'frozen', False):
-            exe_dir = _cv_os.path.dirname(_cv_sys.executable)
-        else:
-            exe_dir = _cv_os.path.dirname(_cv_os.path.abspath(__file__))
-        
-        # Use same directory as license.key file
+        # Use same directory as license.key file for consistency
         key_path = _cv_get_license_key_path()
         lease_dir = _cv_os.path.dirname(key_path)
-        return _cv_os.path.join(lease_dir, "license.lease")
+        lease_path = _cv_os.path.join(lease_dir, "license.lease")
+        return lease_path
             
-    except Exception:
+    except Exception as e:
         # Final fallback
+        print(f"[CodeVault] Error determining lease path: {e}")
         home_dir = _cv_os.path.expanduser("~")
         return _cv_os.path.join(home_dir, "license.lease")
 
@@ -476,26 +486,33 @@ def _cv_license_check():
 
         # Prompt for new license
         key = _cv_prompt_license()
-        if not k_cv_os.makedirs(_cv_os.path.dirname(key_file), exist_ok=True)
+        if not key:
+            _cv_show_error("NO LICENSE KEY", "No license key was provided.", "Please run the application again and enter a valid license key.")
+            return False
+
+        # Validate the entered key
+        success, server_time = _cv_validate_license(key, hwid, API_URL)
+
+        if success is True:
+            # Save license key to the same directory as the executable
+            try:
+                key_dir = _cv_os.path.dirname(key_file)
+                if key_dir and not _cv_os.path.exists(key_dir):
+                    _cv_os.makedirs(key_dir, exist_ok=True)
                 with open(key_file, "w", encoding="utf-8") as f:
                     f.write(key)
                 print(f"[CodeVault] License saved to: {key_file}")
             except Exception as e:
-                print(f"[CodeVault] Warning: Could not save license: {e}")s True:
-            # Save license key
-            try:
-                with open(key_file, "w", encoding="utf-8") as f:
-                    f.write(key)
-                print(f"[CodeVault] License saved")
-            except Exception:
-                pass
+                print(f"[CodeVault] Warning: Could not save license: {e}")
 
-            # Create lease
+            # Create lease for offline use
             local_time = int(_cv_time.time())
             drift = abs(local_time - server_time)
             if drift <= _CV_CLOCK_DRIFT_MAX:
                 lease = _cv_create_lease(key, hwid, server_time)
                 _cv_save_lease(lease)
+            else:
+                print(f"[CodeVault] Clock drift detected ({drift}s), lease not saved")
 
             print("[CodeVault] License activated!")
             return True

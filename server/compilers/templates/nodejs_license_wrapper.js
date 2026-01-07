@@ -231,357 +231,175 @@ function deleteSavedLicenseAndLease() {
 // LICENSE KEY PROMPTING
 // ============================================================
 
-// GUI Prompt using HTML dialog in default browser (modern, matches Python tkinter style)
-function promptGUI() {
+// Native GUI Prompt using PowerShell (matches Python tkinter style)
+function promptNativeGUI() {
     return new Promise((resolve) => {
-        const http = require('http');
-        const querystring = require('querystring');
+        // PowerShell script to create a native Windows Form dialog matching the Python tkinter style
+        const psScript = `
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'License Activation'
+$form.Size = New-Object System.Drawing.Size(470, 350)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1a1a2e')
+$form.ForeColor = [System.Drawing.Color]::White
+$form.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+
+# Branding label
+$brandLabel = New-Object System.Windows.Forms.Label
+$brandLabel.Text = 'Protected by CodeVault'
+$brandLabel.Location = New-Object System.Drawing.Point(0, 20)
+$brandLabel.Size = New-Object System.Drawing.Size(450, 20)
+$brandLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#888888')
+$brandLabel.TextAlign = 'MiddleCenter'
+$brandLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$form.Controls.Add($brandLabel)
+
+# Icon/Lock emoji panel
+$iconLabel = New-Object System.Windows.Forms.Label
+$iconLabel.Text = [char]0x1F512
+$iconLabel.Location = New-Object System.Drawing.Point(0, 45)
+$iconLabel.Size = New-Object System.Drawing.Size(450, 40)
+$iconLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#e94560')
+$iconLabel.TextAlign = 'MiddleCenter'
+$iconLabel.Font = New-Object System.Drawing.Font('Segoe UI Emoji', 20)
+$form.Controls.Add($iconLabel)
+
+# Title label
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Text = 'License Activation'
+$titleLabel.Location = New-Object System.Drawing.Point(0, 90)
+$titleLabel.Size = New-Object System.Drawing.Size(450, 30)
+$titleLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#e94560')
+$titleLabel.TextAlign = 'MiddleCenter'
+$titleLabel.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.FontStyle]::Bold)
+$form.Controls.Add($titleLabel)
+
+# Subtitle label
+$subtitleLabel = New-Object System.Windows.Forms.Label
+$subtitleLabel.Text = 'Enter your license key to activate this application'
+$subtitleLabel.Location = New-Object System.Drawing.Point(0, 125)
+$subtitleLabel.Size = New-Object System.Drawing.Size(450, 25)
+$subtitleLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#aaaaaa')
+$subtitleLabel.TextAlign = 'MiddleCenter'
+$subtitleLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$form.Controls.Add($subtitleLabel)
+
+# License key text box with border panel
+$borderPanel = New-Object System.Windows.Forms.Panel
+$borderPanel.Location = New-Object System.Drawing.Point(35, 165)
+$borderPanel.Size = New-Object System.Drawing.Size(380, 42)
+$borderPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#16213e')
+$form.Controls.Add($borderPanel)
+
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Location = New-Object System.Drawing.Point(6, 6)
+$textBox.Size = New-Object System.Drawing.Size(368, 30)
+$textBox.Font = New-Object System.Drawing.Font('Consolas', 12)
+$textBox.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0f0f23')
+$textBox.ForeColor = [System.Drawing.Color]::White
+$textBox.BorderStyle = 'None'
+$textBox.CharacterCasing = 'Upper'
+$borderPanel.Controls.Add($textBox)
+
+# Activate button
+$activateButton = New-Object System.Windows.Forms.Button
+$activateButton.Text = [char]0x2714 + ' Activate License'
+$activateButton.Location = New-Object System.Drawing.Point(35, 225)
+$activateButton.Size = New-Object System.Drawing.Size(380, 45)
+$activateButton.FlatStyle = 'Flat'
+$activateButton.FlatAppearance.BorderSize = 0
+$activateButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#e94560')
+$activateButton.ForeColor = [System.Drawing.Color]::White
+$activateButton.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+$activateButton.Cursor = 'Hand'
+
+$activateButton.Add_Click({
+    $key = $textBox.Text.Trim()
+    if ($key -ne '') {
+        $form.Tag = $key
+        $form.DialogResult = 'OK'
+        $form.Close()
+    }
+})
+$form.Controls.Add($activateButton)
+
+# Handle Enter key
+$textBox.Add_KeyDown({
+    if ($_.KeyCode -eq 'Enter') {
+        $activateButton.PerformClick()
+    }
+})
+
+$form.AcceptButton = $activateButton
+$textBox.Focus()
+
+$result = $form.ShowDialog()
+
+if ($result -eq 'OK' -and $form.Tag) {
+    Write-Output $form.Tag
+}
+`;
+
+        // Execute PowerShell script
+        const tempDir = os.tmpdir();
+        const scriptPath = path.join(tempDir, `cv_license_${crypto.randomBytes(8).toString('hex')}.ps1`);
         
-        let licenseKey = null;
-        let server = null;
-
-        // Find available port
-        const getPort = () => {
-            return new Promise((portResolve) => {
-                const testServer = http.createServer();
-                testServer.listen(0, '127.0.0.1', () => {
-                    const port = testServer.address().port;
-                    testServer.close(() => portResolve(port));
-                });
+        try {
+            fs.writeFileSync(scriptPath, psScript, 'utf-8');
+            
+            const ps = child_process.spawn('powershell.exe', [
+                '-ExecutionPolicy', 'Bypass',
+                '-NoProfile',
+                '-NoLogo',
+                '-File', scriptPath
+            ], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                windowsHide: false
             });
-        };
 
-        getPort().then(port => {
-            // Create HTTP server for validation
-            server = http.createServer(async (req, res) => {
-                // CORS headers
-                res.setHeader('Access-Control-Allow-Origin', '*');
-                res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-                res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            let output = '';
+            let errorOutput = '';
 
-                if (req.method === 'OPTIONS') {
-                    res.writeHead(200);
-                    res.end();
-                    return;
-                }
+            ps.stdout.on('data', (data) => {
+                output += data.toString();
+            });
 
-                if (req.url === '/' && req.method === 'GET') {
-                    // Serve HTML dialog
-                    const htmlContent = getHtmlDialog(API_URL, port);
-                    res.writeHead(200, { 'Content-Type': 'text/html' });
-                    res.end(htmlContent);
-                } else if (req.url === '/validate' && req.method === 'POST') {
-                    // Handle license validation
-                    let body = '';
-                    req.on('data', chunk => body += chunk);
-                    req.on('end', async () => {
-                        try {
-                            const data = JSON.parse(body);
-                            const key = data.license_key;
+            ps.stderr.on('data', (data) => {
+                errorOutput += data.toString();
+            });
 
-                            // Validate with server
-                            const hwid = getHWID();
-                            const nonce = crypto.randomBytes(16).toString('hex');
-                            const timestamp = Math.floor(Date.now() / 1000);
-
-                            const validationResult = await validateWithServer(key, hwid, nonce, timestamp);
-
-                            if (validationResult.success) {
-                                licenseKey = key;
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ success: true, message: 'License activated successfully!' }));
-                            } else {
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ success: false, message: validationResult.message }));
-                            }
-                        } catch (e) {
-                            res.writeHead(500, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ success: false, message: 'Validation error' }));
-                        }
-                    });
-                } else if (req.url === '/activation-complete' && req.method === 'POST') {
-                    res.writeHead(200);
-                    res.end();
-                    // Close server after successful activation
-                    setTimeout(() => {
-                        server.close();
-                        resolve(licenseKey);
-                    }, 500);
+            ps.on('close', (code) => {
+                // Cleanup
+                try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+                
+                const licenseKey = output.trim();
+                if (licenseKey && licenseKey.length > 0) {
+                    resolve(licenseKey);
                 } else {
-                    res.writeHead(404);
-                    res.end();
-                }
-            });
-
-            server.listen(port, '127.0.0.1', () => {
-                console.log(`[CodeVault] License activation server started on port ${port}`);
-                // Open browser
-                const url = `http://127.0.0.1:${port}`;
-                const start = os.platform() === 'win32' ? 'start' : os.platform() === 'darwin' ? 'open' : 'xdg-open';
-                child_process.exec(`${start} ${url}`, (error) => {
-                    if (error) {
-                        console.error('[CodeVault] Failed to open browser:', error.message);
-                        console.log(`[CodeVault] Please open this URL manually: ${url}`);
-                    }
-                });
-            });
-
-            // Timeout after 5 minutes
-            setTimeout(() => {
-                if (!licenseKey) {
-                    server.close();
                     resolve(null);
                 }
-            }, 5 * 60 * 1000);
-        }).catch(error => {
-            console.error('[CodeVault] Failed to start license server:', error);
+            });
+
+            ps.on('error', (err) => {
+                console.error('[CodeVault] PowerShell error:', err.message);
+                try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+                resolve(null);
+            });
+
+        } catch (err) {
+            console.error('[CodeVault] Failed to create GUI dialog:', err.message);
+            try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
             resolve(null);
-        });
-    });
-}
-
-// Helper function to validate with server
-function validateWithServer(key, hwid, nonce, timestamp) {
-    return new Promise((resolve) => {
-        try {
-            const urlObj = new URL(API_URL);
-            const postData = JSON.stringify({
-                license_key: key,
-                hwid: hwid,
-                nonce: nonce,
-                timestamp: timestamp,
-                machine_name: os.hostname()
-            });
-
-            const hostname = urlObj.hostname === 'localhost' ? '127.0.0.1' : urlObj.hostname;
-            const options = {
-                hostname: hostname,
-                port: urlObj.port || (urlObj.protocol === 'http:' ? 80 : 443),
-                path: urlObj.pathname,
-                method: 'POST',
-                family: 4,
-                timeout: 15000,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
-                }
-            };
-
-            const lib = urlObj.protocol === 'http:' ? require('http') : require('https');
-            const req = lib.request(options, (res) => {
-                let body = '';
-                res.on('data', (chunk) => body += chunk);
-                res.on('end', () => {
-                    try {
-                        if (res.statusCode !== 200) {
-                            resolve({ success: false, message: `Server error (HTTP ${res.statusCode})` });
-                            return;
-                        }
-                        const response = JSON.parse(body);
-                        if (response.status === 'valid') {
-                            resolve({ success: true, message: 'License valid' });
-                        } else {
-                            resolve({ success: false, message: response.message || 'Invalid license' });
-                        }
-                    } catch (e) {
-                        resolve({ success: false, message: 'Failed to parse server response' });
-                    }
-                });
-            });
-
-            req.on('error', (e) => {
-                resolve({ success: false, message: `Connection error: ${e.message}` });
-            });
-
-            req.on('timeout', () => {
-                req.destroy();
-                resolve({ success: false, message: 'Connection timeout' });
-            });
-
-            req.write(postData);
-            req.end();
-        } catch (error) {
-            resolve({ success: false, message: `Validation error: ${error.message}` });
         }
     });
-}
-
-// HTML dialog content
-function getHtmlDialog(apiUrl, port) {
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>License Activation</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container {
-            background: rgba(22, 33, 62, 0.9);
-            border-radius: 16px;
-            padding: 40px;
-            width: 100%;
-            max-width: 420px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 100px rgba(233, 69, 96, 0.1);
-            border: 1px solid rgba(233, 69, 96, 0.2);
-        }
-        .icon { font-size: 48px; text-align: center; margin-bottom: 20px; }
-        h1 { color: #e94560; font-size: 24px; font-weight: 600; text-align: center; margin-bottom: 8px; }
-        .subtitle { color: #aaaaaa; font-size: 14px; text-align: center; margin-bottom: 30px; }
-        .brand { color: #64748b; font-size: 12px; text-align: center; margin-bottom: 20px; }
-        label { display: block; color: #888888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-        input[type="text"] {
-            width: 100%;
-            padding: 14px 16px;
-            font-size: 16px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            background: #0f0f23;
-            border: 2px solid #2a2a4e;
-            border-radius: 8px;
-            color: #ffffff;
-            transition: all 0.3s ease;
-        }
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #e94560;
-            box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.2);
-        }
-        button {
-            width: 100%;
-            padding: 14px 24px;
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 20px;
-        }
-        button:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4);
-        }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .status {
-            margin-top: 20px;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            text-align: center;
-            display: none;
-        }
-        .status.error { display: block; background: rgba(233, 69, 96, 0.15); border: 1px solid rgba(233, 69, 96, 0.3); color: #e94560; }
-        .status.success { display: block; background: rgba(0, 204, 102, 0.15); border: 1px solid rgba(0, 204, 102, 0.3); color: #00cc66; }
-        .status.loading { display: block; background: rgba(74, 144, 217, 0.15); border: 1px solid rgba(74, 144, 217, 0.3); color: #4a90d9; }
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(74, 144, 217, 0.3);
-            border-top-color: #4a90d9;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-right: 8px;
-            vertical-align: middle;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .success-view { display: none; text-align: center; }
-        .success-icon { font-size: 64px; animation: pulse 0.5s ease; }
-        @keyframes pulse { 0% { transform: scale(0); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
-        .success-message h2 { color: #00cc66; font-size: 22px; margin: 20px 0 10px; }
-        .success-message p { color: #aaaaaa; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="container" id="activationForm">
-        <div class="brand">Protected by CodeVault</div>
-        <div class="icon">🔐</div>
-        <h1>License Activation</h1>
-        <p class="subtitle">Enter your license key to activate this application</p>
-        <form id="licenseForm">
-            <label for="licenseKey">License Key</label>
-            <input type="text" id="licenseKey" placeholder="LIC-XXXX-XXXX-XXXX" autocomplete="off" autofocus>
-            <button type="submit" id="submitBtn">✓ Activate License</button>
-        </form>
-        <div class="status" id="status"></div>
-    </div>
-    <div class="container success-view" id="successView">
-        <div class="success-icon">✅</div>
-        <div class="success-message">
-            <h2>License Activated!</h2>
-            <p>You can close this window. The application will start automatically.</p>
-        </div>
-    </div>
-    <script>
-        const form = document.getElementById('licenseForm');
-        const input = document.getElementById('licenseKey');
-        const submitBtn = document.getElementById('submitBtn');
-        const status = document.getElementById('status');
-        const activationForm = document.getElementById('activationForm');
-        const successView = document.getElementById('successView');
-
-        function setStatus(message, type) {
-            status.className = 'status ' + type;
-            if (type === 'loading') {
-                status.innerHTML = '<span class="spinner"></span>' + message;
-            } else {
-                status.textContent = message;
-            }
-        }
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const licenseKey = input.value.trim();
-            if (!licenseKey) {
-                setStatus('⚠️ Please enter a license key', 'error');
-                return;
-            }
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Validating...';
-            setStatus('Connecting to license server...', 'loading');
-
-            try {
-                const response = await fetch('http://127.0.0.1:${port}/validate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ license_key: licenseKey })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    setStatus('✅ ' + result.message, 'success');
-                    activationForm.style.display = 'none';
-                    successView.style.display = 'block';
-                    fetch('http://127.0.0.1:${port}/activation-complete', { method: 'POST' }).catch(() => {});
-                    setTimeout(() => window.close(), 2000);
-                } else {
-                    setStatus('❌ ' + result.message, 'error');
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = '✓ Activate License';
-                }
-            } catch (error) {
-                setStatus('❌ Connection error. Please try again.', 'error');
-                submitBtn.disabled = false;
-                submitBtn.textContent = '✓ Activate License';
-            }
-        });
-
-        input.addEventListener('input', (e) => {
-            e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-        });
-    </script>
-</body>
-</html>`;
 }
 
 // Console prompt for license key
@@ -613,13 +431,12 @@ function promptConsole() {
     });
 }
 
-// Main prompt function - ALWAYS use GUI on Windows to avoid console paste issues
+// Main prompt function - ALWAYS use native GUI on Windows for best user experience
 async function promptForLicenseKey() {
-    // On Windows, ALWAYS use GUI dialog
-    // Console has issues with select mode (clicking pauses the app) and paste (Ctrl+V)
+    // On Windows, use native PowerShell GUI dialog (matches Python tkinter style)
     if (os.platform() === 'win32') {
         console.log('[CodeVault] Opening license key dialog...');
-        const key = await promptGUI();
+        const key = await promptNativeGUI();
         if (key) return key;
 
         // GUI failed - try console as fallback if we have a TTY
@@ -630,7 +447,7 @@ async function promptForLicenseKey() {
         return null;
     }
 
-    // Use console prompt
+    // Use console prompt on non-Windows platforms
     return await promptConsole();
 }
 
@@ -661,13 +478,14 @@ async function loadOrPromptLicense() {
         await exitWithError('No license key provided.\n\nPlease run the application again and enter a valid license key.');
     }
 
-    // Sconst licenseDir = path.dirname(licensePath);
+    // Save license for future runs (atomic write to prevent race conditions)
+    console.log('[CodeVault] Saving license key...');
+    try {
+        // Ensure directory exists
+        const licenseDir = path.dirname(licensePath);
         if (!fs.existsSync(licenseDir)) {
             fs.mkdirSync(licenseDir, { recursive: true });
         }
-        ave license for future runs (atomic write to prevent race conditions)
-    console.log('[CodeVault] Saving license key...');
-    try {
         // Write to temp file first, then rename (atomic operation)
         const tempPath = licensePath + '.tmp.' + crypto.randomBytes(8).toString('hex');
         fs.writeFileSync(tempPath, licenseKey, { encoding: 'utf-8', mode: 0o600 });

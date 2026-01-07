@@ -8,7 +8,11 @@ import time
 import secrets
 import hashlib
 import hmac
+import ipaddress
+import logging
+import socket
 from typing import Optional, List
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -18,6 +22,8 @@ from utils import get_current_user, utc_now, sanitize_log_message
 from database import get_db, release_db
 from models import WebhookCreateRequest
 from middleware.tier_enforcement import requires_feature
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["Webhooks"])
 
@@ -32,6 +38,114 @@ WEBHOOK_EVENTS = [
     "compilation.completed",
     "compilation.failed",
 ]
+
+# Blocked hostnames and IP ranges for SSRF protection
+BLOCKED_HOSTNAMES = {
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "0.0.0.0",
+    "metadata.google.internal",  # GCP metadata
+    "169.254.169.254",  # AWS/Azure/GCP metadata service
+}
+
+
+def is_private_ip(ip_str: str) -> bool:
+    """Check if an IP address is private, loopback, or reserved."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_reserved
+            or ip.is_link_local
+            or ip.is_multicast
+        )
+    except ValueError:
+        return False
+
+
+def validate_webhook_url(url: str) -> tuple[bool, str]:
+    """Validate webhook URL for SSRF protection.
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not url:
+        return False, "URL cannot be empty"
+
+    # Must be http or https
+    if not url.startswith(("http://", "https://")):
+        return False, "Webhook URL must start with http:// or https://"
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "Invalid URL format"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL must have a valid hostname"
+
+    # Block known dangerous hostnames
+    hostname_lower = hostname.lower()
+    if hostname_lower in BLOCKED_HOSTNAMES:
+        return False, f"Webhook URL cannot target {hostname_lower} (internal address)"
+
+    # Check if hostname is an IP address
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if is_private_ip(hostname):
+            return False, f"Webhook URL cannot target private IP address: {hostname}"
+    except ValueError:
+        # It's a hostname, not an IP - try to resolve it
+        try:
+            # Resolve hostname to check if it points to a private IP
+            resolved_ips = socket.getaddrinfo(hostname, parsed.port or 443, socket.AF_UNSPEC)
+            for family, _, _, _, sockaddr in resolved_ips:
+                ip_str = sockaddr[0]
+                if is_private_ip(ip_str):
+                    return False, f"Webhook URL hostname resolves to private IP: {ip_str}"
+        except socket.gaierror:
+            # Can't resolve - let it fail at request time
+            pass
+
+    # Block common internal hostnames patterns
+    internal_patterns = [
+        "internal",
+        "localhost",
+        "local",
+        ".local",
+        "127.",
+        "192.168.",
+        "10.",
+        "172.16.",
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.20.",
+        "172.21.",
+        "172.22.",
+        "172.23.",
+        "172.24.",
+        "172.25.",
+        "172.26.",
+        "172.27.",
+        "172.28.",
+        "172.29.",
+        "172.30.",
+        "172.31.",
+    ]
+
+    for pattern in internal_patterns:
+        if pattern in hostname_lower:
+            return False, f"Webhook URL contains blocked pattern: {pattern}"
+
+    # Reasonable length limit
+    if len(url) > 2000:
+        return False, "URL is too long (max 2000 characters)"
+
+    return True, ""
 
 
 class WebhookUpdateRequest(BaseModel):
@@ -215,10 +329,10 @@ async def create_webhook(
     if invalid_events:
         raise HTTPException(status_code=400, detail=f"Invalid events: {invalid_events}")
 
-    if not data.url.startswith(("http://", "https://")):
-        raise HTTPException(
-            status_code=400, detail="Webhook URL must start with http:// or https://"
-        )
+    # SSRF protection: Validate webhook URL
+    is_valid, error_msg = validate_webhook_url(data.url)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
 
     conn = await get_db()
     try:
@@ -317,11 +431,10 @@ async def update_webhook(
             params.append(data.name)
             param_count += 1
         if data.url is not None:
-            if not data.url.startswith(("http://", "https://")):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Webhook URL must start with http:// or https://",
-                )
+            # SSRF protection: Validate webhook URL
+            is_valid, error_msg = validate_webhook_url(data.url)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
             updates.append(f"url = ${param_count}")
             params.append(data.url)
             param_count += 1

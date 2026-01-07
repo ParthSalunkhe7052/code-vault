@@ -67,12 +67,18 @@ export const SettingsProvider = ({ children }) => {
     // Apply theme to document when it changes
     useEffect(() => {
         if (loaded) {
+            const html = document.documentElement;
+
             // Remove existing theme classes
-            document.documentElement.classList.remove('light', 'dark');
+            html.classList.remove('dark-matter');
+
             // Add current theme class
-            document.documentElement.classList.add(settings.theme);
-            // Also set data attribute for CSS selectors
-            document.documentElement.setAttribute('data-theme', settings.theme);
+            if (settings.theme === 'dark-matter') {
+                html.classList.add('dark-matter');
+            }
+
+            // Set data attribute for CSS selectors
+            html.setAttribute('data-theme', settings.theme);
         }
     }, [settings.theme, loaded]);
 
@@ -101,12 +107,12 @@ export const SettingsProvider = ({ children }) => {
     };
 
     /**
-     * Toggle between light and dark theme
+     * Toggle between default dark theme and dark-matter theme
      */
     const toggleTheme = useCallback(() => {
         setSettings(prev => ({
             ...prev,
-            theme: prev.theme === 'dark' ? 'light' : 'dark'
+            theme: prev.theme === 'dark' ? 'dark-matter' : 'dark'
         }));
     }, []);
 

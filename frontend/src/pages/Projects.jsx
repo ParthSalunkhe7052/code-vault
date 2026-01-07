@@ -21,7 +21,11 @@ const Projects = () => {
         include_modules: [],
         exclude_modules: [],
         nuitka_options: {},
-        files: []
+        files: [],
+        // Build options defaults
+        skip_obfuscation: true,  // Default: skip obfuscation for faster builds
+        enable_lease: false,      // Default: lease disabled
+        compiler_options: {}
     });
     const [configLoading, setConfigLoading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(false);
@@ -131,7 +135,11 @@ const Projects = () => {
                 exclude_modules: config.exclude_modules || [],
                 nuitka_options: config.nuitka_options || {},
                 files: config.files || [],
-                file_tree: config.settings?.file_tree || null
+                file_tree: config.settings?.file_tree || null,
+                // Build options - load from server
+                skip_obfuscation: config.skip_obfuscation,
+                enable_lease: config.enable_lease,
+                compiler_options: config.compiler_options || {}
             });
         } catch (error) {
             console.error('Failed to fetch project config:', error);
@@ -141,7 +149,10 @@ const Projects = () => {
                 include_modules: [],
                 exclude_modules: [],
                 nuitka_options: {},
-                files: []
+                files: [],
+                skip_obfuscation: true,
+                enable_lease: false,
+                compiler_options: {}
             });
         } finally {
             setConfigLoading(false);
@@ -150,12 +161,19 @@ const Projects = () => {
 
     const handleConfigSave = async () => {
         try {
+            console.log('[CONFIG SAVE] Saving config:', {
+                skip_obfuscation: configData.skip_obfuscation,
+                enable_lease: configData.enable_lease,
+                compiler_options: configData.compiler_options
+            });
+
             await projectApi.updateConfig(selectedProject.id, {
                 entry_file: configData.entry_file,
                 output_name: configData.output_name,
                 include_modules: configData.include_modules,
                 exclude_modules: configData.exclude_modules,
                 nuitka_options: configData.nuitka_options,
+                compiler_options: configData.compiler_options,
                 // Build options
                 skip_obfuscation: configData.skip_obfuscation,
                 enable_lease: configData.enable_lease

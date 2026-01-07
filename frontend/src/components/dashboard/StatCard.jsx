@@ -4,13 +4,12 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 const TrendIndicator = ({ value }) => {
     const isPositive = value >= 0;
     const Icon = isPositive ? TrendingUp : TrendingDown;
-    
+
     return (
-        <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${
-            isPositive 
-                ? 'text-emerald-400 bg-emerald-500/10' 
+        <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${isPositive
+                ? 'text-emerald-400 bg-emerald-500/10'
                 : 'text-red-400 bg-red-500/10'
-        }`}>
+            }`}>
             <Icon size={12} />
             <span>{Math.abs(value)}%</span>
         </div>
@@ -18,22 +17,31 @@ const TrendIndicator = ({ value }) => {
 };
 
 const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gray-900/95 to-gray-800/90 
-        border border-white/15 p-6 group hover:border-primary/40 transition-all duration-300
-        shadow-lg shadow-black/20 hover:shadow-xl hover:shadow-black/30">
-        
+    <div
+        className="relative overflow-hidden rounded-2xl p-6 group transition-all duration-300
+            shadow-lg shadow-black/20 hover:shadow-xl hover:shadow-black/30"
+        style={{
+            background: 'linear-gradient(135deg, var(--cv-card), var(--cv-bg-secondary))',
+            border: '1px solid var(--cv-border)'
+        }}
+    >
         {/* Subtle gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent 
-            opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-        
+        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+            style={{ background: 'linear-gradient(135deg, var(--cv-primary-glow), transparent)' }} />
+
         {/* Glow effect on hover */}
-        <div className="absolute -inset-1 bg-gradient-to-r from-primary/20 to-secondary/20 
-            rounded-2xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-500" />
-        
+        <div className="absolute -inset-1 rounded-2xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-500"
+            style={{ background: 'linear-gradient(to right, var(--cv-primary-glow), var(--cv-secondary-glow))' }} />
+
         <div className="relative z-10">
             <div className="flex items-start justify-between mb-4">
-                <div className={`p-3 rounded-xl bg-gray-800/80 border border-white/10 ${color}
-                    group-hover:scale-110 transition-transform duration-300`}>
+                <div
+                    className={`p-3 rounded-xl ${color} group-hover:scale-110 transition-transform duration-300`}
+                    style={{
+                        backgroundColor: 'var(--cv-bg-elevated)',
+                        border: '1px solid var(--cv-border)'
+                    }}
+                >
                     <Icon size={22} />
                 </div>
                 {trend !== undefined && (
@@ -41,11 +49,11 @@ const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
                 )}
             </div>
             <div>
-                <h3 className="text-4xl font-bold text-white mb-1 tabular-nums">{value}</h3>
-                <p className="text-slate-400 text-sm font-medium">{title}</p>
+                <h3 className="text-4xl font-bold mb-1 tabular-nums" style={{ color: 'var(--cv-text)' }}>{value}</h3>
+                <p className="text-sm font-medium" style={{ color: 'var(--cv-text-muted)' }}>{title}</p>
                 {subtitle && (
-                    <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
-                        <span className="w-1 h-1 rounded-full bg-slate-500" />
+                    <p className="text-xs mt-2 flex items-center gap-1" style={{ color: 'var(--cv-text-dim)' }}>
+                        <span className="w-1 h-1 rounded-full" style={{ backgroundColor: 'var(--cv-text-dim)' }} />
                         {subtitle}
                     </p>
                 )}

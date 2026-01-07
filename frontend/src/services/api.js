@@ -1,7 +1,12 @@
 import axios from 'axios';
+import { secureLocalStorage } from '../utils/EncryptionProvider';
 
 const TOKEN_KEY = 'license_wrapper_token';
 const USER_KEY = 'license_wrapper_user';
+
+// In-memory cache for token (to avoid async overhead on every request)
+// Populated on app initialization and after login
+let cachedToken = null;
 
 // Detect if running in Tauri desktop app
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -19,11 +24,24 @@ const api = axios.create({
     },
 });
 
+/**
+ * Initialize auth from encrypted storage.
+ * Call this on app startup to populate the token cache.
+ */
+export async function initializeAuth() {
+    try {
+        cachedToken = await secureLocalStorage.getItem(TOKEN_KEY);
+    } catch (error) {
+        console.error('Failed to initialize auth:', error);
+        cachedToken = null;
+    }
+    return cachedToken;
+}
+
 // Add a request interceptor to include the JWT token
 api.interceptors.request.use((config) => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-        config.headers['Authorization'] = `Bearer ${token}`;
+    if (cachedToken) {
+        config.headers['Authorization'] = `Bearer ${cachedToken}`;
     }
     // Remove Content-Type for FormData - let browser set it with boundary
     if (config.data instanceof FormData) {
@@ -35,10 +53,12 @@ api.interceptors.request.use((config) => {
 // Add response interceptor for handling auth errors
 api.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
         if (error.response?.status === 401) {
-            localStorage.removeItem(TOKEN_KEY);
-            localStorage.removeItem(USER_KEY);
+            // Clear cached token and encrypted storage
+            cachedToken = null;
+            secureLocalStorage.removeItem(TOKEN_KEY);
+            secureLocalStorage.removeItem(USER_KEY);
             window.location.href = '/login';
         }
         return Promise.reject(error);
@@ -49,36 +69,47 @@ export const auth = {
     login: async (email, password) => {
         const response = await api.post('/auth/login', { email, password });
         const { access_token, user } = response.data;
-        localStorage.setItem(TOKEN_KEY, access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        // Store encrypted token and user data
+        await secureLocalStorage.setItem(TOKEN_KEY, access_token);
+        await secureLocalStorage.setItem(USER_KEY, user);
+        // Update cached token for immediate use
+        cachedToken = access_token;
         return user;
     },
     register: async (email, password, name) => {
         const response = await api.post('/auth/register', { email, password, name });
         const { access_token, user } = response.data;
-        localStorage.setItem(TOKEN_KEY, access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        // Store encrypted token and user data
+        await secureLocalStorage.setItem(TOKEN_KEY, access_token);
+        await secureLocalStorage.setItem(USER_KEY, user);
+        // Update cached token for immediate use
+        cachedToken = access_token;
         return user;
     },
     logout: () => {
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
+        cachedToken = null;
+        secureLocalStorage.removeItem(TOKEN_KEY);
+        secureLocalStorage.removeItem(USER_KEY);
     },
     isAuthenticated: () => {
-        return !!localStorage.getItem(TOKEN_KEY);
+        return !!cachedToken;
     },
-    getUser: () => {
-        const user = localStorage.getItem(USER_KEY);
-        return user ? JSON.parse(user) : null;
+    getUser: async () => {
+        const user = await secureLocalStorage.getItem(USER_KEY, true);
+        return user || null;
     },
     getMe: () => api.get('/auth/me').then(res => res.data),
     refreshUser: async () => {
         const response = await api.get('/auth/me');
         const user = response.data;
-        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        await secureLocalStorage.setItem(USER_KEY, user);
+        // Dispatch event for components listening for user updates (e.g., Layout sidebar)
+        window.dispatchEvent(new Event('user-updated'));
         return user;
     },
     regenerateApiKey: () => api.post('/auth/regenerate-api-key').then(res => res.data),
+    // Helper to get the current token (for downloads, etc.)
+    getToken: () => cachedToken,
 };
 
 export const projects = {
@@ -109,7 +140,7 @@ export const compile = {
     getStatus: (jobId) => api.get(`/compile/${jobId}/status`).then(res => res.data),
     listJobs: (projectId) => api.get('/compile/jobs', { params: { project_id: projectId } }).then(res => res.data),
     download: async (jobId, filename) => {
-        const token = localStorage.getItem(TOKEN_KEY);
+        const token = auth.getToken();
         // Use proper URL based on environment (Tauri vs browser)
         const baseUrl = isTauri ? 'http://localhost:8000' : '';
         const response = await fetch(`${baseUrl}/api/v1/compile/${jobId}/download`, {
@@ -168,6 +199,12 @@ export const admin = {
     getStats: () => api.get('/admin/stats').then(res => res.data),
     getUsers: () => api.get('/admin/users').then(res => res.data),
     getAnalytics: (days = 30) => api.get('/admin/analytics', { params: { days } }).then(res => res.data),
+    // New endpoints
+    getRevenue: () => api.get('/admin/revenue').then(res => res.data),
+    getSystemHealth: () => api.get('/admin/system-health').then(res => res.data),
+    updateUserPlan: (userId, plan) => api.put(`/admin/users/${userId}/plan`, { plan }).then(res => res.data),
+    updateUserRole: (userId, role) => api.put(`/admin/users/${userId}/role`, { role }).then(res => res.data),
+    banUser: (userId) => api.post(`/admin/users/${userId}/ban`).then(res => res.data),
 };
 
 // Stripe/Subscription API

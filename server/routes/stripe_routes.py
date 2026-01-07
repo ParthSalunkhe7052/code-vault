@@ -27,6 +27,7 @@ from config import (
     TIER_LIMITS,
     JWT_SECRET,
     JWT_ALGORITHM,
+    ENVIRONMENT,
 )
 from database import get_db, release_db
 
@@ -369,27 +370,59 @@ async def create_customer_portal(
 async def stripe_webhook(
     request: Request, stripe_signature: str = Header(None, alias="Stripe-Signature")
 ):
-    """Handle Stripe webhook events."""
-    # Allow webhook without secret in test mode for local development
+    """Handle Stripe webhook events.
+
+    SECURITY: Webhook signature verification is REQUIRED in production.
+    In development mode only, unsigned webhooks are allowed with a warning.
+    """
     payload = await request.body()
+
+    # SECURITY FIX: Require signature verification in production
+    is_production = ENVIRONMENT == "production"
 
     # Verify payload and signature
     event = None
     try:
-        # If no secret is set, we can't verify signature (dev mode)
-        if not STRIPE_WEBHOOK_SECRET:
-            import json
+        if is_production:
+            # PRODUCTION: Strictly require webhook secret and signature
+            if not STRIPE_WEBHOOK_SECRET:
+                logger.error(
+                    "[Stripe Webhook] CRITICAL: STRIPE_WEBHOOK_SECRET not configured in production! "
+                    "Rejecting webhook to prevent unauthorized access."
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Webhook processing unavailable. Server configuration error."
+                )
 
-            event_data = json.loads(payload)
-            event = stripe.Event.construct_from(event_data, stripe.api_key)
-            logger.warning(
-                "[Stripe Webhook] processing without signature verification (dev mode)"
-            )
-        else:
-            # Production: Strict signature verification
+            if not stripe_signature:
+                logger.warning("[Stripe Webhook] Missing Stripe-Signature header in production")
+                raise HTTPException(status_code=400, detail="Missing signature header")
+
+            # Verify signature - this is the critical security check
             event = stripe.Webhook.construct_event(
                 payload, stripe_signature, STRIPE_WEBHOOK_SECRET
             )
+            logger.info("[Stripe Webhook] Signature verified successfully")
+
+        else:
+            # DEVELOPMENT: Allow unsigned webhooks with warning
+            if STRIPE_WEBHOOK_SECRET and stripe_signature:
+                # If secret is configured, always verify
+                event = stripe.Webhook.construct_event(
+                    payload, stripe_signature, STRIPE_WEBHOOK_SECRET
+                )
+                logger.info("[Stripe Webhook] Dev mode: Signature verified")
+            else:
+                # Dev mode without secret - allow but warn loudly
+                import json
+                event_data = json.loads(payload)
+                event = stripe.Event.construct_from(event_data, stripe.api_key)
+                logger.warning(
+                    "[Stripe Webhook] ⚠️  DEVELOPMENT MODE: Processing webhook WITHOUT "
+                    "signature verification. This would be REJECTED in production!"
+                )
+
     except ValueError as e:
         logger.error(f"[Stripe Webhook] Invalid payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid payload")

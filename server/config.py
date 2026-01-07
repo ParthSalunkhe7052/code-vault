@@ -44,7 +44,34 @@ if ENVIRONMENT == "production":
         raise ValueError(
             "CRITICAL: JWT_SECRET must be set in production! Set it in .env file."
         )
+    if not STRIPE_WEBHOOK_SECRET:
+        raise ValueError(
+            "CRITICAL: STRIPE_WEBHOOK_SECRET must be set in production! "
+            "Without it, Stripe webhooks cannot be verified and payments will fail. "
+            "Get your webhook secret from the Stripe Dashboard > Developers > Webhooks."
+        )
 
+
+# Redis (Upstash)
+UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+
+# Redis URL for rate limiting (use standard Redis URL format)
+# For Upstash, convert UPSTASH_REDIS_REST_URL + token to standard format
+REDIS_URL = os.getenv("REDIS_URL", "")
+
+# If REDIS_URL is not set but UPSTASH credentials are available, construct the URL
+if not REDIS_URL and UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+    # Upstash REST API URL format: https://unique-name.upstash.io
+    # Convert to standard Redis URL format: rediss://default:{token}@{endpoint}:6379
+    endpoint = UPSTASH_REDIS_REST_URL.replace("https://", "").replace("http://", "")
+    REDIS_URL = f"rediss://default:{UPSTASH_REDIS_REST_TOKEN}@{endpoint}:6379"
+    print(f"[Config] Using Upstash Redis: {endpoint}")
+elif not REDIS_URL:
+    # For local development, suggest localhost Redis
+    print("[Config] No Redis configured. Rate limiting disabled.")
+    print("[Config] Install local Redis for rate limiting: https://redis.io/download")
+    print("[Config] Or add REDIS_URL=redis://localhost:6379 to .env")
 
 # Admin
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")

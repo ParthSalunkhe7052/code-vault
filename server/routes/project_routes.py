@@ -159,6 +159,9 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             "api_url": api_url,
             "server_url": server_url,
             "selected_license_id": selected_license_id,
+            # Build options
+            "skip_obfuscation": settings.get("skip_obfuscation", True),
+            "enable_lease": settings.get("enable_lease", False),
             "files": [
                 {
                     "id": f["id"],
@@ -178,6 +181,12 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
 async def update_project_config(
     project_id: str, data: ProjectConfigRequest, user: dict = Depends(get_current_user)
 ):
+    # Debug: Print what we're receiving
+    print(f"\n[CONFIG SAVE] Project {project_id}")
+    print(f"  Received skip_obfuscation: {data.skip_obfuscation}")
+    print(f"  Received enable_lease: {data.enable_lease}")
+    print(f"  Received compiler_options: {data.compiler_options}\n", flush=True)
+
     conn = await get_db()
     try:
         project = await conn.fetchrow(

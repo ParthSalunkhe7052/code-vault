@@ -90,7 +90,7 @@ class ProjectConfigRequest(BaseModel):
     compiler_options: dict = {}
     # Build options
     skip_obfuscation: Optional[bool] = True  # Default: skip for faster builds
-    enable_lease: Optional[bool] = True  # Default: lease enabled
+    enable_lease: Optional[bool] = False  # Default: lease disabled
 
 
 # =============================================================================
