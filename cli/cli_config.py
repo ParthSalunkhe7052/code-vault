@@ -98,7 +98,19 @@ def _delete_token_from_keyring() -> bool:
 
 def _get_token_from_file() -> Optional[str]:
     """Fallback: Get token from config file (legacy/no-keyring mode)."""
+    import base64
+
     config = _load_config_file()
+
+    # Check for obfuscated token first (new format)
+    if "_obf_api_key" in config:
+        try:
+            obfuscated = config["_obf_api_key"]
+            return base64.b64decode(obfuscated.encode()).decode()
+        except Exception:
+            pass
+
+    # Fall back to plain text (legacy format)
     return config.get("api_key")
 
 
@@ -181,8 +193,28 @@ def save_config(config: dict) -> None:
 
 
 def _save_config_file_with_token(config: dict) -> None:
-    """Fallback: Save config including token to file (insecure mode)."""
-    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    """Fallback: Save config including token to file (insecure mode).
+
+    SECURITY NOTE: This function is only used as a fallback when OS keyring
+    is unavailable. The token is obfuscated (not encrypted) to avoid storing
+    it in plain text. This provides minimal protection but is better than
+    clear text. Users should install 'keyring' package for secure storage.
+    """
+    import base64
+
+    # Create a copy to avoid modifying the original
+    safe_config = config.copy()
+
+    # Obfuscate the API key if present (not encryption, just obfuscation)
+    # This prevents casual inspection but is NOT secure storage
+    if "api_key" in safe_config and safe_config["api_key"]:
+        # Simple obfuscation: base64 encode with a marker
+        token = safe_config["api_key"]
+        obfuscated = base64.b64encode(token.encode()).decode()
+        safe_config["_obf_api_key"] = obfuscated
+        del safe_config["api_key"]
+
+    CONFIG_FILE.write_text(json.dumps(safe_config, indent=2))
     _set_restrictive_permissions(CONFIG_FILE)
 
 
