@@ -14,7 +14,7 @@ const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 // In Tauri, we need the full URL since there's no Vite proxy
 // In browser dev mode, use relative path (Vite proxy handles it)
 const API_BASE_URL = isTauri
-    ? 'http://localhost:8000/api/v1'  // Direct to backend server
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1`  // Direct to backend server
     : '/api/v1';                       // Vite proxy in dev
 
 const api = axios.create({
@@ -142,7 +142,7 @@ export const compile = {
     download: async (jobId, filename) => {
         const token = auth.getToken();
         // Use proper URL based on environment (Tauri vs browser)
-        const baseUrl = isTauri ? 'http://localhost:8000' : '';
+        const baseUrl = isTauri ? (import.meta.env.VITE_API_URL || 'http://localhost:8000') : '';
         const response = await fetch(`${baseUrl}/api/v1/compile/${jobId}/download`, {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -218,7 +218,7 @@ export const subscription = {
 
 // Public Store API (no auth required) - uses different base URL
 const publicApi = axios.create({
-    baseURL: isTauri ? 'http://localhost:8000/api/v1' : '/api/v1',
+    baseURL: isTauri ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1` : '/api/v1',
     headers: { 'Content-Type': 'application/json' },
 });
 

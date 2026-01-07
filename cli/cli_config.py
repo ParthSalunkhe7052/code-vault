@@ -107,7 +107,8 @@ def _get_token_from_file() -> Optional[str]:
         try:
             obfuscated = config["_obf_api_key"]
             return base64.b64decode(obfuscated.encode()).decode()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to decode obfuscated token: {e}")
             pass
 
     # Fall back to plain text (legacy format)

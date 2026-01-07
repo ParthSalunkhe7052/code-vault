@@ -11,7 +11,7 @@ const DirectBuildSection = ({
     entryFile,
     onBuildStart,
     hasUploadedFiles = false,  // Whether files have been uploaded to server
-    serverUrl = 'http://localhost:8000'  // Backend server URL
+    serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'  // Backend server URL
 }) => {
     const [selectedLicense, setSelectedLicense] = useState('');
     const [outputDir, setOutputDir] = useState('');
