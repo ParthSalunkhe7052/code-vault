@@ -100,14 +100,14 @@ Examples:
         help="Build without license protection (open build)",
     )
     build_parser.add_argument(
-        "--lease",
-        action="store_true",
-        help="Enable offline lease mode (24h offline access after validation)",
-    )
-    build_parser.add_argument(
         "--obfuscate",
         action="store_true",
-        help="Enable code obfuscation (advanced protection)",
+        help="Enable code obfuscation (slower build, better protection)",
+    )
+    build_parser.add_argument(
+        "--enable-lease",
+        action="store_true",
+        help="Enable offline lease (24-hour cached validation)",
     )
 
     args = parser.parse_args()

@@ -303,7 +303,7 @@ async def get_compile_config(
             "language": project.get("language", "python"),
             # Build options
             "skip_obfuscation": settings.get("skip_obfuscation", True),
-            "enable_lease": settings.get("enable_lease", True),
+            "enable_lease": settings.get("enable_lease", False),
         }
     finally:
         await release_db(conn)
@@ -336,6 +336,13 @@ async def get_build_bundle(
             if isinstance(project["compiler_options"], str)
             else (project["compiler_options"] or {})
         )
+
+        # Debug: Print settings to console
+        print(f"\n[BUNDLE DEBUG] Project {project_id}")
+        print(f"  Settings from DB: {settings}")
+        print(f"  skip_obfuscation: {settings.get('skip_obfuscation')}")
+        print(f"  enable_lease: {settings.get('enable_lease')}\n", flush=True)
+
         language = (
             project.get("language", "python")
             if hasattr(project, "get")
@@ -386,8 +393,13 @@ async def get_build_bundle(
             "include_modules": settings.get("include_modules", []),
             "exclude_modules": settings.get("exclude_modules", []),
             "skip_obfuscation": settings.get("skip_obfuscation", True),
-            "enable_lease": settings.get("enable_lease", True),
+            "enable_lease": settings.get("enable_lease", False),
         }
+
+        # Debug: Print final config being written to bundle
+        print(f"[BUNDLE DEBUG] Final config for bundle:")
+        print(f"  skip_obfuscation: {config['skip_obfuscation']}")
+        print(f"  enable_lease: {config['enable_lease']}\n", flush=True)
 
         with tempfile.NamedTemporaryFile(
             mode="wb", suffix=".zip", delete=False

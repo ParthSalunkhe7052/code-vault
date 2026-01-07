@@ -71,20 +71,26 @@ class EmailService:
         self.use_sendgrid = False
         self.use_smtp = False
 
+        if not EMAIL_ENABLED:
+            print("[Email] Email is disabled (EMAIL_ENABLED=false)")
+            return
+
         # Check Resend first (preferred)
         if HAS_RESEND and RESEND_API_KEY:
             resend.api_key = RESEND_API_KEY
             self.use_resend = True
-            print("[Email] Using Resend")
+            print("[Email] Using Resend (Configured)")
         elif HAS_SENDGRID and SENDGRID_API_KEY:
             self.sendgrid_client = SendGridAPIClient(SENDGRID_API_KEY)
             self.use_sendgrid = True
-            print("[Email] Using SendGrid")
+            print("[Email] Using SendGrid (Configured)")
         elif SMTP_HOST and SMTP_USER:
             self.use_smtp = True
-            print("[Email] Using SMTP")
+            print("[Email] Using SMTP (Configured)")
         else:
             print("[Email] No email provider configured")
+            print("[Email] Available providers: resend, sendgrid, smtp")
+            print("[Email] Configure EMAIL_PROVIDER and API key in .env")
 
     def is_configured(self) -> bool:
         """Check if email service is properly configured."""

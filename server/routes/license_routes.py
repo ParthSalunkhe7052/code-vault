@@ -27,6 +27,7 @@ from utils import (
 )
 from database import get_db, release_db
 from email_service import notify_license_created
+from middleware.rate_limiter import license_validate_rate_limit
 
 router = APIRouter(prefix="/api/v1", tags=["Licenses"])
 
@@ -113,7 +114,11 @@ def get_geo_from_ip(ip_address: str) -> dict:
 
 
 @router.post("/license/validate", response_model=LicenseValidationResponse)
-async def validate_license(request: Request, data: LicenseValidationRequest):
+async def validate_license(
+    request: Request,
+    data: LicenseValidationRequest,
+    _rate_limit: None = Depends(license_validate_rate_limit)
+):
     start_time = time.time()
     client_ip = request.client.host if request.client else "unknown"
 

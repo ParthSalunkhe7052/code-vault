@@ -1,0 +1,79 @@
+# =============================================================================
+# CodeVault Build Worker - Isolated Container for User Code Compilation
+# 
+# SECURITY FEATURES:
+# - Runs as non-root user
+# - Limited CPU/memory resources
+# - No network access (internal network only)
+# - Read-only mounts where possible
+# - Nuitka and pkg installed for compilation
+# =============================================================================
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create non-root user for security
+RUN groupadd -r buildworker && useradd -r -g buildworker buildworker
+
+# Set work directory
+WORKDIR /workspace
+
+# Install system dependencies for compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    ccache \
+    patchelf \
+    libffi-dev \
+    libssl-dev \
+    zlib1g-dev \
+    libsqlite3-dev \
+    curl \
+    unzip \
+    # Node.js for pkg compilation
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Nuitka for Python compilation
+RUN pip install --no-cache-dir \
+    nuitka \
+    ordered-set \
+    zstandard
+
+# Install pkg globally for Node.js compilation
+RUN npm install -g pkg@5.8.1
+
+# Create workspace directories
+RUN mkdir -p /workspace/input /workspace/output /workspace/temp \
+    && chown -R buildworker:buildworker /workspace
+
+# Set resource limits via ulimit (backup to Docker resource constraints)
+# These are set as defaults; Docker Compose limits take precedence
+RUN echo "buildworker soft nproc 256" >> /etc/security/limits.conf \
+    && echo "buildworker hard nproc 512" >> /etc/security/limits.conf \
+    && echo "buildworker soft nofile 1024" >> /etc/security/limits.conf \
+    && echo "buildworker hard nofile 4096" >> /etc/security/limits.conf
+
+# Switch to non-root user
+USER buildworker
+
+# Set environment for non-root user
+ENV HOME=/home/buildworker \
+    PATH="/home/buildworker/.local/bin:$PATH"
+
+# Timeout for builds (10 minutes max)
+ENV BUILD_TIMEOUT=600
+
+# Healthcheck - just verify the user can run basic commands
+HEALTHCHECK --interval=60s --timeout=10s --start-period=5s --retries=2 \
+    CMD python --version && node --version || exit 1
+
+# Default command (will be overridden by actual build commands)
+CMD ["echo", "Build worker ready. Waiting for build jobs..."]

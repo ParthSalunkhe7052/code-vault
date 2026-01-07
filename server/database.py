@@ -35,7 +35,13 @@ async def init_database():
     if not DATABASE_URL:
         raise Exception("DATABASE_URL not set")
 
-    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    db_pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=1,  # Reduced from 2 to prevent initialization hang
+        max_size=10,
+        timeout=30,  # 30 second timeout for acquiring connections
+        command_timeout=60  # 60 second timeout for queries
+    )
 
     conn = await db_pool.acquire()
     try:
@@ -435,7 +441,7 @@ async def init_database():
         """)
         print("[Maintenance] Reset zombie jobs to failed status")
 
-        print("[✓] Database initialized (PostgreSQL)")
+        print("[OK] Database initialized (PostgreSQL)")
 
     finally:
         await db_pool.release(conn)

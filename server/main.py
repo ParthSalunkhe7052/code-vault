@@ -40,9 +40,11 @@ from config import (
     CORS_ORIGINS,
     CORS_ALLOW_ALL,
     ENVIRONMENT,
+    REDIS_URL,
 )
 from startup_checks import run_startup_checks
 from database import lifespan
+from middleware.rate_limiter import init_rate_limiter, close_rate_limiter
 
 # Import background tasks from routers
 from routes.build_routes import cleanup_compile_cache
@@ -61,11 +63,23 @@ async def app_lifespan(app: FastAPI):
         if ENVIRONMENT == "production":
             raise e
 
+    # Initialize rate limiter with Redis
+    if REDIS_URL:
+        await init_rate_limiter(REDIS_URL)
+        logging.getLogger(__name__).info("[Startup] Rate limiter initialized with Redis")
+    else:
+        logging.getLogger(__name__).warning(
+            "[Startup] REDIS_URL not configured - rate limiting disabled"
+        )
+
     async with lifespan(app):
         import asyncio
 
         asyncio.create_task(cleanup_compile_cache())
         yield
+
+    # Cleanup on shutdown
+    await close_rate_limiter()
 
 
 app = FastAPI(
@@ -75,14 +89,31 @@ app = FastAPI(
     lifespan=app_lifespan,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if CORS_ALLOW_ALL else CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware - SECURITY FIX: Don't allow wildcard with credentials
+# When allow_origins is ["*"], credentials must be False per CORS spec
+if CORS_ALLOW_ALL:
+    # Development mode: Allow all origins but NO credentials
+    # This prevents the browser from sending cookies/auth headers cross-origin
+    if ENVIRONMENT == "production":
+        logging.getLogger(__name__).warning(
+            "[CORS] CORS_ALLOW_ALL is enabled in production - this is NOT recommended!"
+        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,  # SECURITY: Must be False when origins is wildcard
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # Production mode: Strict origin list with credentials allowed
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # =============================================================================

@@ -109,23 +109,33 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
             <div
                 ref={modalRef}
                 className={`
-                    relative ${sizes[size]} w-full bg-gray-900/98 border border-white/15
+                    relative ${sizes[size]} w-full
                     rounded-2xl shadow-2xl shadow-black/50 overflow-hidden
                     transform transition-all animate-scale-in
                     flex flex-col max-h-[85vh]
                 `}
+                style={{
+                    backgroundColor: 'var(--cv-card-solid)',
+                    border: '1px solid var(--cv-border)'
+                }}
             >
                 {/* Header with gradient */}
-                <div className="flex items-center justify-between p-5
-                    border-b border-white/10 bg-gradient-to-r from-white/5 to-transparent shrink-0">
-                    <h3 id="modal-title" className="font-bold text-lg text-white">
+                <div
+                    className="flex items-center justify-between p-5 shrink-0"
+                    style={{
+                        borderBottom: '1px solid var(--cv-border)',
+                        background: 'linear-gradient(to right, var(--cv-border-subtle), transparent)'
+                    }}
+                >
+                    <h3 id="modal-title" className="font-bold text-lg" style={{ color: 'var(--cv-text)' }}>
                         {title}
                     </h3>
                     <button
                         onClick={onClose}
-                        className="p-2 rounded-lg hover:bg-white/10 text-slate-400
-                            hover:text-white transition-all focus:outline-none focus:ring-2
-                            focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                        className="p-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2"
+                        style={{
+                            color: 'var(--cv-text-muted)',
+                        }}
                         aria-label="Close modal"
                     >
                         <X size={18} />

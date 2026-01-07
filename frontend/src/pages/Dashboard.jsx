@@ -4,6 +4,7 @@ import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRi
 import { stats } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
+import ThemeToggle from '../components/ThemeToggle';
 
 const Dashboard = () => {
     const [dashboardStats, setDashboardStats] = useState(null);
@@ -72,13 +73,16 @@ const Dashboard = () => {
                     <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
                     <p className="text-slate-400 text-sm">Overview of your license management</p>
                 </div>
-                <button
-                    onClick={fetchData}
-                    className="btn-secondary flex items-center gap-2"
-                >
-                    <RefreshCw size={16} />
-                    Refresh
-                </button>
+                <div className="flex items-center gap-2">
+                    <ThemeToggle />
+                    <button
+                        onClick={fetchData}
+                        className="btn-secondary flex items-center gap-2"
+                    >
+                        <RefreshCw size={16} />
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {/* Stats Grid */}

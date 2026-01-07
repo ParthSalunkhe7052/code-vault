@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import WizardStepIndicator from './WizardStepIndicator';
 import { Step1Upload, Step2Review, Step3Configure, Step4License, Step5Build } from './WizardSteps';
@@ -30,6 +31,9 @@ const ProjectWizard = ({
 }) => {
     // Get settings from context
     const { settings } = useSettings();
+
+    // Navigation hook
+    const navigate = useNavigate();
 
     // Get persistent build state from context
     const projectBuild = useProjectBuild(project?.id);
@@ -62,7 +66,7 @@ const ProjectWizard = ({
 
     const [nodeTarget, setNodeTarget] = useState('node18-win-x64');
     const [enableObfuscation, setEnableObfuscation] = useState(false); // Obfuscation off by default for faster builds
-    const [enableLease, setEnableLease] = useState(true); // Offline lease enabled by default
+    const [enableLease, setEnableLease] = useState(false); // Offline lease OFF by default
 
     // Distribution settings (local state that overrides settings defaults during this wizard session)
     const [distributionType, setDistributionType] = useState(settings.defaultDistributionType || 'portable');
@@ -142,6 +146,13 @@ const ProjectWizard = ({
 
     // Sync local state to configData for saving
     useEffect(() => {
+        console.log('[WIZARD SYNC] Syncing to configData:', {
+            enableObfuscation,
+            enableLease,
+            resulting_skip_obfuscation: !enableObfuscation,
+            resulting_enable_lease: enableLease
+        });
+
         setConfigData(prev => ({
             ...prev,
             include_modules: includePackages,
@@ -160,6 +171,24 @@ const ProjectWizard = ({
             }
         }));
     }, [includePackages, excludePackages, demoMode, demoDuration, nodeTarget, enableObfuscation, enableLease, setConfigData]);
+
+    // Initialize local state from loaded configData (when project config is fetched)
+    useEffect(() => {
+        if (configData && isOpen) {
+            // Sync obfuscation state from config (invert skip_obfuscation to get enableObfuscation)
+            if (configData.skip_obfuscation !== undefined) {
+                setEnableObfuscation(!configData.skip_obfuscation);
+            }
+            // Sync lease state from config
+            if (configData.enable_lease !== undefined) {
+                setEnableLease(configData.enable_lease);
+            }
+            // Sync node target from compiler options
+            if (configData.compiler_options?.target) {
+                setNodeTarget(configData.compiler_options.target);
+            }
+        }
+    }, [configData?.skip_obfuscation, configData?.enable_lease, configData?.compiler_options?.target, isOpen]);
 
     // Auto-advance after ZIP upload
     useEffect(() => {
@@ -247,8 +276,20 @@ const ProjectWizard = ({
         }
     };
 
-    const handleNext = () => {
+    const handleNext = async () => {
         if (currentStep < 5 && canProceed()) {
+            // Auto-save config when leaving Step 3 (Configure) to persist settings
+            if (currentStep === 3) {
+                console.log('[WIZARD] Auto-saving config when leaving Step 3');
+                try {
+                    await onConfigSave();
+                    console.log('[WIZARD] Config saved successfully');
+                } catch (error) {
+                    console.error('[WIZARD] Failed to auto-save config:', error);
+                    // Continue anyway - don't block navigation
+                }
+            }
+
             setCompletedSteps(prev => [...new Set([...prev, currentStep])]);
             setCurrentStep(currentStep + 1);
         }
@@ -256,7 +297,10 @@ const ProjectWizard = ({
 
     const handleBack = () => {
         if (currentStep > 1) {
-            setCurrentStep(currentStep - 1);
+            const prevStep = currentStep - 1;
+            setCurrentStep(prevStep);
+            // Remove any steps >= the step we're moving back to from completed steps
+            setCompletedSteps(prev => prev.filter(step => step < prevStep));
         }
     };
 
@@ -424,6 +468,27 @@ const ProjectWizard = ({
         }
     };
 
+    const handleViewLicenses = async () => {
+        await handleClose(); // Close with auto-save
+        navigate('/licenses'); // Navigate to licenses page
+    };
+
+    // Auto-save config before closing wizard
+    const handleClose = async () => {
+        // Save config if we're on or past Step 3 (where settings are configured)
+        if (currentStep >= 3 && configData.entry_file) {
+            console.log('[WIZARD] Auto-saving config before closing');
+            try {
+                await onConfigSave();
+                console.log('[WIZARD] Config saved before close');
+            } catch (error) {
+                console.error('[WIZARD] Failed to save on close:', error);
+                // Continue closing anyway
+            }
+        }
+        onClose();
+    };
+
     const handleOpenOutputFolder = async () => {
         if (!outputPath || !isTauri) return;
 
@@ -551,6 +616,7 @@ const ProjectWizard = ({
                         onStartBuild={handleCheckPrerequisites}
                         onStopBuild={handleStopBuild}
                         onOpenOutputFolder={handleOpenOutputFolder}
+                        onViewLicenses={handleViewLicenses}
                         // Distribution settings
                         distributionType={distributionType}
                         setDistributionType={setDistributionType}
@@ -574,7 +640,7 @@ const ProjectWizard = ({
             {createPortal(
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
                     {/* Click outside to close */}
-                    <div className="absolute inset-0" onClick={onClose} />
+                    <div className="absolute inset-0" onClick={handleClose} />
 
                     <div className="relative max-w-4xl w-full bg-gray-900/98 border border-white/15 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden transform transition-all animate-scale-in flex flex-col max-h-[90vh]">
                         {/* Header */}
@@ -583,7 +649,7 @@ const ProjectWizard = ({
                                 Configure Project: {project?.name || ''}
                             </h3>
                             <button
-                                onClick={onClose}
+                                onClick={handleClose}
                                 className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all"
                             >
                                 <X size={18} />
@@ -642,7 +708,7 @@ const ProjectWizard = ({
                                     </button>
                                 ) : (
                                     <button
-                                        onClick={onClose}
+                                        onClick={handleClose}
                                         className="px-5 py-2.5 rounded-lg font-medium bg-white/10 text-white hover:bg-white/20 transition-colors"
                                     >
                                         Done
