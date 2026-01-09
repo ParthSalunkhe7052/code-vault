@@ -80,7 +80,7 @@ def validate_server_url(server_url: str) -> str:
         The validated server URL
 
     Raises:
-        ValidationError: If URL format is invalid
+        ValidationError: If URL format is invalid or contains embedded credentials
     """
     if not server_url:
         raise ValidationError("Server URL cannot be empty")
@@ -102,6 +102,12 @@ def validate_server_url(server_url: str) -> str:
     # Must have a valid hostname
     if not parsed.netloc:
         raise ValidationError("Server URL must have a valid hostname")
+
+    # CRITICAL: Reject URLs with embedded credentials
+    if parsed.username or parsed.password:
+        raise ValidationError(
+            "Server URL must not contain embedded credentials (username/password)"
+        )
 
     # Block dangerous characters that could escape string context
     dangerous_chars = ["'", '"', '`', '\\', '\n', '\r', '\t', '\0']
@@ -295,10 +301,36 @@ def validate_boolean(value: Any, field_name: str = "value") -> bool:
         return value
 
     if isinstance(value, str):
-        return value.lower() in ('true', '1', 'yes', 'on')
+        lower_value = value.lower()
+        if lower_value in ('true', '1', 'yes', 'on'):
+            return True
+        elif lower_value in ('false', '0', 'no', 'off'):
+            return False
+        else:
+            raise ValidationError(
+                f"{field_name} must be a valid boolean string "
+                f"(true/false/yes/no/1/0/on/off), got '{value}'"
+            )
 
-    if isinstance(value, (int, float)):
-        return bool(value)
+    if isinstance(value, int):
+        if value == 0:
+            return False
+        elif value == 1:
+            return True
+        else:
+            raise ValidationError(
+                f"{field_name} must be 0 or 1 for numeric boolean, got {value}"
+            )
+
+    if isinstance(value, float):
+        if value == 0.0:
+            return False
+        elif value == 1.0:
+            return True
+        else:
+            raise ValidationError(
+                f"{field_name} must be 0.0 or 1.0 for float boolean, got {value}"
+            )
 
     raise ValidationError(f"{field_name} must be a boolean or convertible to boolean")
 

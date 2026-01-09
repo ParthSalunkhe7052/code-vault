@@ -853,8 +853,9 @@ def detect_heavy_dependencies(project_dir: Path) -> bool:
             try:
                 content = py_file.read_text(encoding='utf-8', errors='ignore').lower()
                 check_files.append(content)
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError):
+                # Skip files that can't be read or decoded
+                continue
 
     # Look for heavy dependency imports
     heavy_patterns = [
@@ -899,16 +900,23 @@ def detect_heavy_deps_detailed(project_dir: Path) -> list:
                     if dep_name not in found:
                         found.append(dep_name)
                     break
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError):
+                # Skip files that can't be read or decoded
+                continue
 
     return found
 
 
-def parse_nuitka_percent(line: str) -> int:
-    """Extract percentage from Nuitka output like 'GGG:  15% [1500/10000]'"""
+def parse_nuitka_percent(line: str) -> int | None:
+    """Extract percentage from Nuitka output like 'GGG:  15% [1500/10000]'
+
+    Args:
+        line: A line of Nuitka output
+
+    Returns:
+        The extracted percentage as an integer, or None if no percentage found
+    """
     if "%" in line:
-        import re
         match = re.search(r'(\d+)%', line)
         if match:
             return int(match.group(1))
@@ -1176,8 +1184,10 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         for f in sample_files:
             try:
                 total_lines += len(f.read_text(encoding='utf-8', errors='ignore').splitlines())
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError) as e:
+                # Skip files that can't be read or decoded, but log for debugging
+                print(f"[DEBUG] Could not read {f.name}: {e}", flush=True)
+                continue
 
         if len(sample_files) > 0 and len(py_files) > len(sample_files):
             total_lines = int(total_lines / len(sample_files) * len(py_files))
@@ -1227,12 +1237,17 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
             print("     • Add --jobs=8 (use all CPU cores)")
             print("     • Build once, cache for future iterations")
 
-            # Confirmation
-            print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
-            response = input().strip().lower()
-            if response in ['n', 'no']:
-                print("  Build cancelled.")
-                return False
+            # Check if running in interactive mode
+            if sys.stdin.isatty():
+                print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
+                response = input().strip().lower()
+                if response in ['n', 'no']:
+                    print("  Build cancelled.")
+                    return False
+            else:
+                # Non-interactive environment (CI/CD, scripts)
+                print(f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}")
+                print(f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}")
 
         return True
 
@@ -1255,13 +1270,23 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
                     print(f"\n  {Colors.RED}⚠️  Large number of dependencies!{Colors.RESET}")
                     print(f"  {Colors.YELLOW}     Consider: --fast-build to skip obfuscation{Colors.RESET}")
 
-                    print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
-                    response = input().strip().lower()
-                    if response in ['n', 'no']:
-                        print("  Build cancelled.")
-                        return False
-            except Exception:
-                pass
+                    # Check if running in interactive mode
+                    if sys.stdin.isatty():
+                        print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
+                        response = input().strip().lower()
+                        if response in ['n', 'no']:
+                            print("  Build cancelled.")
+                            return False
+                    else:
+                        # Non-interactive environment (CI/CD, scripts)
+                        print(f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}")
+                        print(f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}")
+            except json.JSONDecodeError as e:
+                print(f"  {Colors.YELLOW}⚠️  Warning: Could not parse package.json: {e}{Colors.RESET}")
+                print(f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}")
+            except OSError as e:
+                print(f"  {Colors.YELLOW}⚠️  Warning: Could not read package.json: {e}{Colors.RESET}")
+                print(f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}")
 
         return True
 

@@ -206,9 +206,10 @@ export function useBuild() {
  * Memoized to prevent unnecessary re-renders
  */
 export function useProjectBuild(projectId) {
-    const { getBuild, updateBuild, addBuildLog, startBuild, completeBuild, failBuild, cancelBuild } = useBuild();
+    const { getBuild, updateBuild, addBuildLog, startBuild, completeBuild, failBuild, cancelBuild, builds } = useBuild();
 
-    const build = getBuild(projectId);
+    // Memoize the build retrieval to prevent new object creation on each render
+    const build = useMemo(() => getBuild(projectId), [getBuild, projectId, builds]);
 
     // Memoize the callback functions to prevent new references on each render
     const memoizedUpdateBuild = useCallback(

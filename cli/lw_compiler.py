@@ -120,6 +120,7 @@ Build Tips:
     build_parser.add_argument(
         "--fast-build",
         action="store_true",
+        default=None,
         help="Fast build mode: Compile without --onefile (directory output, much faster)",
     )
     build_parser.add_argument(
@@ -131,10 +132,17 @@ Build Tips:
         "--fast",
         action="store_true",
         dest="fast_build",  # Same as --fast-build
+        default=None,
         help="Alias for --fast-build",
     )
 
     args = parser.parse_args()
+
+    # Validate --jobs argument if provided
+    if getattr(args, 'jobs', None) is not None:
+        if args.jobs < 1:
+            print(f"{Colors.RED}Error: --jobs must be >= 1{Colors.RESET}")
+            sys.exit(1)
 
     def cmd_version(args):
         """Show CLI version."""

@@ -130,7 +130,7 @@ def run_local_build(args):
     # Log build start
     log_build_start(
         project_id="local_file",
-        language=config["license_key"],
+        language=config["language"],
         license_mode=config["license_key"],
         obfuscate_enabled=obfuscate_enabled,
         lease_enabled=lease_enabled,

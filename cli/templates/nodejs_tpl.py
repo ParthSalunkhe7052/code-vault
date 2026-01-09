@@ -428,7 +428,7 @@ function _lw_showErrorAndWait(type, error) {
     } else if (type.includes('SERVER ERROR')) {
         process.stderr.write('- The license server may be temporarily unavailable\n');
         process.stderr.write('- Try again in a few minutes\n');
-        process.stderr.write('- Check https://status.codevault.io for server status\n');
+        process.stderr.write('- Check with support for server status\n');
     } else if (type.includes('VALIDATION') || type.includes('RESPONSE')) {
         process.stderr.write('- This may be a bug in the license wrapper\n');
         process.stderr.write('- Please report this error with full details\n');
