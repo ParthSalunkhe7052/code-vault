@@ -22,7 +22,9 @@ const BuildPresetsManager = ({
             try {
                 setPresets(JSON.parse(saved));
             } catch (e) {
-                console.error('Failed to load presets:', e);
+                if (import.meta.env.DEV) {
+                    console.error('Failed to load presets:', e);
+                }
             }
         }
     }, []);

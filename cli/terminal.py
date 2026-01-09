@@ -71,3 +71,45 @@ def print_warning(msg: str):
 def print_info(msg: str):
     """Print info message."""
     color_print(f"📋 {msg}", Colors.BLUE)
+
+
+def print_progress_bar(
+    percent: int,
+    width: int = 30,
+    phase: str = "",
+    elapsed_time: str = ""
+) -> None:
+    """Print a visual progress bar.
+
+    Args:
+        percent: Progress percentage (0-100)
+        width: Width of the progress bar in characters
+        phase: Current phase description (e.g., "modules", "C code")
+        elapsed_time: Elapsed time string (e.g., "2m15s")
+    """
+    enable_colors()
+
+    # Clamp percent to 0-100
+    percent = max(0, min(100, percent))
+
+    filled = int(width * percent / 100)
+    bar = "█" * filled + "░" * (width - filled)
+
+    # Build the status text
+    status_parts = []
+    if phase:
+        status_parts.append(phase)
+    if elapsed_time:
+        status_parts.append(elapsed_time)
+
+    status_text = " | ".join(status_parts) if status_parts else ""
+    status_display = f" [{status_text}]" if status_text else ""
+
+    output = f"\r{Colors.CYAN}[{bar}]{Colors.RESET} {percent:3d}%{status_display}  "
+
+    try:
+        print(output, end="", flush=True)
+    except UnicodeEncodeError:
+        # Fallback for terminals without Unicode support
+        filled_char = "#" * filled + "-" * (width - filled)
+        print(f"\r[{filled_char}] {percent:3d}%{status_display}  ", end="", flush=True)

@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useMemo, memo } from 'react';
 import { FolderTree, FileCode, Package, CheckCircle, AlertCircle } from 'lucide-react';
 
 /**
- * Step2Review - Review the project structure after upload
+ * Step2Review - Optimized with memo
+ * Review the project structure after upload
  * Shows file tree, detected entry point, and dependencies
  */
-const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, onEntryPointChange }) => {
-    const hasFileTree = fileTree && fileTree.files && fileTree.files.length > 0;
+const Step2Review = memo(({ fileTree, files = [], entryPoint, entryPointConfidence, onEntryPointChange }) => {
+    const hasFileTree = useMemo(() => fileTree && fileTree.files && fileTree.files.length > 0, [fileTree]);
 
     const getConfidenceColor = (confidence) => {
         switch (confidence) {
@@ -22,8 +23,8 @@ const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, o
             : <AlertCircle size={16} className={getConfidenceColor(confidence)} />;
     };
 
-    // Build folder structure for display
-    const buildFolderStructure = () => {
+    // Build folder structure for display - memoized
+    const structure = useMemo(() => {
         if (!hasFileTree) return null;
 
         const folders = {};
@@ -45,9 +46,28 @@ const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, o
         });
 
         return { folders, rootFiles };
-    };
+    }, [fileTree, hasFileTree]);
 
-    const structure = buildFolderStructure();
+    // Memoized file/folder render data
+    const renderData = useMemo(() => {
+        if (!structure) return null;
+
+        const rootFiles = structure.rootFiles.map((file, i) => ({
+            key: `root-${i}`,
+            file,
+            isEntry: file === entryPoint
+        }));
+
+        const folders = Object.entries(structure.folders).map(([folder, folderFiles]) => ({
+            key: folder,
+            folder,
+            files: folderFiles.slice(0, 5),
+            hasMore: folderFiles.length > 5,
+            moreCount: folderFiles.length - 5
+        }));
+
+        return { rootFiles, folders };
+    }, [structure, entryPoint]);
 
     return (
         <div className="space-y-6">
@@ -73,15 +93,17 @@ const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, o
 
                     <div className="font-mono text-sm max-h-64 overflow-y-auto space-y-1">
                         {/* Root files first */}
-                        {structure?.rootFiles.map((file, i) => (
+                        {renderData?.rootFiles.map(({ key, file, isEntry }) => (
                             <div
-                                key={`root-${i}`}
-                                className={`flex items-center gap-2 pl-2 py-1 rounded ${file === entryPoint ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-300'
+                                key={key}
+                                className={`flex items-center gap-2 pl-2 py-1 rounded ${isEntry
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : 'text-slate-300'
                                     }`}
                             >
                                 <FileCode size={14} />
                                 <span>{file}</span>
-                                {file === entryPoint && (
+                                {isEntry && (
                                     <span className="text-xs bg-emerald-500/30 px-2 py-0.5 rounded ml-2">
                                         Entry Point
                                     </span>
@@ -90,27 +112,31 @@ const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, o
                         ))}
 
                         {/* Folders */}
-                        {structure && Object.entries(structure.folders).map(([folder, folderFiles]) => (
-                            <div key={folder} className="mt-2">
+                        {renderData?.folders.map(({ key, folder, files, hasMore, moreCount }) => (
+                            <div key={key} className="mt-2">
                                 <div className="flex items-center gap-2 text-amber-400 pl-2">
                                     <Package size={14} />
                                     <span>{folder}/</span>
                                 </div>
-                                {folderFiles.slice(0, 5).map((file, i) => (
-                                    <div
-                                        key={`${folder}-${i}`}
-                                        className={`flex items-center gap-2 pl-6 py-0.5 ${`${folder}/${file}` === entryPoint
+                                {files.map((file, i) => {
+                                    const fullPath = `${folder}/${file}`;
+                                    const isEntry = fullPath === entryPoint;
+                                    return (
+                                        <div
+                                            key={`${key}-${i}`}
+                                            className={`flex items-center gap-2 pl-6 py-0.5 ${isEntry
                                                 ? 'text-emerald-400'
                                                 : 'text-slate-400'
-                                            }`}
-                                    >
-                                        <FileCode size={12} />
-                                        <span>{file}</span>
-                                    </div>
-                                ))}
-                                {folderFiles.length > 5 && (
+                                                }`}
+                                        >
+                                            <FileCode size={12} />
+                                            <span>{file}</span>
+                                        </div>
+                                    );
+                                })}
+                                {hasMore && (
                                     <div className="text-slate-500 pl-6 text-xs">
-                                        ... and {folderFiles.length - 5} more
+                                        ... and {moreCount} more
                                     </div>
                                 )}
                             </div>
@@ -180,6 +206,8 @@ const Step2Review = ({ fileTree, files = [], entryPoint, entryPointConfidence, o
             )}
         </div>
     );
-};
+});
+
+Step2Review.displayName = 'Step2Review';
 
 export default Step2Review;

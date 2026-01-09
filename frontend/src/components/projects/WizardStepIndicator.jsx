@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { memo, useCallback } from 'react';
 import { Check, Upload, FolderTree, Settings, Shield, Hammer } from 'lucide-react';
 
 /**
  * WizardStepIndicator - Visual progress indicator for the project wizard
  * Shows 5 steps: Upload, Review, Configure, Protection, Build
+ * Memoized to prevent unnecessary re-renders
  */
-const WizardStepIndicator = ({ currentStep, completedSteps = [] }) => {
+const WizardStepIndicator = memo(({ currentStep, completedSteps = [] }) => {
     const steps = [
         { id: 1, name: 'Upload', icon: Upload },
         { id: 2, name: 'Review', icon: FolderTree },
@@ -14,11 +15,11 @@ const WizardStepIndicator = ({ currentStep, completedSteps = [] }) => {
         { id: 5, name: 'Build', icon: Hammer },
     ];
 
-    const getStepStatus = (stepId) => {
+    const getStepStatus = useCallback((stepId) => {
         if (completedSteps.includes(stepId)) return 'completed';
         if (stepId === currentStep) return 'current';
         return 'upcoming';
-    };
+    }, [currentStep, completedSteps]);
 
     return (
         <div className="w-full px-4 py-6">
@@ -81,6 +82,9 @@ const WizardStepIndicator = ({ currentStep, completedSteps = [] }) => {
             </div>
         </div>
     );
-};
+});
+
+// Display name for React DevTools
+WizardStepIndicator.displayName = 'WizardStepIndicator';
 
 export default WizardStepIndicator;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key } from 'lucide-react';
 
 // Check if we're in Tauri
@@ -43,7 +43,9 @@ const Step5Build = ({
             setCopiedStep(stepId);
             setTimeout(() => setCopiedStep(null), 2000);
         } catch (err) {
-            console.error('Failed to copy:', err);
+            if (import.meta.env.DEV) {
+                console.error('Failed to copy:', err);
+            }
         }
     };
 
@@ -579,4 +581,6 @@ const Step5Build = ({
     return isTauri ? renderDesktopBuild() : renderWebModeGuide();
 };
 
-export default Step5Build;
+const MemoizedStep5Build = memo(Step5Build);
+
+export default MemoizedStep5Build;

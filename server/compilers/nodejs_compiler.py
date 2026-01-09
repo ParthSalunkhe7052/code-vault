@@ -514,7 +514,7 @@ validateLicense().then(() => {{
         await self.log(f"📄 Obfuscating {len(js_files)} JS files...", log_callback)
 
         # Obfuscation settings optimized for speed + protection
-        # Valid options for javascript-obfuscator@4.1.0
+        # Valid options for javascript-obfuscator (v5.x in package.json)
         obfuscate_args = [
             # Core obfuscation (fast, good protection)
             "--compact", "true",

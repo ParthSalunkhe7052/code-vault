@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -67,6 +67,7 @@ const ProjectWizard = ({
     const [nodeTarget, setNodeTarget] = useState('node18-win-x64');
     const [enableObfuscation, setEnableObfuscation] = useState(false); // Obfuscation off by default for faster builds
     const [enableLease, setEnableLease] = useState(false); // Offline lease OFF by default
+    const [fastBuild, setFastBuild] = useState(false); // Fast build OFF by default (produces onefile exe)
 
     // Distribution settings (local state that overrides settings defaults during this wizard session)
     const [distributionType, setDistributionType] = useState(settings.defaultDistributionType || 'portable');
@@ -150,16 +151,74 @@ const ProjectWizard = ({
         }
     }, [isOpen, project?.id, currentStep, completedSteps, protectionMode, projectPath]);
 
-    // Sync local state to configData for saving
-    useEffect(() => {
-        if (import.meta.env.DEV) {
-            console.log('[WIZARD SYNC] Syncing to configData:', {
-                enableObfuscation,
-                enableLease,
-                resulting_skip_obfuscation: !enableObfuscation,
-                resulting_enable_lease: enableLease
-            });
+    // Track if we've initialized from configData to prevent circular updates
+    const hasInitializedRef = useRef(false);
+    const isUpdatingConfigRef = useRef(false);
+
+    // Initialize local state from loaded configData ONCE when config is first loaded
+    // This runs synchronously before the sync effect to prevent loops
+    useLayoutEffect(() => {
+        if (configData && isOpen && !hasInitializedRef.current) {
+            // Only initialize once per wizard session
+            hasInitializedRef.current = true;
+
+            // Sync obfuscation state from config (invert skip_obfuscation to get enableObfuscation)
+            if (configData.skip_obfuscation !== undefined) {
+                setEnableObfuscation(!configData.skip_obfuscation);
+            }
+            // Sync lease state from config
+            if (configData.enable_lease !== undefined) {
+                setEnableLease(configData.enable_lease);
+            }
+            // Sync fast build state from config
+            if (configData.fast_build !== undefined) {
+                setFastBuild(configData.fast_build);
+            }
+            // Sync node target from compiler options
+            if (configData.compiler_options?.target) {
+                setNodeTarget(configData.compiler_options.target);
+            }
+
+            if (import.meta.env.DEV) {
+                console.log('[WIZARD] Initialized state from configData');
+            }
         }
+    }, [configData, isOpen]);
+
+    // Reset initialization flag when wizard closes
+    useEffect(() => {
+        if (!isOpen) {
+            hasInitializedRef.current = false;
+        }
+    }, [isOpen]);
+
+    // Sync local state to configData for saving - but prevent loops
+    useEffect(() => {
+        // Skip if we're currently processing an update or haven't initialized
+        if (!hasInitializedRef.current || isUpdatingConfigRef.current) {
+            return;
+        }
+
+        // Check if values actually changed before updating
+        const needsUpdate =
+            configData.include_modules?.join(',') !== includePackages.join(',') ||
+            configData.exclude_modules?.join(',') !== excludePackages.join(',') ||
+            configData.skip_obfuscation !== !enableObfuscation ||
+            configData.enable_lease !== enableLease ||
+            configData.fast_build !== fastBuild ||
+            configData.nuitka_options?.demo_mode !== demoMode ||
+            configData.nuitka_options?.demo_duration !== demoDuration ||
+            configData.compiler_options?.target !== nodeTarget;
+
+        if (!needsUpdate) {
+            return;
+        }
+
+        if (import.meta.env.DEV) {
+            console.log('[WIZARD SYNC] Syncing to configData');
+        }
+
+        isUpdatingConfigRef.current = true;
 
         setConfigData(prev => ({
             ...prev,
@@ -168,6 +227,7 @@ const ProjectWizard = ({
             // Build options that get saved to project settings
             skip_obfuscation: !enableObfuscation,  // Invert: UI shows "enable", config stores "skip"
             enable_lease: enableLease,
+            fast_build: fastBuild,  // Fast build mode (skips --onefile for faster compilation)
             nuitka_options: {
                 ...prev.nuitka_options,
                 demo_mode: demoMode,
@@ -178,25 +238,12 @@ const ProjectWizard = ({
                 target: nodeTarget
             }
         }));
-    }, [includePackages, excludePackages, demoMode, demoDuration, nodeTarget, enableObfuscation, enableLease, setConfigData]);
 
-    // Initialize local state from loaded configData (when project config is fetched)
-    useEffect(() => {
-        if (configData && isOpen) {
-            // Sync obfuscation state from config (invert skip_obfuscation to get enableObfuscation)
-            if (configData.skip_obfuscation !== undefined) {
-                setEnableObfuscation(!configData.skip_obfuscation);
-            }
-            // Sync lease state from config
-            if (configData.enable_lease !== undefined) {
-                setEnableLease(configData.enable_lease);
-            }
-            // Sync node target from compiler options
-            if (configData.compiler_options?.target) {
-                setNodeTarget(configData.compiler_options.target);
-            }
-        }
-    }, [configData?.skip_obfuscation, configData?.enable_lease, configData?.compiler_options?.target, isOpen]);
+        // Reset the flag after a microtask to allow the state update to propagate
+        Promise.resolve().then(() => {
+            isUpdatingConfigRef.current = false;
+        });
+    }, [includePackages, excludePackages, demoMode, demoDuration, nodeTarget, enableObfuscation, enableLease, fastBuild, setConfigData, configData]);
 
     // Auto-advance after ZIP upload
     useEffect(() => {
@@ -204,7 +251,7 @@ const ProjectWizard = ({
             setCompletedSteps(prev => [...new Set([...prev, 1])]);
             setCurrentStep(2);
         }
-    }, [configData.file_tree]);
+    }, [configData.file_tree, currentStep]);
 
     // Scan project structure when projectPath changes (for env vars, data folders)
     useEffect(() => {
@@ -241,31 +288,47 @@ const ProjectWizard = ({
 
         let unlistenProgress = null;
         let unlistenResult = null;
+        let isMounted = true;
 
         const setupListeners = async () => {
-            const { listen } = await import('@tauri-apps/api/event');
+            try {
+                const { listen } = await import('@tauri-apps/api/event');
 
-            unlistenProgress = await listen('compilation-progress', (event) => {
-                const { progress: prog, message } = event.payload;
-                projectBuild.updateBuild({ progress: prog });
-                projectBuild.addLog(message);
-            });
+                // Only set up listeners if component is still mounted
+                if (!isMounted) return;
 
-            unlistenResult = await listen('compilation-result', (event) => {
-                const { success, output_path, error_message } = event.payload;
-                if (success) {
-                    projectBuild.complete(output_path);
-                } else {
-                    projectBuild.fail(error_message);
+                unlistenProgress = await listen('compilation-progress', (event) => {
+                    const { progress: prog, message } = event.payload;
+                    projectBuild.updateBuild({ progress: prog });
+                    projectBuild.addLog(message);
+                });
+
+                unlistenResult = await listen('compilation-result', (event) => {
+                    const { success, output_path, error_message } = event.payload;
+                    if (success) {
+                        projectBuild.complete(output_path);
+                    } else {
+                        projectBuild.fail(error_message);
+                    }
+                });
+            } catch (error) {
+                if (import.meta.env.DEV) {
+                    console.error('Failed to setup Tauri event listeners:', error);
                 }
-            });
+            }
         };
 
         setupListeners();
 
         return () => {
-            unlistenProgress?.then?.(fn => fn?.());
-            unlistenResult?.then?.(fn => fn?.());
+            isMounted = false;
+            // Clean up listeners if they were successfully set up
+            if (unlistenProgress) {
+                unlistenProgress();
+            }
+            if (unlistenResult) {
+                unlistenResult();
+            }
         };
     }, [isOpen, buildStatus, projectBuild]);
 
@@ -630,6 +693,9 @@ const ProjectWizard = ({
                         // Lease props
                         enableLease={enableLease}
                         setEnableLease={setEnableLease}
+                        // Fast build props
+                        fastBuild={fastBuild}
+                        setFastBuild={setFastBuild}
                     />
                 );
             case 4:
@@ -685,11 +751,13 @@ const ProjectWizard = ({
     return (
         <>
             {createPortal(
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fade-in">
+                    {/* Removed backdrop-filter blur for better GPU performance */}
                     {/* Click outside to close */}
                     <div className="absolute inset-0" onClick={handleClose} />
 
-                    <div className="relative max-w-4xl w-full bg-gray-900/98 border border-white/15 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden transform transition-all animate-scale-in flex flex-col max-h-[90vh]">
+                    <div className="relative max-w-4xl w-full bg-gray-900 border border-white/15 rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+                        {/* Reduced effects for better performance */}
                         {/* Header */}
                         <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-white/5 to-transparent shrink-0">
                             <h3 className="font-bold text-lg text-white">
@@ -715,7 +783,7 @@ const ProjectWizard = ({
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                             {configLoading ? (
                                 <div className="flex items-center justify-center py-20">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" />
+                                    <div className="rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" style={{ animation: 'spin 1s linear infinite' }} />
                                 </div>
                             ) : (
                                 renderStep()

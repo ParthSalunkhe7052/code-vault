@@ -192,22 +192,22 @@ const Projects = () => {
         if (!files || files.length === 0) return;
 
         // Validation constants
-        const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB per file
-        const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200MB total
+        const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+        const MAX_TOTAL_SIZE = 500 * 1024 * 1024; // 500MB total
         const ALLOWED_EXTENSIONS = ['.py', '.js', '.ts', '.json', '.txt', '.yml', '.yaml', '.md', '.html', '.css', '.jsx', '.tsx', '.mjs', '.cjs'];
 
         // Validate file sizes
         let totalSize = 0;
         for (let i = 0; i < files.length; i++) {
             if (files[i].size > MAX_FILE_SIZE) {
-                toast.error(`File "${files[i].name}" exceeds 50MB limit`);
+                toast.error(`File "${files[i].name}" exceeds 100MB limit`);
                 return;
             }
             totalSize += files[i].size;
         }
 
         if (totalSize > MAX_TOTAL_SIZE) {
-            toast.error('Total upload size exceeds 200MB limit');
+            toast.error('Total upload size exceeds 500MB limit');
             return;
         }
 

@@ -1,14 +1,14 @@
-import React from 'react';
+import React, { memo, useCallback } from 'react';
 import { Shield, Timer, Unlock, Sparkles, Users, Key, ArrowRight, Info } from 'lucide-react';
 
 /**
- * Step4License - Protection Settings
+ * Step4License - Protection Settings - Optimized with memo
  * REDESIGNED: Now focuses on Generic Build workflow
  * - Generic Build: Customers enter keys at runtime
  * - Demo Mode: Trial period before requiring key
  * - No Protection: Unprotected build
  */
-const Step4License = ({
+const Step4License = memo(({
     // Protection mode: 'generic' | 'demo' | 'none'
     protectionMode = 'generic',
     setProtectionMode,
@@ -18,16 +18,20 @@ const Step4License = ({
     demoDuration = 60,
     setDemoDuration
 }) => {
-    // Handle protection mode change
-    const handleModeChange = (mode) => {
+    // Handle protection mode change - memoized
+    const handleModeChange = useCallback((mode) => {
         setProtectionMode(mode);
-        // If demo mode, also set demoMode flag
         if (mode === 'demo') {
             setDemoMode(true);
         } else {
             setDemoMode(false);
         }
-    };
+    }, [setProtectionMode, setDemoMode]);
+
+    // Memoized demo duration handler
+    const handleDemoDurationChange = useCallback((value) => {
+        setDemoDuration(Number(value));
+    }, [setDemoDuration]);
 
     return (
         <div className="space-y-6">
@@ -150,7 +154,7 @@ const Step4License = ({
                             <label className="text-sm text-slate-300 mb-2 block">Trial Duration:</label>
                             <select
                                 value={demoDuration}
-                                onChange={(e) => setDemoDuration(Number(e.target.value))}
+                                onChange={(e) => handleDemoDurationChange(e.target.value)}
                                 className="w-full px-3 py-2 bg-black/30 border border-amber-500/30 rounded-lg text-white focus:outline-none focus:border-amber-500"
                             >
                                 <option value="30">30 minutes</option>
@@ -271,6 +275,8 @@ const Step4License = ({
             )}
         </div>
     );
-};
+});
+
+Step4License.displayName = 'Step4License';
 
 export default Step4License;

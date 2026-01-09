@@ -178,11 +178,15 @@ const DirectBuildSection = ({
                     const envVals = await invoke('read_env_file_values', { projectPath: path });
                     setEnvValues(envVals);
                 } catch (e) {
-                    console.error('Failed to read .env:', e);
+                    if (import.meta.env.DEV) {
+                        console.error('Failed to read .env:', e);
+                    }
                 }
             }
         } catch (error) {
-            console.error('Failed to scan project:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to scan project:', error);
+            }
         } finally {
             setScanningStructure(false);
         }
@@ -203,7 +207,9 @@ const DirectBuildSection = ({
                 setOutputDir(selected);
             }
         } catch (error) {
-            console.error('Failed to open folder picker:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to open folder picker:', error);
+            }
         }
     };
 
@@ -240,7 +246,9 @@ const DirectBuildSection = ({
             const unlisten = await listen('download-progress', (event) => {
                 const { progress, message, stage } = event.payload;
                 setDownloadProgress(progress);
-                console.log(`Download: ${stage} - ${message}`);
+                if (import.meta.env.DEV) {
+                    console.log(`Download: ${stage} - ${message}`);
+                }
             });
 
             // Download the project - FIXED: Use auth service instead of hardcoded localStorage access
@@ -257,7 +265,9 @@ const DirectBuildSection = ({
             setDownloading(false);
 
         } catch (error) {
-            console.error('Download failed:', error);
+            if (import.meta.env.DEV) {
+                console.error('Download failed:', error);
+            }
             setDownloading(false);
             alert(`Download failed: ${error}`);
         }

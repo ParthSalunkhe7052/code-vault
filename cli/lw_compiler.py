@@ -41,12 +41,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  lw-compiler login                       Login with your account
-  lw-compiler projects                    List your projects
-  lw-compiler licenses PROJECT_ID         List licenses for a project
-  lw-compiler build PROJECT_ID -l KEY     Build project with license
-  lw-compiler build                       Interactive build mode
-  lw-compiler version                     Show CLI version
+  lw-compiler login                           Login with your account
+  lw-compiler projects                        List your projects
+  lw-compiler licenses PROJECT_ID             List licenses for a project
+  lw-compiler build PROJECT_ID -l KEY         Build project with license
+  lw-compiler build script.py --fast          Fast build (3-4x faster)
+  lw-compiler build script.py --jobs=8        Use 8 CPU cores
+  lw-compiler build                           Interactive build mode
+
+Build Tips:
+  • --fast or --fast-build: 3-4x faster, directory output (not single .exe)
+  • --jobs=N: Use N CPU cores (default: auto-detect, max: 8, override with CODEVAULT_JOBS)
+  • Large projects: 20-60 min standard, 10-15 min with --fast
+  • Terminal bell plays when build completes (double bell on error)
+  • Press Windows+V after bell to see clipboard history with output path
         """,
     )
 
@@ -108,6 +116,22 @@ Examples:
         "--enable-lease",
         action="store_true",
         help="Enable offline lease (24-hour cached validation)",
+    )
+    build_parser.add_argument(
+        "--fast-build",
+        action="store_true",
+        help="Fast build mode: Compile without --onefile (directory output, much faster)",
+    )
+    build_parser.add_argument(
+        "--jobs",
+        type=int,
+        help="Override CPU core count for parallel compilation (default: auto-detect, max: 8)",
+    )
+    build_parser.add_argument(
+        "--fast",
+        action="store_true",
+        dest="fast_build",  # Same as --fast-build
+        help="Alias for --fast-build",
     )
 
     args = parser.parse_args()

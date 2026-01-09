@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileCode, Loader, X, CheckCircle, XCircle, Package, Terminal } from 'lucide-react';
+import { Upload, FileCode, Loader, X, CheckCircle, XCircle, Package, Terminal, Download } from 'lucide-react';
 import Modal from '../Modal';
 import DirectBuildSection from './DirectBuildSection';
 import CompilationModal from '../CompilationModal';
