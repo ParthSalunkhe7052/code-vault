@@ -617,7 +617,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
                 pkg_json_content = json.loads(package_json.read_text(encoding="utf-8"))
                 dep_count = len(pkg_json_content.get("dependencies", {}))
                 print(f"   Found {dep_count} dependencies (est. {dep_count * 2}s)")
-            except:
+            except Exception:
                 pass
 
             npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
@@ -853,7 +853,7 @@ def detect_heavy_dependencies(project_dir: Path) -> bool:
             try:
                 content = py_file.read_text(encoding='utf-8', errors='ignore').lower()
                 check_files.append(content)
-            except:
+            except Exception:
                 pass
 
     # Look for heavy dependency imports
@@ -899,7 +899,7 @@ def detect_heavy_deps_detailed(project_dir: Path) -> list:
                     if dep_name not in found:
                         found.append(dep_name)
                     break
-            except:
+            except Exception:
                 pass
 
     return found
@@ -1161,7 +1161,6 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         bool: True to proceed with build, False to cancel
     """
     language = config.get("language", "python")
-    output_name = config.get("output_name", "output")
 
     print(f"\n{Colors.CYAN}{'='*60}{Colors.RESET}")
     print(f"{Colors.CYAN}📊 PROJECT ANALYSIS{Colors.RESET}")
@@ -1177,7 +1176,7 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         for f in sample_files:
             try:
                 total_lines += len(f.read_text(encoding='utf-8', errors='ignore').splitlines())
-            except:
+            except Exception:
                 pass
 
         if len(sample_files) > 0 and len(py_files) > len(sample_files):
@@ -1261,7 +1260,7 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
                     if response in ['n', 'no']:
                         print("  Build cancelled.")
                         return False
-            except:
+            except Exception:
                 pass
 
         return True
