@@ -1,11 +1,11 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useMemo, useCallback, memo } from 'react';
 import { Upload, Package, Loader, FileCode, X } from 'lucide-react';
 
 /**
- * Step1Upload - First step of the wizard
+ * Step1Upload - First step of the wizard - Optimized with memo
  * Handles single file or ZIP upload with drag-and-drop support
  */
-const Step1Upload = ({
+const Step1Upload = memo(({
     onFileUpload,
     onZipUpload,
     uploadProgress,
@@ -14,27 +14,30 @@ const Step1Upload = ({
     onDeleteFile,
     project
 }) => {
-    const isNodeJS = project?.language === 'nodejs';
-    const langName = isNodeJS ? 'Node.js' : 'Python';
-    const fileTypes = isNodeJS ? '.js, .ts, .mjs' : '.py';
-    const depFile = isNodeJS ? 'package.json' : 'requirements.txt';
+    // Memoized language-specific values
+    const isNodeJS = useMemo(() => project?.language === 'nodejs', [project?.language]);
+    const langName = useMemo(() => isNodeJS ? 'Node.js' : 'Python', [isNodeJS]);
+    const fileTypes = useMemo(() => isNodeJS ? '.js, .ts, .mjs' : '.py', [isNodeJS]);
+    const depFile = useMemo(() => isNodeJS ? 'package.json' : 'requirements.txt', [isNodeJS]);
 
-    const [uploadType, setUploadType] = React.useState('zip');
+    const [uploadType, setUploadType] = useState('zip');
     const fileInputRef = useRef(null);
     const zipInputRef = useRef(null);
 
-    const formatFileSize = (bytes) => {
+    // Memoized formatFileSize
+    const formatFileSize = useCallback((bytes) => {
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    };
+    }, []);
 
-    const handleDragOver = (e) => {
+    // Memoized drag/drop handlers
+    const handleDragOver = useCallback((e) => {
         e.preventDefault();
         e.stopPropagation();
-    };
+    }, []);
 
-    const handleDrop = (e) => {
+    const handleDrop = useCallback((e) => {
         e.preventDefault();
         e.stopPropagation();
 
@@ -47,9 +50,26 @@ const Step1Upload = ({
         } else {
             onFileUpload({ target: { files: droppedFiles } });
         }
-    };
+    }, [onZipUpload, onFileUpload]);
 
-    const hasFiles = files.length > 0 || fileTree;
+    // Memoized click handlers
+    const handleZipClick = useCallback(() => {
+        zipInputRef.current?.click();
+    }, []);
+
+    const handleFileClick = useCallback(() => {
+        fileInputRef.current?.click();
+    }, []);
+
+    const handleDeleteFile = useCallback((fileId) => {
+        onDeleteFile(fileId);
+    }, [onDeleteFile]);
+
+    // Memoized upload type toggles
+    const toggleToZip = useCallback(() => setUploadType('zip'), []);
+    const toggleToSingle = useCallback(() => setUploadType('single'), []);
+
+    const hasFiles = useMemo(() => files.length > 0 || fileTree, [files, fileTree]);
 
     return (
         <div className="space-y-6">
@@ -64,7 +84,7 @@ const Step1Upload = ({
             <div className="flex gap-3 mb-6">
                 <button
                     type="button"
-                    onClick={() => setUploadType('zip')}
+                    onClick={toggleToZip}
                     className={`flex-1 px-4 py-3 rounded-xl border transition-all ${uploadType === 'zip'
                         ? 'bg-indigo-600 border-indigo-500 text-white'
                         : 'bg-white/5 border-white/10 text-slate-400 hover:border-indigo-500/50'
@@ -75,7 +95,7 @@ const Step1Upload = ({
                 </button>
                 <button
                     type="button"
-                    onClick={() => setUploadType('single')}
+                    onClick={toggleToSingle}
                     className={`flex-1 px-4 py-3 rounded-xl border transition-all ${uploadType === 'single'
                         ? 'bg-indigo-600 border-indigo-500 text-white'
                         : 'bg-white/5 border-white/10 text-slate-400 hover:border-indigo-500/50'
@@ -97,7 +117,7 @@ const Step1Upload = ({
                         className="hidden"
                     />
                     <div
-                        onClick={() => zipInputRef.current?.click()}
+                        onClick={handleZipClick}
                         onDragOver={handleDragOver}
                         onDrop={handleDrop}
                         className="border-2 border-dashed border-white/20 rounded-2xl p-12 flex flex-col items-center justify-center text-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer group"
@@ -143,7 +163,7 @@ const Step1Upload = ({
                         className="hidden"
                     />
                     <div
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={handleFileClick}
                         onDragOver={handleDragOver}
                         onDrop={handleDrop}
                         className="border-2 border-dashed border-white/20 rounded-2xl p-12 flex flex-col items-center justify-center text-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer group"
@@ -191,7 +211,7 @@ const Step1Upload = ({
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={() => onDeleteFile(file.id)}
+                                    onClick={() => handleDeleteFile(file.id)}
                                     className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
                                 >
                                     <X size={16} />
@@ -215,6 +235,8 @@ const Step1Upload = ({
             )}
         </div>
     );
-};
+});
+
+Step1Upload.displayName = 'Step1Upload';
 
 export default Step1Upload;

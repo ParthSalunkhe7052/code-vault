@@ -15,6 +15,10 @@ def check_logged_in():
     headers = get_headers()
     if not headers:
         color_print("❌ Not logged in. Run 'lw-compiler login' first.", Colors.RED)
+        color_print("\n💡 Quick start:", Colors.CYAN)
+        color_print("   1. python lw_compiler.py login", Colors.WHITE)
+        color_print("   2. python lw_compiler.py build", Colors.WHITE)
+        color_print("", Colors.RESET)
         sys.exit(1)
     return headers
 

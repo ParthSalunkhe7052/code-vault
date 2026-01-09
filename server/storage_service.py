@@ -34,13 +34,13 @@ R2_ENDPOINT = os.getenv("R2_ENDPOINT", "")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")
 
 # File size limits (in bytes)
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(10 * 1024 * 1024)))  # 10 MB per file
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(100 * 1024 * 1024)))  # 100 MB per file
 MAX_ZIP_SIZE = int(
-    os.getenv("MAX_ZIP_SIZE", str(50 * 1024 * 1024))
-)  # 50 MB for ZIP uploads
+    os.getenv("MAX_ZIP_SIZE", str(500 * 1024 * 1024))
+)  # 500 MB for ZIP uploads
 MAX_TOTAL_PROJECT_SIZE = int(
-    os.getenv("MAX_TOTAL_PROJECT_SIZE", str(100 * 1024 * 1024))
-)  # 100 MB total per project
+    os.getenv("MAX_TOTAL_PROJECT_SIZE", str(500 * 1024 * 1024))
+)  # 500 MB total per project
 
 # File retention (in days)
 BUILD_RETENTION_DAYS = int(

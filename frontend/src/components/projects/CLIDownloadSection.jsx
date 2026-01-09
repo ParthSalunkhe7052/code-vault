@@ -31,7 +31,9 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         } catch (err) {
-            console.error('Failed to download build bundle:', err);
+            if (import.meta.env.DEV) {
+                console.error('Failed to download build bundle:', err);
+            }
             const errorMessage = err.response?.data?.detail || 'Failed to download build bundle. Please try again.';
             alert(errorMessage);
         } finally {
@@ -47,7 +49,9 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
-            console.error('Failed to copy:', err);
+            if (import.meta.env.DEV) {
+                console.error('Failed to copy:', err);
+            }
         }
     };
 

@@ -15,16 +15,39 @@ _LW_LEASE_DURATION = 24 * 60 * 60  # 24 hours in seconds
 _LW_CLOCK_DRIFT_MAX = 60 * 60  # 1 hour max clock drift
 
 def _lw_show_error(title, message, details=None):
-    """Show error with formatting and wait for user."""
+    """Show error with formatting and troubleshooting guidance."""
     print("\n" + "=" * 60)
     print(f"  ❌ {title}")
     print("=" * 60)
     print(f"\n{message}")
     if details:
         print(f"\nDetails: {details}")
+
+    # Add context-specific troubleshooting
+    print("\n" + "-" * 60)
+    print("TROUBLESHOOTING:")
+    print("-" * 60)
+    if "LICENSE INVALID" in title:
+        print("- Check your license key for typos")
+        print("- Ensure the license is active and not expired")
+        print("- Verify you're connected to the internet")
+    elif "CONNECTION REQUIRED" in title or "OFFLINE" in title:
+        print("- Check your internet connection")
+        print("- Try connecting to a different network")
+        print("- If offline mode is desired, contact support")
+    elif "SERVER ERROR" in title:
+        print("- The license server may be temporarily unavailable")
+        print("- Try again in a few minutes")
+        print("- Check https://status.codevault.io for server status")
+    elif "VALIDATION ERROR" in title or "RESPONSE ERROR" in title:
+        print("- This may be a bug in the license wrapper")
+        print("- Please report this error with full details")
+    else:
+        print("- Please take a screenshot of this entire error")
+        print("- Include information about what you were doing")
+        print("- Contact support with the error details")
+
     print("\n" + "=" * 60)
-    print("Please take a screenshot of this error and report it.")
-    print("=" * 60)
     try:
         input("\nPress Enter to exit...")
     except Exception:
@@ -403,14 +426,14 @@ def _lw_validate():
     """Validate license with server."""
     LICENSE_KEY = "{license_key}"
     SERVER_URL = "{server_url}"
-    
+
     # Check GUI availability at startup
     _lw_check_gui_available()
-    
+
     if LICENSE_KEY == "DEMO":
         print("[License Wrapper] Running in DEMO mode")
         return True
-    
+
     if LICENSE_KEY == "GENERIC_BUILD":
         LICENSE_KEY = _lw_load_or_prompt_license()
     

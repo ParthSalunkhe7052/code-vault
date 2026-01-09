@@ -412,6 +412,32 @@ function _lw_showErrorAndWait(type, error) {
         process.stderr.write('\nStack trace:\n');
         process.stderr.write(error.stack + '\n');
     }
+
+    // Context-specific troubleshooting
+    process.stderr.write('\n' + '-'.repeat(60) + '\n');
+    process.stderr.write('TROUBLESHOOTING:\n');
+    process.stderr.write('-'.repeat(60) + '\n');
+    if (type.includes('LICENSE INVALID')) {
+        process.stderr.write('- Check your license key for typos\n');
+        process.stderr.write('- Ensure the license is active and not expired\n');
+        process.stderr.write('- Verify you are connected to the internet\n');
+    } else if (type.includes('CONNECTION') || type.includes('OFFLINE')) {
+        process.stderr.write('- Check your internet connection\n');
+        process.stderr.write('- Try connecting to a different network\n');
+        process.stderr.write('- If offline mode is desired, contact support\n');
+    } else if (type.includes('SERVER ERROR')) {
+        process.stderr.write('- The license server may be temporarily unavailable\n');
+        process.stderr.write('- Try again in a few minutes\n');
+        process.stderr.write('- Check with support for server status\n');
+    } else if (type.includes('VALIDATION') || type.includes('RESPONSE')) {
+        process.stderr.write('- This may be a bug in the license wrapper\n');
+        process.stderr.write('- Please report this error with full details\n');
+    } else {
+        process.stderr.write('- Please take a screenshot of this entire error\n');
+        process.stderr.write('- Include information about what you were doing\n');
+        process.stderr.write('- Contact support with the error details\n');
+    }
+
     process.stderr.write('\n' + '='.repeat(60) + '\n');
     process.stderr.write('Press any key to exit...\n');
     process.stderr.write('='.repeat(60) + '\n');

@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
-import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image } from 'lucide-react';
+import React, { useState, useMemo, useCallback, memo } from 'react';
+import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap } from 'lucide-react';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
 /**
- * Step3Configure - Configure build settings
+ * Step3Configure - Optimized with memoization
  * Entry point selection, console mode, advanced options with env vars, icon, packages, data folders
  */
-const Step3Configure = ({
+const Step3Configure = memo(({
     fileTree,
     files = [],
     entryFile,
@@ -38,39 +38,40 @@ const Step3Configure = ({
     setEnableObfuscation,
     // Lease props (both Python and Node.js)
     enableLease = true,
-    setEnableLease
+    setEnableLease,
+    // Fast build props
+    fastBuild = false,
+    setFastBuild
 }) => {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [iconDragOver, setIconDragOver] = useState(false);
 
-    // Check project language
-    const isNodeJS = project?.language === 'nodejs';
+    // Memoize language check
+    const isNodeJS = useMemo(() => project?.language === 'nodejs', [project?.language]);
 
-    // Get available source files
-    const sourceFiles = fileTree
-        ? fileTree.files.filter(f => isNodeJS ? /\.(js|ts|mjs|cjs)$/.test(f) : f.endsWith('.py'))
-        : files.filter(f => isNodeJS ? /\.(js|ts|mjs|cjs)$/.test(f.original_filename) : f.original_filename.endsWith('.py')).map(f => f.original_filename);
+    // Get available source files - memoized
+    const sourceFiles = useMemo(() => {
+        return fileTree
+            ? fileTree.files.filter(f => isNodeJS ? /\\.(js|ts|mjs|cjs)$/.test(f) : f.endsWith('.py'))
+            : files.filter(f => isNodeJS ? /\\.(js|ts|mjs|cjs)$/.test(f.original_filename) : f.original_filename.endsWith('.py')).map(f => f.original_filename);
+    }, [fileTree, files, isNodeJS]);
 
-    const getCandidate = (file) => {
+    const getCandidate = useCallback((file) => {
         return entryPointCandidates.find(c => c.file === file);
-    };
+    }, [entryPointCandidates]);
 
-    // Handle icon drop - Note: Drag & drop file paths are unreliable in Tauri v2
-    // We still catch the drop but prompt user to use the browse dialog
-    const handleIconDrop = async (e) => {
+    // Handle icon drop - memoized
+    const handleIconDrop = useCallback(async (e) => {
         e.preventDefault();
         setIconDragOver(false);
 
-        // In Tauri, DataTransfer doesn't reliably expose full file paths
-        // So we prompt the user to use the browse dialog instead
         if (e.dataTransfer.files?.length > 0) {
-            // Show a message via the browseIcon dialog instead
             browseIcon();
         }
-    };
+    }, []);
 
-    // Browse for icon file
-    const browseIcon = async () => {
+    // Browse for icon file - memoized
+    const browseIcon = useCallback(async () => {
         if (!isTauri) return;
 
         try {
@@ -85,15 +86,15 @@ const Step3Configure = ({
             });
 
             if (selected) {
-                // If PNG, convert to ICO
                 if (selected.toLowerCase().endsWith('.png')) {
                     try {
                         const { invoke } = await import('@tauri-apps/api/core');
                         const icoPath = await invoke('convert_png_to_ico', { pngPath: selected });
                         setIconPath(icoPath);
                     } catch (err) {
-                        console.error('PNG to ICO conversion failed:', err);
-                        // Use PNG anyway - Nuitka can handle it
+                        if (import.meta.env.DEV) {
+                            console.error('PNG to ICO conversion failed:', err);
+                        }
                         setIconPath(selected);
                     }
                 } else {
@@ -101,9 +102,63 @@ const Step3Configure = ({
                 }
             }
         } catch (error) {
-            console.error('Failed to open file picker:', error);
+            if (import.meta.env.DEV) {
+                console.error('Failed to open file picker:', error);
+            }
         }
-    };
+    }, [setIconPath]);
+
+    // Memoized selection handler for env vars
+    const handleEnvVarChange = useCallback((key, checked) => {
+        if (checked) {
+            setSelectedEnvKeys([...selectedEnvKeys, key]);
+        } else {
+            setSelectedEnvKeys(selectedEnvKeys.filter(k => k !== key));
+        }
+    }, [selectedEnvKeys, setSelectedEnvKeys]);
+
+    // Memoized data folder selection handler
+    const handleDataFolderChange = useCallback((folder, checked) => {
+        if (checked) {
+            setSelectedDataFolders([...selectedDataFolders, folder]);
+        } else {
+            setSelectedDataFolders(selectedDataFolders.filter(f => f !== folder));
+        }
+    }, [selectedDataFolders, setSelectedDataFolders]);
+
+    // Memoized package handlers
+    const handleIncludeChange = useCallback((value) => {
+        setIncludePackages(value.split(',').map(s => s.trim()).filter(Boolean));
+    }, [setIncludePackages]);
+
+    const handleExcludeChange = useCallback((value) => {
+        setExcludePackages(value.split(',').map(s => s.trim()).filter(Boolean));
+    }, [setExcludePackages]);
+
+    // Memoized showAdvanced toggle
+    const toggleAdvanced = useCallback(() => {
+        setShowAdvanced(prev => !prev);
+    }, []);
+
+    // Memoized console toggle
+    const toggleConsole = useCallback(() => {
+        setShowConsole(prev => !prev);
+    }, [setShowConsole]);
+
+    // Memoized obfuscation toggle
+    const toggleObfuscation = useCallback(() => {
+        setEnableObfuscation(!enableObfuscation);
+    }, [enableObfuscation, setEnableObfuscation]);
+
+    // Memoized lease toggle
+    const toggleLease = useCallback(() => {
+        setEnableLease(!enableLease);
+    }, [enableLease, setEnableLease]);
+
+    // Memoized fast build toggle
+    const toggleFastBuild = useCallback(() => {
+        setFastBuild(!fastBuild);
+    }, [fastBuild, setFastBuild]);
 
     return (
         <div className="space-y-6">
@@ -180,7 +235,7 @@ const Step3Configure = ({
                     <input
                         type="checkbox"
                         checked={showConsole}
-                        onChange={(e) => setShowConsole(e.target.checked)}
+                        onChange={toggleConsole}
                         className="hidden"
                     />
                 </label>
@@ -190,8 +245,8 @@ const Step3Configure = ({
             <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
                 <button
                     type="button"
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+                    onClick={toggleAdvanced}
+                    className="w-full flex items-center justify-between p-4 hover:bg-white/5"
                 >
                     <div className="flex items-center gap-3">
                         <Settings size={18} className="text-slate-400" />
@@ -251,7 +306,7 @@ const Step3Configure = ({
                                         <input
                                             type="checkbox"
                                             checked={enableObfuscation}
-                                            onChange={(e) => setEnableObfuscation?.(e.target.checked)}
+                                            onChange={toggleObfuscation}
                                             className="w-4 h-4 rounded border-slate-500 text-purple-500 focus:ring-purple-500"
                                         />
                                         <div className="flex-1">
@@ -274,7 +329,7 @@ const Step3Configure = ({
                                 <input
                                     type="checkbox"
                                     checked={enableLease}
-                                    onChange={(e) => setEnableLease?.(e.target.checked)}
+                                    onChange={toggleLease}
                                     className="w-4 h-4 rounded border-slate-500 text-emerald-500 focus:ring-emerald-500"
                                 />
                                 <div className="flex-1">
@@ -287,6 +342,43 @@ const Step3Configure = ({
                                     </span>
                                 )}
                             </label>
+                        </div>
+
+                        {/* Fast Build Toggle - Available for BOTH Python and Node.js */}
+                        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-lg p-3 border border-amber-500/20">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={fastBuild}
+                                    onChange={toggleFastBuild}
+                                    className="w-4 h-4 rounded border-slate-500 text-amber-500 focus:ring-amber-500"
+                                />
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <Zap size={14} className="text-amber-400" />
+                                        <span className="text-sm font-medium text-white">Fast Build Mode</span>
+                                        <span className="text-xs bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+                                            3-4x Faster
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Compiles without --onefile for faster iterations
+                                    </p>
+                                </div>
+                            </label>
+
+                            {/* Side Effects Warning - only shown when enabled */}
+                            {fastBuild && (
+                                <div className="mt-3 p-2 bg-amber-500/10 rounded border border-amber-500/20">
+                                    <p className="text-xs text-amber-400 font-medium mb-1">⚡ Fast Mode Trade-offs:</p>
+                                    <ul className="text-xs text-amber-300/80 space-y-1 list-disc list-inside">
+                                        <li>Output is a folder, not a single .exe file</li>
+                                        <li>Requires all files in folder to run (less portable)</li>
+                                        <li>Best for: Development, testing, quick iterations</li>
+                                        <li>Not recommended for: Final distribution to customers</li>
+                                    </ul>
+                                </div>
+                            )}
                         </div>
 
                         {/* Python/Nuitka Specific Options */}
@@ -308,17 +400,11 @@ const Step3Configure = ({
                                     {Object.keys(envValues).length > 0 ? (
                                         <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
                                             {Object.entries(envValues).map(([key, value]) => (
-                                                <label key={key} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors">
+                                                <label key={key} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10">
                                                     <input
                                                         type="checkbox"
                                                         checked={selectedEnvKeys.includes(key)}
-                                                        onChange={(e) => {
-                                                            if (e.target.checked) {
-                                                                setSelectedEnvKeys([...selectedEnvKeys, key]);
-                                                            } else {
-                                                                setSelectedEnvKeys(selectedEnvKeys.filter(k => k !== key));
-                                                            }
-                                                        }}
+                                                        onChange={(e) => handleEnvVarChange(key, e.target.checked)}
                                                         className="w-4 h-4 rounded border-slate-500 text-emerald-500 focus:ring-emerald-500"
                                                     />
                                                     <span className="font-mono text-sm text-emerald-400">{key}</span>
@@ -354,7 +440,7 @@ const Step3Configure = ({
                                         {iconPath ? (
                                             <div className="flex items-center justify-center gap-2">
                                                 <Image size={18} className="text-emerald-400" />
-                                                <span className="text-emerald-400 text-sm">{iconPath.split(/[/\\]/).pop()}</span>
+                                                <span className="text-emerald-400 text-sm">{iconPath.split(/[/\\\\]/).pop()}</span>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); setIconPath(null); }}
                                                     className="ml-2 text-slate-400 hover:text-red-400"
@@ -385,7 +471,7 @@ const Step3Configure = ({
                                                 placeholder="package1, package2"
                                                 className="input w-full text-sm"
                                                 value={includePackages.join(', ')}
-                                                onChange={(e) => setIncludePackages(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                                                onChange={(e) => handleIncludeChange(e.target.value)}
                                             />
                                         </div>
                                         <div>
@@ -395,7 +481,7 @@ const Step3Configure = ({
                                                 placeholder="tkinter, test"
                                                 className="input w-full text-sm"
                                                 value={excludePackages.join(', ')}
-                                                onChange={(e) => setExcludePackages(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                                                onChange={(e) => handleExcludeChange(e.target.value)}
                                             />
                                         </div>
                                     </div>
@@ -420,13 +506,7 @@ const Step3Configure = ({
                                                     <input
                                                         type="checkbox"
                                                         checked={selectedDataFolders.includes(folder)}
-                                                        onChange={(e) => {
-                                                            if (e.target.checked) {
-                                                                setSelectedDataFolders([...selectedDataFolders, folder]);
-                                                            } else {
-                                                                setSelectedDataFolders(selectedDataFolders.filter(f => f !== folder));
-                                                            }
-                                                        }}
+                                                        onChange={(e) => handleDataFolderChange(folder, e.target.checked)}
                                                         className="hidden"
                                                     />
                                                     <span className="text-sm">{folder}/</span>
@@ -464,6 +544,9 @@ const Step3Configure = ({
             )}
         </div>
     );
-};
+});
+
+// Display name for debugging
+Step3Configure.displayName = 'Step3Configure';
 
 export default Step3Configure;

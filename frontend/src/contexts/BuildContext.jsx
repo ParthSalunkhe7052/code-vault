@@ -7,7 +7,7 @@
  * so users can navigate away and return to see their ongoing build.
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 const BuildContext = createContext(null);
 
@@ -203,21 +203,55 @@ export function useBuild() {
 
 /**
  * Hook for a specific project's build state
+ * Memoized to prevent unnecessary re-renders
  */
 export function useProjectBuild(projectId) {
-    const { getBuild, updateBuild, addBuildLog, startBuild, completeBuild, failBuild, cancelBuild } = useBuild();
+    const { getBuild, updateBuild, addBuildLog, startBuild, completeBuild, failBuild, cancelBuild, builds } = useBuild();
 
-    const build = getBuild(projectId);
+    // Memoize the build retrieval to prevent new object creation on each render
+    const build = useMemo(() => getBuild(projectId), [getBuild, projectId, builds]);
 
-    return {
+    // Memoize the callback functions to prevent new references on each render
+    const memoizedUpdateBuild = useCallback(
+        (updates) => updateBuild(projectId, updates),
+        [updateBuild, projectId]
+    );
+
+    const memoizedAddLog = useCallback(
+        (message) => addBuildLog(projectId, message),
+        [addBuildLog, projectId]
+    );
+
+    const memoizedStart = useCallback(
+        (jobId) => startBuild(projectId, jobId),
+        [startBuild, projectId]
+    );
+
+    const memoizedComplete = useCallback(
+        (outputPath) => completeBuild(projectId, outputPath),
+        [completeBuild, projectId]
+    );
+
+    const memoizedFail = useCallback(
+        (errorMessage) => failBuild(projectId, errorMessage),
+        [failBuild, projectId]
+    );
+
+    const memoizedCancel = useCallback(
+        () => cancelBuild(projectId),
+        [cancelBuild, projectId]
+    );
+
+    // Memoize the entire return object to maintain stable reference
+    return useMemo(() => ({
         ...build,
-        updateBuild: (updates) => updateBuild(projectId, updates),
-        addLog: (message) => addBuildLog(projectId, message),
-        start: (jobId) => startBuild(projectId, jobId),
-        complete: (outputPath) => completeBuild(projectId, outputPath),
-        fail: (errorMessage) => failBuild(projectId, errorMessage),
-        cancel: () => cancelBuild(projectId),
-    };
+        updateBuild: memoizedUpdateBuild,
+        addLog: memoizedAddLog,
+        start: memoizedStart,
+        complete: memoizedComplete,
+        fail: memoizedFail,
+        cancel: memoizedCancel,
+    }), [build, memoizedUpdateBuild, memoizedAddLog, memoizedStart, memoizedComplete, memoizedFail, memoizedCancel]);
 }
 
 export default BuildContext;
