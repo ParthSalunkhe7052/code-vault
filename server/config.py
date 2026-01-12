@@ -68,9 +68,12 @@ elif not REDIS_URL:
 # Admin
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-# License Server URL - Used by compiled applications to validate licenses
-# Set this to your production API URL, e.g. "https://api.codevault.com/api/v1"
-LICENSE_SERVER_URL = os.getenv("LICENSE_SERVER_URL", "http://localhost:8000/api/v1")
+
+# GitHub Actions (Cloud Build)
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "")
+BUILD_CALLBACK_SECRET = os.getenv("BUILD_CALLBACK_SECRET", "")
+
 
 # CLI Tool
 CLI_VERSION = "1.0.0"
@@ -156,6 +159,7 @@ TIER_LIMITS = {
         "max_licenses_per_project": 5,
         "can_sell_licenses": False,
         "cloud_compilation": False,
+        "cloud_builds_per_month": 0,
         "analytics": False,
         "webhooks": False,
         "team_seats": 1,
@@ -167,6 +171,7 @@ TIER_LIMITS = {
         "max_licenses_per_project": 100,
         "can_sell_licenses": True,
         "cloud_compilation": True,
+        "cloud_builds_per_month": 10,
         "analytics": True,
         "webhooks": True,
         "team_seats": 1,
@@ -178,6 +183,7 @@ TIER_LIMITS = {
         "max_licenses_per_project": -1,  # unlimited
         "can_sell_licenses": True,
         "cloud_compilation": True,
+        "cloud_builds_per_month": -1,  # unlimited
         "analytics": True,
         "webhooks": True,
         "team_seats": 5,

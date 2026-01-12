@@ -303,7 +303,7 @@ def create_validation_response(
     message: str,
     client_nonce: str,
     expires_at: Optional[int] = None,
-    features: List[str] = None,
+    features: Optional[List[str]] = None,
 ) -> LicenseValidationResponse:
     """Create a signed license validation response."""
     server_nonce = generate_nonce()
@@ -353,3 +353,48 @@ async def get_user_tier_limits(user_id: str, conn) -> dict:
     )
     tier = sub["plan_tier"] if sub else "free"
     return TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+
+
+async def get_user_tier(user_id: str, conn) -> dict:
+    """Get user's subscription tier and white-label branding features.
+
+    Returns tier information including whether the user can remove branding
+    from their compiled executables.
+
+    Args:
+        user_id: The user's ID
+        conn: Database connection
+
+    Returns:
+        dict with:
+            - tier: string ('free', 'pro', 'enterprise')
+            - is_pro: bool (True if pro or enterprise)
+            - can_remove_branding: bool (True if pro or enterprise)
+            - can_custom_branding: bool (True only for enterprise)
+    """
+    sub = await conn.fetchrow(
+        """
+        SELECT plan_tier, status 
+        FROM subscriptions 
+        WHERE user_id = $1 AND status = 'active'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        user_id,
+    )
+
+    if not sub:
+        return {
+            "tier": "free",
+            "is_pro": False,
+            "can_remove_branding": False,
+            "can_custom_branding": False,
+        }
+
+    tier = sub["plan_tier"].lower() if sub["plan_tier"] else "free"
+
+    return {
+        "tier": tier,
+        "is_pro": tier in ["pro", "enterprise"],
+        "can_remove_branding": tier in ["pro", "enterprise"],
+        "can_custom_branding": tier == "enterprise",
+    }

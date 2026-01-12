@@ -708,6 +708,9 @@ const ProjectWizard = ({
                         setDemoMode={setDemoMode}
                         demoDuration={demoDuration}
                         setDemoDuration={setDemoDuration}
+                        // Tier info for branding notice (from project config API)
+                        isPro={configData.is_pro || false}
+                        canRemoveBranding={configData.can_remove_branding || false}
                     />
                 );
             case 5:
@@ -739,6 +742,9 @@ const ProjectWizard = ({
                         setCreateStartMenu={setCreateStartMenu}
                         publisher={publisher}
                         setPublisher={setPublisher}
+                        licenseId={configData.selected_license_id}
+                        // Cross-platform compilation (Pro tier info)
+                        isPro={configData.is_pro || false}
                     />
                 );
             default:

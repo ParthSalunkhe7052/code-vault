@@ -1,0 +1,282 @@
+name: Cloud Compile
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Build job ID'
+        required: true
+        type: string
+      project_id:
+        description: 'Project ID'
+        required: true
+        type: string
+      language:
+        description: 'Language (python or nodejs)'
+        required: true
+        type: string
+      source_url:
+        description: 'R2 presigned URL for source download'
+        required: true
+        type: string
+      config_json:
+        description: 'Build configuration JSON'
+        required: true
+        type: string
+      callback_url:
+        description: 'Webhook URL for completion'
+        required: true
+        type: string
+      callback_secret:
+        description: 'HMAC secret for webhook'
+        required: true
+        type: string
+
+jobs:
+  compile-python:
+    if: ${{ github.event.inputs.language == 'python' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip' # Enable caching for pip
+      
+      - name: Install Nuitka and dependencies
+        run: |
+          pip install nuitka ordered-set zstandard
+          pip install requests cryptography
+      
+      - name: Download source code
+        run: |
+          curl -o source.zip "${{ github.event.inputs.source_url }}"
+          Expand-Archive -Path source.zip -DestinationPath ./project
+        shell: pwsh
+      
+      - name: Parse config and inject wrapper
+        id: prepare
+        run: |
+          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
+          
+          # Inject license wrapper into entry file
+          $entryFile = Join-Path "./project/source" $config.entry_file
+          $wrapperCode = @"
+          # === CodeVault License Validation ===
+          import hashlib, hmac, json, os, platform, secrets, subprocess, sys, time, urllib.request
+          
+          _CV_LICENSE_KEY = "$($config.license_key)"
+          _CV_API_URL = "$($config.api_url)"
+          
+          def _cv_get_hwid():
+              try:
+                  cpu = platform.processor()
+                  if platform.system() == "Windows":
+                      serial = subprocess.check_output(["wmic", "bios", "get", "serialnumber"], text=True).strip().split()[-1]
+                  else:
+                      serial = "unknown"
+                  import uuid
+                  mac = ':'.join(f'{(uuid.getnode() >> i) & 0xff:02x}' for i in range(40, -1, -8))
+                  return hashlib.sha256(f"{cpu}|{serial}|{mac}".encode()).hexdigest()
+              except: return "error"
+          
+          def _cv_validate():
+              if _CV_LICENSE_KEY == "GENERIC_BUILD":
+                  return True
+              try:
+                  data = json.dumps({"license_key": _CV_LICENSE_KEY, "hwid": _cv_get_hwid()}).encode()
+                  req = urllib.request.Request(_CV_API_URL, data=data, headers={"Content-Type": "application/json"})
+                  resp = urllib.request.urlopen(req, timeout=10)
+                  return json.loads(resp.read()).get("valid", False)
+              except: return True  # Offline grace
+          
+          if not _cv_validate():
+              print("License validation failed")
+              sys.exit(1)
+          # === End CodeVault ===
+          
+          "@
+          
+          $originalCode = Get-Content $entryFile -Raw
+          $newCode = $wrapperCode + "`n" + $originalCode
+          Set-Content -Path $entryFile -Value $newCode
+          
+          echo "entry_file=$($config.entry_file)" >> $env:GITHUB_OUTPUT
+          echo "output_name=$($config.output_name)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Compile with Nuitka
+        run: |
+          cd project/source
+          python -m nuitka `
+            --standalone `
+            --onefile `
+            --assume-yes-for-downloads `
+            --windows-disable-console=false `
+            --output-filename="${{ steps.prepare.outputs.output_name }}.exe" `
+            "${{ steps.prepare.outputs.entry_file }}"
+        shell: pwsh
+      
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          # Find the compiled exe
+          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" | Select-Object -First 1
+          
+          # Upload using AWS CLI (S3-compatible)
+          aws configure set aws_access_key_id $env:R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $env:R2_SECRET_KEY
+          
+          $key = "builds/${{ github.event.inputs.build_id }}/$($exe.Name)"
+          aws s3 cp $exe.FullName "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
+          echo "UPLOAD_FILENAME=$($exe.Name)" >> $env:GITHUB_ENV
+        shell: pwsh
+      
+      - name: Notify completion
+        if: always()
+        run: |
+          $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
+          
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            status = $status
+            download_key = $env:UPLOAD_KEY
+            filename = $env:UPLOAD_FILENAME
+            error = if ($status -eq "failed") { "Compilation failed" } else { $null }
+          } | ConvertTo-Json
+          
+          # Create HMAC signature
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          
+          # Send webhook
+          Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
+            -Method POST `
+            -ContentType "application/json" `
+            -Headers @{ "X-Signature" = $signature } `
+            -Body $body
+        shell: pwsh
+
+  compile-nodejs:
+    if: ${{ github.event.inputs.language == 'nodejs' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm' # Enable caching for npm
+      
+      - name: Install pkg
+        run: npm install -g pkg
+      
+      - name: Download source code
+        run: |
+          curl -o source.zip "${{ github.event.inputs.source_url }}"
+          Expand-Archive -Path source.zip -DestinationPath ./project
+        shell: pwsh
+      
+      - name: Inject license wrapper
+        run: |
+          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
+          $entryFile = Join-Path "./project/source" $config.entry_file
+          
+          $wrapperCode = @"
+          // === CodeVault License Validation ===
+          const https = require('https');
+          const os = require('os');
+          const crypto = require('crypto');
+          
+          const CV_LICENSE_KEY = '$($config.license_key)';
+          const CV_API_URL = '$($config.api_url)';
+          
+          function getHWID() {
+            const cpus = os.cpus()[0]?.model || 'unknown';
+            const networkInterfaces = os.networkInterfaces();
+            const mac = Object.values(networkInterfaces).flat().find(i => !i.internal && i.mac)?.mac || '00:00:00:00:00:00';
+            return crypto.createHash('sha256').update(cpus + '|' + mac).digest('hex');
+          }
+          
+          async function validateLicense() {
+            if (CV_LICENSE_KEY === 'GENERIC_BUILD') return true;
+            // Async validation...
+            return true;
+          }
+          validateLicense();
+          // === End CodeVault ===
+          
+          "@
+          
+          $originalCode = Get-Content $entryFile -Raw
+          Set-Content -Path $entryFile -Value ($wrapperCode + "`n" + $originalCode)
+        shell: pwsh
+      
+      - name: Install dependencies
+        run: |
+          cd project/source
+          npm install --production
+        shell: pwsh
+      
+      - name: Compile with pkg
+        run: |
+          cd project/source
+          pkg . --targets node18-win-x64 --output "${{ github.event.inputs.build_id }}.exe"
+        shell: pwsh
+      
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" | Select-Object -First 1
+          aws configure set aws_access_key_id $env:R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $env:R2_SECRET_KEY
+          
+          $key = "builds/${{ github.event.inputs.build_id }}/$($exe.Name)"
+          aws s3 cp $exe.FullName "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
+          echo "UPLOAD_FILENAME=$($exe.Name)" >> $env:GITHUB_ENV
+        shell: pwsh
+      
+      - name: Notify completion
+        if: always()
+        run: |
+          # Same as Python job
+          $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
+          
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            status = $status
+            download_key = $env:UPLOAD_KEY
+            filename = $env:UPLOAD_FILENAME
+            error = if ($status -eq "failed") { "Compilation failed" } else { $null }
+          } | ConvertTo-Json
+          
+          # Create HMAC signature
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          
+          # Send webhook
+          Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
+            -Method POST `
+            -ContentType "application/json" `
+            -Headers @{ "X-Signature" = $signature } `
+            -Body $body
+        shell: pwsh

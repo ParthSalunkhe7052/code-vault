@@ -292,8 +292,14 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         license_key = config.get("license_key", "DEMO")
         server_url = config.get("server_url", "http://localhost:8000")
         lease_enabled = config.get("lease_enabled", False)
+        # White-label branding: show_branding is True for free tier (default)
+        show_branding = config.get("show_branding", True)
+        
+        # Log branding status for debugging
+        branding_status = "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        print(f"[BUILD] Branding: {branding_status}", flush=True)
 
-        wrapper = get_python_wrapper(license_key, server_url, lease_enabled)
+        wrapper = get_python_wrapper(license_key, server_url, lease_enabled, show_branding)
         entry_file.write_text(wrapper + original_code, encoding="utf-8")
         print(f"[BUILD] Injected wrapper into: {entry_file.name}", flush=True)
         return True
@@ -329,6 +335,12 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
         license_key = config.get("license_key", "DEMO")
         server_url = config.get("server_url", "http://localhost:8000")
         lease_enabled = config.get("lease_enabled", False)
+        # White-label branding: show_branding is True for free tier (default)
+        show_branding = config.get("show_branding", True)
+        
+        # Log branding status for debugging
+        branding_status = "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        print(f"[BUILD] Branding: {branding_status}", flush=True)
 
         # Strip shebang if present
         shebang = ""
@@ -339,7 +351,7 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
                 original_code = original_code[first_newline + 1 :]
                 print(f"[BUILD] Stripped shebang: {shebang.strip()}", flush=True)
 
-        prefix, suffix = get_nodejs_wrapper_inline(license_key, server_url, lease_enabled)
+        prefix, suffix = get_nodejs_wrapper_inline(license_key, server_url, lease_enabled, show_branding)
         wrapped_code = shebang + prefix + original_code + suffix
         entry_file.write_text(wrapped_code, encoding="utf-8")
         print(f"[BUILD] Injected JS wrapper into: {entry_file.name}", flush=True)

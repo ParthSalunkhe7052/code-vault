@@ -1,5 +1,7 @@
 import React, { useState, memo } from 'react';
 import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key } from 'lucide-react';
+import { CloudBuildButton } from '../../CloudBuildButton';
+import PlatformSelector from '../PlatformSelector';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -33,9 +35,13 @@ const Step5Build = ({
     createStartMenu,
     setCreateStartMenu,
     publisher,
-    setPublisher
+    setPublisher,
+    licenseId,
+    // Cross-platform compilation
+    isPro = false
 }) => {
     const [copiedStep, setCopiedStep] = useState(null);
+    const [selectedPlatforms, setSelectedPlatforms] = useState(['windows']);
 
     const copyToClipboard = async (text, stepId) => {
         try {
@@ -71,6 +77,42 @@ const Step5Build = ({
     // Render CLI Setup Guide for Web Mode (non-Tauri)
     const renderWebModeGuide = () => (
         <div className="space-y-6">
+            {/* Cloud Build Section */}
+             <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-xl p-6 border border-indigo-500/20">
+                <div className="text-center mb-6">
+                    <h2 className="text-xl font-bold text-white mb-2">Cloud Build (Recommended)</h2>
+                    <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
+                        Compile your project instantly on our secure cloud servers. No local installation required.
+                    </p>
+                </div>
+
+                {/* Platform Selection */}
+                <div className="mb-6">
+                    <PlatformSelector
+                        selectedPlatforms={selectedPlatforms}
+                        onChange={setSelectedPlatforms}
+                        isPro={isPro}
+                        disabled={false}
+                    />
+                </div>
+
+                {/* Build Button */}
+                <div className="max-w-md mx-auto">
+                    <CloudBuildButton 
+                        projectId={projectId} 
+                        licenseId={licenseId} 
+                        targetPlatforms={selectedPlatforms}
+                        className="w-full"
+                    />
+                </div>
+            </div>
+
+            <div className="relative flex items-center py-4">
+                <div className="flex-grow border-t border-white/10"></div>
+                <span className="flex-shrink-0 mx-4 text-slate-500 text-sm">OR BUILD LOCALLY</span>
+                <div className="flex-grow border-t border-white/10"></div>
+            </div>
+
             {/* Header */}
             <div className="text-center mb-6">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 mb-4">
@@ -270,8 +312,8 @@ const Step5Build = ({
                         </>
                     )}
                     <li className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                        Windows PC (cross-compilation not supported)
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Local CLI builds require matching OS (use Cloud Build for cross-platform)
                     </li>
                 </ul>
             </div>

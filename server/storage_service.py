@@ -257,13 +257,16 @@ class StorageService:
             return None
 
         # R2 download
-        try:
-            response = self.client.get_object(Bucket=self.bucket, Key=key)
-            return response["Body"].read()
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
-                return None
-            raise
+        if self.use_r2 and self.client:
+            try:
+                response = self.client.get_object(Bucket=self.bucket, Key=key)
+                return response["Body"].read()
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchKey":
+                    return None
+                raise
+        
+        return None
 
     async def delete_file(self, key: str, is_local: bool = False) -> bool:
         """
@@ -286,11 +289,13 @@ class StorageService:
             return False
 
         # R2 delete
-        try:
-            self.client.delete_object(Bucket=self.bucket, Key=key)
-            return True
-        except ClientError:
-            return False
+        if self.use_r2 and self.client:
+            try:
+                self.client.delete_object(Bucket=self.bucket, Key=key)
+                return True
+            except ClientError:
+                return False
+        return False
 
     async def delete_project_files(self, project_id: str) -> int:
         """
@@ -427,11 +432,14 @@ class StorageService:
         if is_local or not self.use_r2:
             return Path(key).exists()
 
-        try:
-            self.client.head_object(Bucket=self.bucket, Key=key)
-            return True
-        except ClientError:
-            return False
+        if self.use_r2 and self.client:
+            try:
+                self.client.head_object(Bucket=self.bucket, Key=key)
+                return True
+            except ClientError:
+                return False
+        
+        return False
 
     async def get_file_info(self, key: str, is_local: bool = False) -> Optional[dict]:
         """
@@ -456,18 +464,21 @@ class StorageService:
                 }
             return None
 
-        try:
-            response = self.client.head_object(Bucket=self.bucket, Key=key)
-            return {
-                "key": key,
-                "size": response["ContentLength"],
-                "modified": response["LastModified"].isoformat(),
-                "content_type": response.get("ContentType"),
-                "metadata": response.get("Metadata", {}),
-                "is_local": False,
-            }
-        except ClientError:
-            return None
+        if self.use_r2 and self.client:
+            try:
+                response = self.client.head_object(Bucket=self.bucket, Key=key)
+                return {
+                    "key": key,
+                    "size": response["ContentLength"],
+                    "modified": response["LastModified"].isoformat(),
+                    "content_type": response.get("ContentType"),
+                    "metadata": response.get("Metadata", {}),
+                    "is_local": False,
+                }
+            except ClientError:
+                return None
+        
+        return None
 
 
 # Global storage service instance

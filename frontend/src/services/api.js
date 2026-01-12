@@ -1,6 +1,35 @@
 import axios from 'axios';
 import { secureLocalStorage } from '../utils/EncryptionProvider';
 
+/**
+ * Sanitizes a filename to prevent path traversal and other security issues
+ * @param {string} filename - The filename to sanitize
+ * @returns {string} - Safe filename
+ */
+function sanitizeFilename(filename) {
+    if (!filename) return 'download';
+
+    // Remove any path components (../, ./, /)
+    const parts = filename.split(/[\\/]/);
+    let safeName = parts[parts.length - 1];
+
+    // Remove any remaining dangerous characters
+    safeName = safeName.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+    // Ensure filename isn't too long
+    if (safeName.length > 100) {
+        const ext = safeName.split('.').pop();
+        safeName = safeName.substring(0, 95) + (ext ? '.' + ext : '');
+    }
+
+    // Prevent empty or hidden files
+    if (!safeName || safeName.startsWith('.')) {
+        safeName = 'download';
+    }
+
+    return safeName;
+}
+
 const TOKEN_KEY = 'license_wrapper_token';
 const USER_KEY = 'license_wrapper_user';
 
@@ -153,7 +182,11 @@ export const compile = {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename || 'download';
+        // SECURITY: Sanitize filename to prevent path traversal
+        a.download = sanitizeFilename(filename || 'download');
+        // Prevent the anchor from being visible or interactive
+        a.style.display = 'none';
+        a.setAttribute('tabindex', '-1');
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);

@@ -107,15 +107,28 @@ class NodeJSCompiler:
                 stderr=asyncio.subprocess.STDOUT,
             )
 
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                decoded_line = line.decode("utf-8", errors="replace").rstrip()
-                if decoded_line:
-                    await self.log(f"  npm: {decoded_line}", log_callback)
+            # Add timeout for npm install (10 minutes max)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=600)
+            except asyncio.TimeoutError:
+                process.kill()
+                raise Exception("❌ npm install timed out after 10 minutes")
 
-            await process.wait()
+            # Stream output with timeout per line
+            while True:
+                try:
+                    line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
+                    if not line:
+                        break
+                    decoded_line = line.decode("utf-8", errors="replace").rstrip()
+                    if decoded_line:
+                        await self.log(f"  npm: {decoded_line}", log_callback)
+                except asyncio.TimeoutError:
+                    # Line reading timeout - continue checking process
+                    if process.returncode is not None:
+                        break
+                    await self.log("  npm: [Still installing...]", log_callback)
+                    continue
 
             if process.returncode != 0:
                 raise Exception(

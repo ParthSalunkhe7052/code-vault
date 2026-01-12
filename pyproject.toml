@@ -69,3 +69,14 @@ skip-magic-trailing-comma = false
 
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
+
+[tool.pyright]
+include = ["server", "cli", "tests"]
+exclude = ["**/node_modules", "**/__pycache__", "venv", ".venv"]
+venv = "venv"
+venvPath = "."
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+

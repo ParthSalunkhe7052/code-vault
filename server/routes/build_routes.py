@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from database import get_db, release_db
-from utils import get_current_user, safe_join, validate_project_id, SecurityError
+from utils import get_current_user, safe_join, validate_project_id, SecurityError, get_user_tier
 from storage_service import LOCAL_UPLOAD_DIR as UPLOAD_DIR
 from config import LICENSE_SERVER_URL, CLI_VERSION
 from compilers import check_build_prerequisites, get_build_orchestrator, BuildConfig
@@ -376,6 +376,9 @@ async def get_build_bundle(
         server_url = os.getenv("PUBLIC_API_URL", "http://127.0.0.1:8000")
         api_url = f"{server_url}/api/v1/license/validate"
 
+        # Get user tier info for white-label branding
+        tier_info = await get_user_tier(user["id"], conn)
+
         config = {
             "project_id": project_id,
             "project_name": project["name"],
@@ -398,12 +401,16 @@ async def get_build_bundle(
             "exclude_modules": settings.get("exclude_modules", []),
             "skip_obfuscation": settings.get("skip_obfuscation", True),
             "enable_lease": settings.get("enable_lease", False),
+            # White-label branding: show branding for free tier users
+            "tier": tier_info["tier"],
+            "is_pro": tier_info["is_pro"],
+            "show_branding": not tier_info["can_remove_branding"],  # True for free tier
         }
 
         # Debug: Log final config being written to bundle
         logger.debug(
-            "[BUNDLE DEBUG] Final config for bundle: skip_obfuscation=%s, enable_lease=%s",
-            config['skip_obfuscation'], config['enable_lease']
+            "[BUNDLE DEBUG] Final config for bundle: skip_obfuscation=%s, enable_lease=%s, show_branding=%s, tier=%s",
+            config['skip_obfuscation'], config['enable_lease'], config['show_branding'], config['tier']
         )
 
         with tempfile.NamedTemporaryFile(
