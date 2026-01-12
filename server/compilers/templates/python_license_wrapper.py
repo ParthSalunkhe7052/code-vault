@@ -321,13 +321,25 @@ def _cv_create_lease(license_key, hwid, server_time, duration=_CV_LEASE_DURATION
     }
 
 def _cv_save_lease(lease_data):
-    """Save encrypted lease to file."""
+    """Save encrypted lease to file using atomic write."""
     try:
         lease_path = _cv_get_lease_path()
         encrypted = _cv_encrypt_lease(lease_data)
         if encrypted:
-            with open(lease_path, 'w', encoding='utf-8') as f:
-                f.write(encrypted)
+            # Atomic write: temp file + rename to prevent corruption
+            import tempfile
+            lease_dir = _cv_os.path.dirname(lease_path)
+            fd, temp_path = tempfile.mkstemp(dir=lease_dir, prefix='.tmp_', text=True)
+            try:
+                with _cv_os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.write(encrypted)
+                _cv_os.replace(temp_path, lease_path)
+            except:
+                try:
+                    _cv_os.unlink(temp_path)
+                except:
+                    pass
+                raise
             print("[CodeVault] Lease saved (24h offline access)")
             return True
     except Exception:
@@ -491,13 +503,26 @@ def _cv_license_check():
         success, server_time = _cv_validate_license(key, hwid, API_URL)
 
         if success is True:
-            # Save license key to the same directory as the executable
+            # Save license key to the same directory as the executable (atomic write)
             try:
                 key_dir = _cv_os.path.dirname(key_file)
                 if key_dir and not _cv_os.path.exists(key_dir):
                     _cv_os.makedirs(key_dir, exist_ok=True)
-                with open(key_file, "w", encoding="utf-8") as f:
-                    f.write(key)
+
+                # Atomic write to prevent corruption
+                import tempfile
+                fd, temp_path = tempfile.mkstemp(dir=key_dir, prefix='.tmp_', text=True)
+                try:
+                    with _cv_os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        f.write(key)
+                    _cv_os.replace(temp_path, key_file)
+                except:
+                    try:
+                        _cv_os.unlink(temp_path)
+                    except:
+                        pass
+                    raise
+
                 print(f"[CodeVault] License saved to: {key_file}")
             except Exception as e:
                 print(f"[CodeVault] Warning: Could not save license: {e}")

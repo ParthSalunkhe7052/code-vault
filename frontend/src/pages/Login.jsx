@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail } from 'lucide-react';
 import { auth } from '../services/api';
@@ -14,17 +14,71 @@ const Login = () => {
     const [isRegisterMode, setIsRegisterMode] = useState(false);
     const navigate = useNavigate();
 
+    // Email validation regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // Validate inputs
+    const validation = useMemo(() => {
+        const errors = [];
+
+        if (!email || !emailRegex.test(email)) {
+            errors.push('Valid email is required');
+        }
+
+        if (!password || password.length < 8) {
+            errors.push('Password must be at least 8 characters');
+        }
+
+        if (isRegisterMode && (!name || name.trim().length < 2)) {
+            errors.push('Name must be at least 2 characters');
+        }
+
+        return {
+            isValid: errors.length === 0,
+            errors,
+            disabled: errors.length > 0 || loading
+        };
+    }, [email, password, name, isRegisterMode, loading]);
+
+    const validateInputs = () => {
+        if (!emailRegex.test(email)) {
+            setError('Please enter a valid email address');
+            toast.error('Invalid email format');
+            return false;
+        }
+
+        if (password.length < 8) {
+            setError('Password must be at least 8 characters');
+            toast.error('Password too short');
+            return false;
+        }
+
+        if (isRegisterMode && name.trim().length < 2) {
+            setError('Name must be at least 2 characters');
+            toast.error('Name too short');
+            return false;
+        }
+
+        return true;
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError('');
 
+        // Additional validation before API call
+        if (!validateInputs()) {
+            setLoading(false);
+            return;
+        }
+
         try {
             if (isRegisterMode) {
-                await auth.register(email, password, name);
+                await auth.register(email.trim(), password, name.trim());
                 toast.success('Account created successfully!');
             } else {
-                await auth.login(email, password);
+                await auth.login(email.trim(), password);
                 toast.success('Welcome back!');
             }
             navigate('/');
@@ -33,6 +87,8 @@ const Login = () => {
 
             if (err.response?.status === 401) {
                 errorMessage = 'Invalid email or password';
+            } else if (err.response?.status === 409) {
+                errorMessage = 'Email already registered';
             } else if (err.response?.data?.detail) {
                 errorMessage = err.response.data.detail;
             } else if (isRegisterMode) {
@@ -140,11 +196,24 @@ const Login = () => {
                             </div>
                         )}
 
+                        {/* Validation feedback (real-time) */}
+                        {!loading && !error && validation.errors.length > 0 && (
+                            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono animate-fade-in">
+                                <ul className="list-disc list-inside space-y-1">
+                                    {validation.errors.map((err, idx) => (
+                                        <li key={idx}>{err}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         <div className="flex justify-center mt-2">
                             <button
                                 type="submit"
-                                disabled={loading}
-                                className="btn-primary px-8 py-3 text-sm tracking-widest uppercase group rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all"
+                                disabled={validation.disabled}
+                                className={`btn-primary px-8 py-3 text-sm tracking-widest uppercase group rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all ${
+                                    validation.disabled && !loading ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
                             >
                                 {loading ? (
                                     <Loader2 className="animate-spin" size={18} />

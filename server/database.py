@@ -370,6 +370,54 @@ async def init_database():
         )
 
         # =============================================================================
+        # Feature: Cloud Builds
+        # =============================================================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS cloud_builds (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                
+                -- Build configuration
+                language VARCHAR(20) NOT NULL,
+                entry_file VARCHAR(255) NOT NULL,
+                output_name VARCHAR(255) NOT NULL,
+                license_key VARCHAR(255),
+                config_json JSONB NOT NULL,
+                
+                -- Status tracking
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                progress INTEGER DEFAULT 0,
+                
+                -- Results
+                download_key VARCHAR(500),
+                download_filename VARCHAR(255),
+                download_size BIGINT,
+                error_message TEXT,
+                
+                -- Metadata
+                github_run_id VARCHAR(50),
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                
+                -- Cleanup tracking
+                expires_at TIMESTAMPTZ,
+                deleted_at TIMESTAMPTZ
+            )
+        """)
+
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_builds_user ON cloud_builds(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_builds_project ON cloud_builds(project_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_builds_status ON cloud_builds(status)"
+        )
+
+        # =============================================================================
         # Migration 005: Tier Sync Improvements (Phase 1 Fix)
         # =============================================================================
         try:

@@ -341,8 +341,16 @@ class PythonCompiler:
         await self.log(f"Running: {' '.join(cmd)}", log_callback)
 
         # Set environment for unbuffered output
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
+        # SECURITY: Create sanitized environment (don't pass arbitrary user env)
+        env = {
+            "PYTHONUNBUFFERED": "1",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        # Only add safe temp variables if they exist and are valid
+        if "TEMP" in os.environ and os.environ["TEMP"].startswith("/tmp"):
+            env["TEMP"] = os.environ["TEMP"]
+        if "TEMPDIR" in os.environ and os.environ["TEMPDIR"].startswith("/tmp"):
+            env["TEMPDIR"] = os.environ["TEMPDIR"]
 
         # Run Nuitka
         process = await asyncio.create_subprocess_exec(

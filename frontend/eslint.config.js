@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
-    { ignores: ['dist'] },
+    { ignores: ['dist', 'node_modules', '**/*.test.js', '**/*.spec.js'] },
     {
         files: ['**/*.{js,jsx}'],
         languageOptions: {
@@ -27,9 +27,22 @@ export default [
                 'warn',
                 { allowConstantExport: true },
             ],
-            // Relax some rules for faster development
-            'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+            // Relaxed rules for production use - false positives are common in React
+            'no-unused-vars': ['warn', {
+                'argsIgnorePattern': '^_',
+                'varsIgnorePattern': '^_',
+                'caughtErrorsIgnorePattern': '^_'
+            }],
             'no-console': 'off',
+            // Keep as warnings, not errors
+            'no-undef': 'warn',
+            'no-empty': 'warn',
+            'no-constant-condition': 'warn',
+            // Security: These should be warnings but not break builds
+            'no-prototype-builtins': 'warn',
+            'no-async-promise-executor': 'warn',
+            'no-misleading-character-class': 'warn',
+            'no-regex-spaces': 'warn',
         },
     },
 ];

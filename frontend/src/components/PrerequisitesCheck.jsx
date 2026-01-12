@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, XCircle, Loader2, Download, AlertTriangle, ExternalLink } from 'lucide-react';
 
 // Check if we're in Tauri
@@ -19,13 +19,8 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
     const [installing, setInstalling] = useState(null);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        if (isOpen && isTauri) {
-            checkAll();
-        }
-    }, [isOpen, language]);
-
-    const checkAll = async () => {
+    // Memoize checkAll to prevent unnecessary re-creations
+    const checkAll = useCallback(async () => {
         setStatus({
             runtime: { loading: true, installed: false, version: null, path: null },
             compiler: { loading: true, installed: false, version: null },
@@ -104,9 +99,9 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
                 nsis: { loading: false, installed: false, version: null }
             });
         }
-    };
+    }, [isNodeJS]);
 
-    const installCompiler = async () => {
+    const installCompiler = useCallback(async () => {
         setInstalling('compiler');
         setError(null);
 
@@ -124,7 +119,7 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
         } finally {
             setInstalling(null);
         }
-    };
+    }, [isNodeJS, checkAll]);
 
     // Config based on language
     const config = isNodeJS ? {

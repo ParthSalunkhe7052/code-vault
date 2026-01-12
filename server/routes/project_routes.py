@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
 
 from database import get_db, release_db
-from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits
+from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits, get_user_tier
 from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
@@ -149,6 +149,9 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
         # Get selected license if stored in settings
         selected_license_id = settings.get("selected_license_id")
 
+        # Get user tier info for white-label branding
+        tier_info = await get_user_tier(user["id"], conn)
+
         return {
             "project_name": project["name"],
             "entry_file": settings.get("entry_file"),
@@ -165,6 +168,11 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             # Build options
             "skip_obfuscation": settings.get("skip_obfuscation", True),
             "enable_lease": settings.get("enable_lease", False),
+            # White-label branding tier info
+            "tier": tier_info["tier"],
+            "is_pro": tier_info["is_pro"],
+            "can_remove_branding": tier_info["can_remove_branding"],
+            "can_custom_branding": tier_info["can_custom_branding"],
             "files": [
                 {
                     "id": f["id"],
@@ -253,6 +261,7 @@ async def upload_files(
 
         uploaded = []
         for upload_file in files:
+            filename = upload_file.filename or "unnamed_file"
             content = await upload_file.read()
 
             from storage_service import validate_file_size
@@ -261,11 +270,11 @@ async def upload_files(
             if not is_valid:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"File '{upload_file.filename}': {error_msg}",
+                    detail=f"File '{filename}': {error_msg}",
                 )
 
             stored = await upload_project_file(
-                project_id, upload_file.filename, content
+                project_id, filename, content
             )
 
             file_id = secrets.token_hex(16)
@@ -277,7 +286,7 @@ async def upload_files(
                 file_id,
                 project_id,
                 Path(stored.key).name,
-                upload_file.filename,
+                filename,
                 stored.key,
                 stored.hash,
                 stored.size,
@@ -288,7 +297,7 @@ async def upload_files(
                 {
                     "id": file_id,
                     "filename": Path(stored.key).name,
-                    "original_filename": upload_file.filename,
+                    "original_filename": filename,
                     "file_size": stored.size,
                     "file_hash": stored.hash,
                     "created_at": utc_now().isoformat(),
@@ -378,7 +387,7 @@ async def upload_project_zip(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        if not file.filename.endswith(".zip"):
+        if not file.filename or not file.filename.endswith(".zip"):
             raise HTTPException(status_code=400, detail="File must be a .zip file")
 
         # Use safe_join for all path operations

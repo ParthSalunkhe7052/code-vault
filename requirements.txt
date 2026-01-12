@@ -5,6 +5,10 @@ click>=8.1.0
 rich>=13.0.0
 keyring>=24.0.0  # Secure credential storage (Windows Credential Manager, macOS Keychain, Linux Secret Service)
 
+# Email Services
+sendgrid>=6.11.0  # SendGrid email service (optional)
+resend>=2.0.0  # Resend email service (optional)
+
 # License Core (injected into wrapped apps)
 requests>=2.28.0
 cryptography>=40.0.0

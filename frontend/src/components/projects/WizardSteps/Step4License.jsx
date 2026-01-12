@@ -1,5 +1,45 @@
 import React, { memo, useCallback } from 'react';
-import { Shield, Timer, Unlock, Sparkles, Users, Key, ArrowRight, Info } from 'lucide-react';
+import { Shield, Timer, Unlock, Sparkles, Users, Key, ArrowRight, Info, CheckCircle, AlertTriangle } from 'lucide-react';
+
+/**
+ * BrandingNotice - Shows upgrade prompt for free tier or success message for Pro
+ */
+const BrandingNotice = memo(({ isPro, canRemoveBranding }) => {
+    if (isPro || canRemoveBranding) {
+        return (
+            <div className="bg-green-900/20 border border-green-600/30 rounded-lg p-4 mb-4">
+                <div className="flex items-center gap-2 text-green-400">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="font-medium">Pro Feature Active</span>
+                </div>
+                <p className="text-sm text-slate-400 mt-1">
+                    Your compiled applications will NOT show CodeVault branding.
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-yellow-900/20 border border-yellow-600/30 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2 text-yellow-400">
+                <AlertTriangle className="w-5 h-5" />
+                <span className="font-medium">Free Tier Branding</span>
+            </div>
+            <p className="text-sm text-slate-400 mt-1">
+                Your compiled applications will show a "Protected by CodeVault" splash screen on startup.
+            </p>
+            <a 
+                href="/pricing" 
+                className="inline-flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300 mt-2"
+            >
+                Upgrade to Pro to remove branding
+                <ArrowRight className="w-4 h-4" />
+            </a>
+        </div>
+    );
+});
+
+BrandingNotice.displayName = 'BrandingNotice';
 
 /**
  * Step4License - Protection Settings - Optimized with memo
@@ -16,7 +56,10 @@ const Step4License = memo(({
     demoMode = false,
     setDemoMode,
     demoDuration = 60,
-    setDemoDuration
+    setDemoDuration,
+    // Tier info for branding notice
+    isPro = false,
+    canRemoveBranding = false
 }) => {
     // Handle protection mode change - memoized
     const handleModeChange = useCallback((mode) => {
@@ -41,6 +84,9 @@ const Step4License = memo(({
                     Choose how your app will be protected with license validation
                 </p>
             </div>
+
+            {/* Branding Notice for Free/Pro tier */}
+            <BrandingNotice isPro={isPro} canRemoveBranding={canRemoveBranding} />
 
             {/* Protection Mode Options */}
             <div className="space-y-3">
