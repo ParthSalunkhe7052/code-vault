@@ -27,6 +27,41 @@ UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def validate_safe_path(base_dir: Path, user_input: str) -> Path:
+    """
+    Validate that user input doesn't escape the base directory (path traversal protection).
+    
+    Args:
+        base_dir: The allowed base directory
+        user_input: User-provided path component (e.g., project_id)
+    
+    Returns:
+        Safe resolved path within base_dir
+    
+    Raises:
+        HTTPException: If path traversal is detected
+    """
+    # Reject obviously malicious patterns
+    if ".." in user_input or user_input.startswith("/") or user_input.startswith("\\"):
+        raise HTTPException(400, "Invalid path component")
+    
+    # Build the candidate path
+    candidate = base_dir / user_input
+    
+    # Resolve to absolute path and verify it's within base_dir
+    try:
+        resolved = candidate.resolve()
+        base_resolved = base_dir.resolve()
+        
+        # Ensure the resolved path is within the base directory
+        if not str(resolved).startswith(str(base_resolved)):
+            raise HTTPException(400, "Invalid path component")
+        
+        return resolved
+    except (OSError, ValueError):
+        raise HTTPException(400, "Invalid path component")
+
+
 class CloudBuildRequest(BaseModel):
     project_id: str
     license_id: Optional[str] = None
@@ -230,11 +265,16 @@ async def start_cloud_build(
             
         # 3. Validate source directory exists
         # FIX: The correct path is UPLOAD_DIR / project_id / "source"
-        source_dir = UPLOAD_DIR / request.project_id / "source"
+        # Security: Validate project_id to prevent path traversal attacks
+        safe_project_dir = validate_safe_path(UPLOAD_DIR, request.project_id)
+        source_dir = safe_project_dir / "source"
         
         if not source_dir.exists():
             # Try alternate path structure
-            alt_source_dir = UPLOAD_DIR / "projects" / request.project_id / "source"
+            projects_base = UPLOAD_DIR / "projects"
+            projects_base.mkdir(parents=True, exist_ok=True)
+            safe_alt_project_dir = validate_safe_path(projects_base, request.project_id)
+            alt_source_dir = safe_alt_project_dir / "source"
             if alt_source_dir.exists():
                 source_dir = alt_source_dir
             else:
