@@ -40,6 +40,13 @@ jobs:
     timeout-minutes: 60
     
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/workflows/wrapper_python.py
+          sparse-checkout-cone-mode: false
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -57,114 +64,6 @@ jobs:
         run: |
           curl -o source.zip "$env:SOURCE_URL"
           Expand-Archive -Path source.zip -DestinationPath ./project
-      
-      - name: Create license wrapper script
-        shell: pwsh
-        run: |
-          $wrapper = @'
-          # === CodeVault License Validation ===
-          import hashlib, json, os, platform, subprocess, sys, urllib.request
-          from pathlib import Path
-
-          _CV_LICENSE_KEY = "__LICENSE_KEY__"
-          _CV_API_URL = "__API_URL__"
-          _CV_LICENSE_FILE = Path.home() / ".codevault" / "license.key"
-
-          def _cv_get_hwid():
-              try:
-                  cpu = platform.processor()
-                  if platform.system() == "Windows":
-                      serial = subprocess.check_output(["wmic", "bios", "get", "serialnumber"], text=True, creationflags=0x08000000).strip().split()[-1]
-                  else:
-                      serial = subprocess.check_output(["cat", "/etc/machine-id"], text=True).strip() if os.path.exists("/etc/machine-id") else "unknown"
-                  import uuid
-                  mac = ':'.join(f'{(uuid.getnode() >> i) & 0xff:02x}' for i in range(40, -1, -8))
-                  return hashlib.sha256(f"{cpu}|{serial}|{mac}".encode()).hexdigest()
-              except:
-                  return "error"
-
-          def _cv_load_cached_key():
-              try:
-                  if _CV_LICENSE_FILE.exists():
-                      return _CV_LICENSE_FILE.read_text().strip()
-              except:
-                  pass
-              return None
-
-          def _cv_save_key(key):
-              try:
-                  _CV_LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                  _CV_LICENSE_FILE.write_text(key)
-              except:
-                  pass
-
-          def _cv_validate_key(key):
-              if not key or not _CV_API_URL:
-                  return False
-              try:
-                  data = json.dumps({"license_key": key, "hwid": _cv_get_hwid()}).encode()
-                  req = urllib.request.Request(_CV_API_URL, data=data, headers={"Content-Type": "application/json"})
-                  resp = urllib.request.urlopen(req, timeout=15)
-                  result = json.loads(resp.read())
-                  return result.get("valid", False)
-              except Exception as e:
-                  print(f"[License] Validation error: {e}")
-                  return False
-
-          def _cv_prompt_license():
-              print("\n" + "="*50)
-              print("       LICENSE REQUIRED")
-              print("="*50)
-              print("\nThis software requires a valid license key.")
-              print("Purchase at: https://codevault.app\n")
-              try:
-                  key = input("Enter license key: ").strip()
-                  return key
-              except (EOFError, KeyboardInterrupt):
-                  print("\nLicense entry cancelled.")
-                  sys.exit(1)
-
-          def _cv_main_validation():
-              license_key = _CV_LICENSE_KEY
-              
-              # If no embedded key, try cached key
-              if license_key == "GENERIC_BUILD" or not license_key:
-                  cached = _cv_load_cached_key()
-                  if cached:
-                      print("[License] Found cached license, validating...")
-                      if _cv_validate_key(cached):
-                          print("[License] Valid!")
-                          return True
-                      else:
-                          print("[License] Cached license is invalid or expired.")
-                  
-                  # No valid cached key, prompt user
-                  for attempt in range(3):
-                      key = _cv_prompt_license()
-                      if _cv_validate_key(key):
-                          print("[License] Valid! Saving for future use...")
-                          _cv_save_key(key)
-                          return True
-                      else:
-                          remaining = 2 - attempt
-                          if remaining > 0:
-                              print(f"[License] Invalid key. {remaining} attempts remaining.")
-                          else:
-                              print("[License] Too many failed attempts.")
-                  return False
-              else:
-                  # Embedded key - validate silently
-                  if _cv_validate_key(license_key):
-                      return True
-                  print("[License] Embedded license is invalid.")
-                  return False
-
-          if not _cv_main_validation():
-              print("\n[License] Validation failed. Exiting.")
-              sys.exit(1)
-          # === End CodeVault ===
-          '@
-          Set-Content -Path "./wrapper_template.py" -Value $wrapper
       
       - name: Inject wrapper and compile
         id: compile
@@ -187,11 +86,18 @@ jobs:
           $licenseKey = if ($config.license_key) { $config.license_key } else { "GENERIC_BUILD" }
           $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
           
-          $wrapper = Get-Content "./wrapper_template.py" -Raw
+          # Read the wrapper template from the checked out file
+          $wrapperPath = "./.github/workflows/wrapper_python.py"
+          if (-not (Test-Path $wrapperPath)) {
+            Write-Error "Wrapper template not found at: $wrapperPath"
+            exit 1
+          }
+          
+          $wrapper = Get-Content $wrapperPath -Raw -Encoding UTF8
           $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
           $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
           
-          $originalCode = Get-Content $entryFile -Raw
+          $originalCode = Get-Content $entryFile -Raw -Encoding UTF8
           $newCode = $wrapper + "`n" + $originalCode
           Set-Content -Path $entryFile -Value $newCode -Encoding UTF8
           
@@ -199,8 +105,20 @@ jobs:
           $entryFileName = Split-Path -Leaf $entryFile
           $outputName = if ($config.output_name) { $config.output_name } else { "app" }
           
+          # Install project requirements if they exist
+          $reqFile = Join-Path $sourceDir "requirements.txt"
+          if (Test-Path $reqFile) {
+            Write-Host "Installing project requirements..."
+            pip install -r $reqFile
+          }
+          
           Push-Location $sourceDir
-          python -m nuitka --standalone --onefile --assume-yes-for-downloads --output-filename="$outputName.exe" $entryFileName
+          # Include tkinter for GUI license dialog, use all CPU cores
+          python -m nuitka --standalone --onefile --assume-yes-for-downloads `
+            --enable-plugin=tk-inter `
+            --output-filename="$outputName.exe" `
+            --jobs=4 `
+            $entryFileName
           Pop-Location
           
           $exe = Get-ChildItem -Path $sourceDir -Filter "*.exe" -Recurse | Select-Object -First 1
@@ -272,6 +190,13 @@ jobs:
     timeout-minutes: 60
     
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/workflows/wrapper_nodejs.js
+          sparse-checkout-cone-mode: false
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -287,98 +212,6 @@ jobs:
         run: |
           curl -o source.zip "$env:SOURCE_URL"
           Expand-Archive -Path source.zip -DestinationPath ./project
-      
-      - name: Create license wrapper script
-        shell: pwsh
-        run: |
-          $wrapper = @'
-          // === CodeVault License Validation ===
-          const os = require('os');
-          const crypto = require('crypto');
-          const https = require('https');
-          const http = require('http');
-          const CV_LICENSE_KEY = '__LICENSE_KEY__';
-          const CV_API_URL = '__API_URL__';
-          
-          function getHWID() {
-            const cpus = os.cpus()[0]?.model || 'unknown';
-            const networkInterfaces = os.networkInterfaces();
-            const mac = Object.values(networkInterfaces).flat().find(i => !i.internal && i.mac)?.mac || '00:00:00:00:00:00';
-            return crypto.createHash('sha256').update(cpus + '|' + mac).digest('hex');
-          }
-          
-          async function validateLicense() {
-            if (!CV_LICENSE_KEY || CV_LICENSE_KEY === 'GENERIC_BUILD') {
-              return true; // Skip validation for generic builds
-            }
-            
-            const hwid = getHWID();
-            const nonce = crypto.randomBytes(16).toString('hex');
-            const timestamp = Math.floor(Date.now() / 1000);
-            
-            const payload = JSON.stringify({
-              license_key: CV_LICENSE_KEY,
-              hwid: hwid,
-              nonce: nonce,
-              timestamp: timestamp
-            });
-            
-            return new Promise((resolve, reject) => {
-              const url = new URL(CV_API_URL);
-              const protocol = url.protocol === 'https:' ? https : http;
-              
-              const req = protocol.request({
-                hostname: url.hostname,
-                port: url.port || (url.protocol === 'https:' ? 443 : 80),
-                path: url.pathname,
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(payload)
-                },
-                timeout: 10000
-              }, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                  try {
-                    const response = JSON.parse(data);
-                    if (res.statusCode === 200 && response.valid === true) {
-                      console.log('[CodeVault] License validated successfully');
-                      resolve(true);
-                    } else {
-                      console.error('[CodeVault] License validation failed:', response.message || 'Invalid license');
-                      process.exit(1);
-                    }
-                  } catch (e) {
-                    console.error('[CodeVault] License validation error:', e.message);
-                    process.exit(1);
-                  }
-                });
-              });
-              
-              req.on('error', (e) => {
-                console.error('[CodeVault] License server unreachable:', e.message);
-                process.exit(1);
-              });
-              
-              req.on('timeout', () => {
-                req.destroy();
-                console.error('[CodeVault] License validation timed out');
-                process.exit(1);
-              });
-              
-              req.write(payload);
-              req.end();
-            });
-          }
-          
-          // Validate license on startup
-          // Logic moved to bootstrap
-
-          // === End CodeVault ===
-          '@
-          Set-Content -Path "./wrapper_template.js" -Value $wrapper
       
       - name: Inject wrapper and compile
         id: compile
@@ -401,7 +234,14 @@ jobs:
           $licenseKey = if ($config.license_key) { $config.license_key } else { "GENERIC_BUILD" }
           $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
           
-          $wrapper = Get-Content "./wrapper_template.js" -Raw
+          # Read the wrapper template from the checked out file
+          $wrapperPath = "./.github/workflows/wrapper_nodejs.js"
+          if (-not (Test-Path $wrapperPath)) {
+            Write-Error "Wrapper template not found at: $wrapperPath"
+            exit 1
+          }
+          
+          $wrapper = Get-Content $wrapperPath -Raw -Encoding UTF8
           $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
           $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
           
@@ -412,7 +252,7 @@ jobs:
           
           Rename-Item -Path $entryFile -NewName $renamedEntry
           
-          $bootstrap = "(async () => { try { if (CV_LICENSE_KEY && CV_LICENSE_KEY !== 'GENERIC_BUILD') await validateLicense(); } catch (e) { process.exit(1); } require('./$renamedEntry'); })();"
+          $bootstrap = "(async () => { try { await licenseCheck(); } catch (e) { console.error(e); process.exit(1); } require('./$renamedEntry'); })();"
           
           Set-Content -Path $entryFile -Value ($wrapper + "`n" + $bootstrap) -Encoding UTF8
           
