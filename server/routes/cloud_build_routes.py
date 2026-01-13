@@ -8,6 +8,7 @@ import httpx
 import hmac
 import hashlib
 import secrets
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -39,8 +40,12 @@ def validate_safe_path(base_dir: Path, user_input: str) -> Path:
         Safe resolved path within base_dir
     
     Raises:
-        HTTPException: If path traversal is detected
+        HTTPException: If path traversal is detected or input is invalid
     """
+    # Strict allowlist: only alphanumeric, dashes, underscores, and dots (no leading dot)
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*$', user_input):
+        raise HTTPException(400, "Invalid path component: only alphanumeric, dashes, underscores allowed")
+    
     # Reject obviously malicious patterns
     if ".." in user_input or user_input.startswith("/") or user_input.startswith("\\"):
         raise HTTPException(400, "Invalid path component")
@@ -209,7 +214,9 @@ async def trigger_github_build(build_id: str, config: dict, source_dir: Path):
 
     except Exception as e:
         logger.error(f"Failed to trigger build: {e}")
-        conn = await get_db()
+        # Only acquire connection if not already acquired
+        if conn is None:
+            conn = await get_db()
         await conn.execute(
             "UPDATE cloud_builds SET status = 'failed', error_message = $1 WHERE id = $2",
             str(e), build_id
@@ -349,14 +356,9 @@ async def start_cloud_build(
 @router.post("/webhook")
 async def build_webhook(request: Request):
     """Callback from GitHub Actions when build completes."""
-    # Verify HMAC signature (secure method)
+    # Verify HMAC signature (secure method only - query param auth removed for security)
     if not await verify_webhook_signature(request):
-        # Also support legacy query param for backwards compatibility during transition
-        secret = request.query_params.get("secret")
-        if secret != BUILD_CALLBACK_SECRET:
-            raise HTTPException(401, "Invalid webhook signature")
-        else:
-            logger.warning("Webhook using deprecated query param authentication. Please update to X-Signature header.")
+        raise HTTPException(401, "Invalid webhook signature")
     
     # Re-read body since it was consumed by verify_webhook_signature
     body_bytes = await request.body()

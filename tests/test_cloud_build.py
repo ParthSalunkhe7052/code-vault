@@ -14,8 +14,6 @@ import hmac
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
-from pathlib import Path
 
 
 # =============================================================================
@@ -290,7 +288,6 @@ class TestBuildStatus:
 
     def test_pending_to_queued(self):
         """Build should transition from pending to queued."""
-        current = "pending"
         next_status = "queued"
         
         valid_from_pending = ["queued", "failed", "cancelled"]

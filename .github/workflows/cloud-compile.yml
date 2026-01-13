@@ -112,8 +112,8 @@ jobs:
           $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
           
           $wrapper = Get-Content "./wrapper_template.py" -Raw
-          $wrapper = $wrapper -replace "__LICENSE_KEY__", $licenseKey
-          $wrapper = $wrapper -replace "__API_URL__", $apiUrl
+          $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
+          $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
           
           $originalCode = Get-Content $entryFile -Raw
           $newCode = $wrapper + "`n" + $originalCode
@@ -217,14 +217,88 @@ jobs:
           // === CodeVault License Validation ===
           const os = require('os');
           const crypto = require('crypto');
+          const https = require('https');
+          const http = require('http');
           const CV_LICENSE_KEY = '__LICENSE_KEY__';
+          const CV_API_URL = '__API_URL__';
+          
           function getHWID() {
             const cpus = os.cpus()[0]?.model || 'unknown';
             const networkInterfaces = os.networkInterfaces();
             const mac = Object.values(networkInterfaces).flat().find(i => !i.internal && i.mac)?.mac || '00:00:00:00:00:00';
             return crypto.createHash('sha256').update(cpus + '|' + mac).digest('hex');
           }
-          if (CV_LICENSE_KEY !== 'GENERIC_BUILD' && CV_LICENSE_KEY) { getHWID(); }
+          
+          async function validateLicense() {
+            if (!CV_LICENSE_KEY || CV_LICENSE_KEY === 'GENERIC_BUILD') {
+              return true; // Skip validation for generic builds
+            }
+            
+            const hwid = getHWID();
+            const nonce = crypto.randomBytes(16).toString('hex');
+            const timestamp = Math.floor(Date.now() / 1000);
+            
+            const payload = JSON.stringify({
+              license_key: CV_LICENSE_KEY,
+              hwid: hwid,
+              nonce: nonce,
+              timestamp: timestamp
+            });
+            
+            return new Promise((resolve, reject) => {
+              const url = new URL(CV_API_URL);
+              const protocol = url.protocol === 'https:' ? https : http;
+              
+              const req = protocol.request({
+                hostname: url.hostname,
+                port: url.port || (url.protocol === 'https:' ? 443 : 80),
+                path: url.pathname,
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(payload)
+                },
+                timeout: 10000
+              }, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                  try {
+                    const response = JSON.parse(data);
+                    if (res.statusCode === 200 && response.valid === true) {
+                      console.log('[CodeVault] License validated successfully');
+                      resolve(true);
+                    } else {
+                      console.error('[CodeVault] License validation failed:', response.message || 'Invalid license');
+                      process.exit(1);
+                    }
+                  } catch (e) {
+                    console.error('[CodeVault] License validation error:', e.message);
+                    process.exit(1);
+                  }
+                });
+              });
+              
+              req.on('error', (e) => {
+                console.error('[CodeVault] License server unreachable:', e.message);
+                process.exit(1);
+              });
+              
+              req.on('timeout', () => {
+                req.destroy();
+                console.error('[CodeVault] License validation timed out');
+                process.exit(1);
+              });
+              
+              req.write(payload);
+              req.end();
+            });
+          }
+          
+          // Validate license on startup
+          if (CV_LICENSE_KEY && CV_LICENSE_KEY !== 'GENERIC_BUILD') {
+            validateLicense().catch(() => process.exit(1));
+          }
           // === End CodeVault ===
           '@
           Set-Content -Path "./wrapper_template.js" -Value $wrapper
@@ -248,9 +322,11 @@ jobs:
           }
           
           $licenseKey = if ($config.license_key) { $config.license_key } else { "GENERIC_BUILD" }
+          $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
           
           $wrapper = Get-Content "./wrapper_template.js" -Raw
-          $wrapper = $wrapper -replace "__LICENSE_KEY__", $licenseKey
+          $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
+          $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
           
           $originalCode = Get-Content $entryFile -Raw
           Set-Content -Path $entryFile -Value ($wrapper + "`n" + $originalCode) -Encoding UTF8
