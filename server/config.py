@@ -1,19 +1,31 @@
 """
 Configuration settings for CodeVault API Server.
-Loads environment variables from data/.env or local .env fallback.
+Loads environment variables from multiple possible locations.
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Try to load from data/.env first (production), fallback to local .env (development)
-_env_file = Path(__file__).parent.parent.parent / "data" / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
-    print(f"[Config] Loaded environment from: {_env_file}")
-else:
-    load_dotenv()  # Fallback to default behavior
+# Try multiple .env locations in order of priority
+_server_dir = Path(__file__).parent
+_project_root = _server_dir.parent
+_env_locations = [
+    _project_root / "data" / ".env",  # Production: data/.env
+    _project_root / ".env",            # Development: project root .env
+    _server_dir / ".env",              # Fallback: server/.env
+]
+
+_env_loaded = False
+for _env_file in _env_locations:
+    if _env_file.exists():
+        load_dotenv(_env_file)
+        print(f"[Config] Loaded environment from: {_env_file}")
+        _env_loaded = True
+        break
+
+if not _env_loaded:
+    load_dotenv()  # Last resort: default behavior
     print("[Config] Using default .env loading")
 
 # Database
@@ -73,10 +85,12 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")
 BUILD_CALLBACK_SECRET = os.getenv("BUILD_CALLBACK_SECRET", "")
+PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
 
 
 # CLI Tool
 CLI_VERSION = "1.0.0"
+LICENSE_SERVER_URL = os.getenv("LICENSE_SERVER_URL", "http://localhost:8000")
 CLI_DOWNLOAD_URLS = {
     "windows": os.getenv("CLI_DOWNLOAD_WINDOWS", ""),
     "macos": os.getenv("CLI_DOWNLOAD_MACOS", ""),
@@ -158,8 +172,9 @@ TIER_LIMITS = {
         "max_projects": 1,
         "max_licenses_per_project": 5,
         "can_sell_licenses": False,
-        "cloud_compilation": False,
-        "cloud_builds_per_month": 0,
+        "cloud_compilation": True,  # Enable for freemium
+        "cloud_builds_per_month": 5,  # 5 free builds per month
+        "cloud_platforms": ["windows"],  # Free tier: Windows only
         "analytics": False,
         "webhooks": False,
         "team_seats": 1,
@@ -171,7 +186,8 @@ TIER_LIMITS = {
         "max_licenses_per_project": 100,
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 10,
+        "cloud_builds_per_month": 50,
+        "cloud_platforms": ["windows", "macos", "linux"],  # All platforms
         "analytics": True,
         "webhooks": True,
         "team_seats": 1,
@@ -184,6 +200,7 @@ TIER_LIMITS = {
         "can_sell_licenses": True,
         "cloud_compilation": True,
         "cloud_builds_per_month": -1,  # unlimited
+        "cloud_platforms": ["windows", "macos", "linux"],  # All platforms
         "analytics": True,
         "webhooks": True,
         "team_seats": 5,

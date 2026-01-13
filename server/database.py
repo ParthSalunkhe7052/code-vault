@@ -384,6 +384,7 @@ async def init_database():
                 output_name VARCHAR(255) NOT NULL,
                 license_key VARCHAR(255),
                 config_json JSONB NOT NULL,
+                target_platforms JSONB DEFAULT '["windows"]',
                 
                 -- Status tracking
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -407,6 +408,22 @@ async def init_database():
             )
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS cloud_build_artifacts (
+                id VARCHAR(32) PRIMARY KEY,
+                build_id VARCHAR(32) NOT NULL REFERENCES cloud_builds(id) ON DELETE CASCADE,
+                platform VARCHAR(20) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                download_key VARCHAR(500),
+                download_filename VARCHAR(255),
+                file_size BIGINT,
+                error_message TEXT,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_cloud_builds_user ON cloud_builds(user_id)"
         )
@@ -416,6 +433,18 @@ async def init_database():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_cloud_builds_status ON cloud_builds(status)"
         )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_build_artifacts_build ON cloud_build_artifacts(build_id)"
+        )
+
+        # Apply Migration 007 manually for existing databases
+        try:
+            await conn.execute(
+                "ALTER TABLE cloud_builds ADD COLUMN IF NOT EXISTS target_platforms JSONB DEFAULT '[\"windows\"]'"
+            )
+        except Exception:
+            pass
+
 
         # =============================================================================
         # Migration 005: Tier Sync Improvements (Phase 1 Fix)
