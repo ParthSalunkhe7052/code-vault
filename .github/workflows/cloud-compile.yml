@@ -1,4 +1,5 @@
 name: Cloud Compile
+run-name: Cloud Build ${{ inputs.build_id }}
 
 on:
   workflow_dispatch:
@@ -51,8 +52,10 @@ jobs:
       
       - name: Download source code
         shell: pwsh
+        env:
+          SOURCE_URL: ${{ github.event.inputs.source_url }}
         run: |
-          curl -o source.zip "${{ github.event.inputs.source_url }}"
+          curl -o source.zip "$env:SOURCE_URL"
           Expand-Archive -Path source.zip -DestinationPath ./project
       
       - name: Create license wrapper script
@@ -124,7 +127,7 @@ jobs:
           $outputName = if ($config.output_name) { $config.output_name } else { "app" }
           
           Push-Location $sourceDir
-          python -m nuitka --standalone --onefile --assume-yes-for-downloads --windows-disable-console=false --output-filename="$outputName.exe" $entryFileName
+          python -m nuitka --standalone --onefile --assume-yes-for-downloads --output-filename="$outputName.exe" $entryFileName
           Pop-Location
           
           $exe = Get-ChildItem -Path $sourceDir -Filter "*.exe" -Recurse | Select-Object -First 1
@@ -206,8 +209,10 @@ jobs:
       
       - name: Download source code
         shell: pwsh
+        env:
+          SOURCE_URL: ${{ github.event.inputs.source_url }}
         run: |
-          curl -o source.zip "${{ github.event.inputs.source_url }}"
+          curl -o source.zip "$env:SOURCE_URL"
           Expand-Archive -Path source.zip -DestinationPath ./project
       
       - name: Create license wrapper script
@@ -296,9 +301,8 @@ jobs:
           }
           
           // Validate license on startup
-          if (CV_LICENSE_KEY && CV_LICENSE_KEY !== 'GENERIC_BUILD') {
-            validateLicense().catch(() => process.exit(1));
-          }
+          // Logic moved to bootstrap
+
           // === End CodeVault ===
           '@
           Set-Content -Path "./wrapper_template.js" -Value $wrapper
@@ -328,8 +332,16 @@ jobs:
           $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
           $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
           
-          $originalCode = Get-Content $entryFile -Raw
-          Set-Content -Path $entryFile -Value ($wrapper + "`n" + $originalCode) -Encoding UTF8
+          # Rename original file to allow async bootstrap
+          $entryDir = Split-Path -Parent $entryFile
+          $entryName = Split-Path -Leaf $entryFile
+          $renamedEntry = "__original_" + $entryName
+          
+          Rename-Item -Path $entryFile -NewName $renamedEntry
+          
+          $bootstrap = "(async () => { try { if (CV_LICENSE_KEY && CV_LICENSE_KEY !== 'GENERIC_BUILD') await validateLicense(); } catch (e) { process.exit(1); } require('./$renamedEntry'); })();"
+          
+          Set-Content -Path $entryFile -Value ($wrapper + "`n" + $bootstrap) -Encoding UTF8
           
           $sourceDir = Split-Path -Parent $entryFile
           $entryFileName = Split-Path -Leaf $entryFile
