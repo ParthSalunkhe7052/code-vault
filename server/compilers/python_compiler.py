@@ -356,6 +356,7 @@ class PythonCompiler:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(source_dir),
+            stdin=asyncio.subprocess.DEVNULL,  # Prevent blocking on input prompts
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,

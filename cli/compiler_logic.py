@@ -449,7 +449,8 @@ def run_js_obfuscation(project_dir: Path) -> bool:
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
-                timeout=OBFUSCATE_TIMEOUT
+                timeout=OBFUSCATE_TIMEOUT,
+                stdin=subprocess.DEVNULL  # Prevent blocking on input prompts
             )
 
             return (js_file, result.returncode == 0, result.stderr if result.returncode != 0 else "")
