@@ -64,30 +64,103 @@ jobs:
           $wrapper = @'
           # === CodeVault License Validation ===
           import hashlib, json, os, platform, subprocess, sys, urllib.request
+          from pathlib import Path
+
           _CV_LICENSE_KEY = "__LICENSE_KEY__"
           _CV_API_URL = "__API_URL__"
+          _CV_LICENSE_FILE = Path.home() / ".codevault" / "license.key"
+
           def _cv_get_hwid():
               try:
                   cpu = platform.processor()
                   if platform.system() == "Windows":
-                      serial = subprocess.check_output(["wmic", "bios", "get", "serialnumber"], text=True).strip().split()[-1]
+                      serial = subprocess.check_output(["wmic", "bios", "get", "serialnumber"], text=True, creationflags=0x08000000).strip().split()[-1]
                   else:
-                      serial = "unknown"
+                      serial = subprocess.check_output(["cat", "/etc/machine-id"], text=True).strip() if os.path.exists("/etc/machine-id") else "unknown"
                   import uuid
                   mac = ':'.join(f'{(uuid.getnode() >> i) & 0xff:02x}' for i in range(40, -1, -8))
                   return hashlib.sha256(f"{cpu}|{serial}|{mac}".encode()).hexdigest()
-              except: return "error"
-          def _cv_validate():
-              if _CV_LICENSE_KEY == "GENERIC_BUILD" or not _CV_LICENSE_KEY:
-                  return True
+              except:
+                  return "error"
+
+          def _cv_load_cached_key():
               try:
-                  data = json.dumps({"license_key": _CV_LICENSE_KEY, "hwid": _cv_get_hwid()}).encode()
+                  if _CV_LICENSE_FILE.exists():
+                      return _CV_LICENSE_FILE.read_text().strip()
+              except:
+                  pass
+              return None
+
+          def _cv_save_key(key):
+              try:
+                  _CV_LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                  _CV_LICENSE_FILE.write_text(key)
+              except:
+                  pass
+
+          def _cv_validate_key(key):
+              if not key or not _CV_API_URL:
+                  return False
+              try:
+                  data = json.dumps({"license_key": key, "hwid": _cv_get_hwid()}).encode()
                   req = urllib.request.Request(_CV_API_URL, data=data, headers={"Content-Type": "application/json"})
-                  resp = urllib.request.urlopen(req, timeout=10)
-                  return json.loads(resp.read()).get("valid", False)
-              except: return True
-          if not _cv_validate():
-              print("License validation failed")
+                  resp = urllib.request.urlopen(req, timeout=15)
+                  result = json.loads(resp.read())
+                  return result.get("valid", False)
+              except Exception as e:
+                  print(f"[License] Validation error: {e}")
+                  return False
+
+          def _cv_prompt_license():
+              print("\n" + "="*50)
+              print("       LICENSE REQUIRED")
+              print("="*50)
+              print("\nThis software requires a valid license key.")
+              print("Purchase at: https://codevault.app\n")
+              try:
+                  key = input("Enter license key: ").strip()
+                  return key
+              except (EOFError, KeyboardInterrupt):
+                  print("\nLicense entry cancelled.")
+                  sys.exit(1)
+
+          def _cv_main_validation():
+              license_key = _CV_LICENSE_KEY
+              
+              # If no embedded key, try cached key
+              if license_key == "GENERIC_BUILD" or not license_key:
+                  cached = _cv_load_cached_key()
+                  if cached:
+                      print("[License] Found cached license, validating...")
+                      if _cv_validate_key(cached):
+                          print("[License] Valid!")
+                          return True
+                      else:
+                          print("[License] Cached license is invalid or expired.")
+                  
+                  # No valid cached key, prompt user
+                  for attempt in range(3):
+                      key = _cv_prompt_license()
+                      if _cv_validate_key(key):
+                          print("[License] Valid! Saving for future use...")
+                          _cv_save_key(key)
+                          return True
+                      else:
+                          remaining = 2 - attempt
+                          if remaining > 0:
+                              print(f"[License] Invalid key. {remaining} attempts remaining.")
+                          else:
+                              print("[License] Too many failed attempts.")
+                  return False
+              else:
+                  # Embedded key - validate silently
+                  if _cv_validate_key(license_key):
+                      return True
+                  print("[License] Embedded license is invalid.")
+                  return False
+
+          if not _cv_main_validation():
+              print("\n[License] Validation failed. Exiting.")
               sys.exit(1)
           # === End CodeVault ===
           '@
