@@ -1,5 +1,4 @@
 name: Cloud Compile
-run-name: Cloud Build ${{ inputs.build_id }}
 
 on:
   workflow_dispatch:
@@ -16,6 +15,11 @@ on:
         description: 'Language (python or nodejs)'
         required: true
         type: string
+      target_platforms:
+        description: 'List of platforms to build for (e.g. windows,macos,linux)'
+        required: true
+        type: string
+        default: 'windows'
       source_url:
         description: 'R2 presigned URL for source download'
         required: true
@@ -34,383 +38,437 @@ on:
         type: string
 
 jobs:
-  compile-python:
-    if: ${{ github.event.inputs.language == 'python' }}
+  build-windows:
+    if: contains(github.event.inputs.target_platforms, 'windows')
     runs-on: windows-latest
     timeout-minutes: 60
     
     steps:
       - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip' # Enable standard pip caching
       
-      - name: Install Nuitka and dependencies
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm' # Enable standard npm caching
+      
+      - name: Install Nuitka (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
         run: |
           pip install nuitka ordered-set zstandard
           pip install requests cryptography
       
-      - name: Download source code
-        shell: pwsh
-        env:
-          SOURCE_URL: ${{ github.event.inputs.source_url }}
-        run: |
-          curl -o source.zip "$env:SOURCE_URL"
-          Expand-Archive -Path source.zip -DestinationPath ./project
-      
-      - name: Create license wrapper script
-        shell: pwsh
-        run: |
-          $wrapper = @'
-          # === CodeVault License Validation ===
-          import hashlib, json, os, platform, subprocess, sys, urllib.request
-          _CV_LICENSE_KEY = "__LICENSE_KEY__"
-          _CV_API_URL = "__API_URL__"
-          def _cv_get_hwid():
-              try:
-                  cpu = platform.processor()
-                  if platform.system() == "Windows":
-                      serial = subprocess.check_output(["wmic", "bios", "get", "serialnumber"], text=True).strip().split()[-1]
-                  else:
-                      serial = "unknown"
-                  import uuid
-                  mac = ':'.join(f'{(uuid.getnode() >> i) & 0xff:02x}' for i in range(40, -1, -8))
-                  return hashlib.sha256(f"{cpu}|{serial}|{mac}".encode()).hexdigest()
-              except: return "error"
-          def _cv_validate():
-              if _CV_LICENSE_KEY == "GENERIC_BUILD" or not _CV_LICENSE_KEY:
-                  return True
-              try:
-                  data = json.dumps({"license_key": _CV_LICENSE_KEY, "hwid": _cv_get_hwid()}).encode()
-                  req = urllib.request.Request(_CV_API_URL, data=data, headers={"Content-Type": "application/json"})
-                  resp = urllib.request.urlopen(req, timeout=10)
-                  return json.loads(resp.read()).get("valid", False)
-              except: return True
-          if not _cv_validate():
-              print("License validation failed")
-              sys.exit(1)
-          # === End CodeVault ===
-          '@
-          Set-Content -Path "./wrapper_template.py" -Value $wrapper
-      
-      - name: Inject wrapper and compile
-        id: compile
-        shell: pwsh
-        env:
-          CONFIG_JSON: ${{ github.event.inputs.config_json }}
-        run: |
-          $config = $env:CONFIG_JSON | ConvertFrom-Json
-          
-          $entryFile = Join-Path "./project" $config.entry_file
-          if (-not (Test-Path $entryFile)) {
-            $entryFile = Join-Path "./project/source" $config.entry_file
-          }
-          
-          if (-not (Test-Path $entryFile)) {
-            Write-Error "Entry file not found: $($config.entry_file)"
-            exit 1
-          }
-          
-          $licenseKey = if ($config.license_key) { $config.license_key } else { "GENERIC_BUILD" }
-          $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
-          
-          $wrapper = Get-Content "./wrapper_template.py" -Raw
-          $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
-          $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
-          
-          $originalCode = Get-Content $entryFile -Raw
-          $newCode = $wrapper + "`n" + $originalCode
-          Set-Content -Path $entryFile -Value $newCode -Encoding UTF8
-          
-          $sourceDir = Split-Path -Parent $entryFile
-          $entryFileName = Split-Path -Leaf $entryFile
-          $outputName = if ($config.output_name) { $config.output_name } else { "app" }
-          
-          Push-Location $sourceDir
-          python -m nuitka --standalone --onefile --assume-yes-for-downloads --output-filename="$outputName.exe" $entryFileName
-          Pop-Location
-          
-          $exe = Get-ChildItem -Path $sourceDir -Filter "*.exe" -Recurse | Select-Object -First 1
-          if ($exe) {
-            echo "EXE_PATH=$($exe.FullName)" >> $env:GITHUB_ENV
-            echo "EXE_NAME=$($exe.Name)" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "No executable produced"
-            exit 1
-          }
-      
-      - name: Install AWS CLI
-        shell: pwsh
-        run: choco install awscli -y
-      
-      - name: Upload to R2
-        shell: pwsh
-        env:
-          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
-        run: |
-          aws configure set aws_access_key_id $env:R2_ACCESS_KEY
-          aws configure set aws_secret_access_key $env:R2_SECRET_KEY
-          aws configure set default.region auto
-          
-          $key = "builds/${{ github.event.inputs.build_id }}/$env:EXE_NAME"
-          aws s3 cp $env:EXE_PATH "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
-          
-          echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
-          echo "UPLOAD_FILENAME=$env:EXE_NAME" >> $env:GITHUB_ENV
-      
-      - name: Notify completion
-        if: always()
-        shell: pwsh
-        env:
-          CALLBACK_SECRET: ${{ github.event.inputs.callback_secret }}
-          CALLBACK_URL: ${{ github.event.inputs.callback_url }}
-          BUILD_ID: ${{ github.event.inputs.build_id }}
-        run: |
-          $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
-          
-          $bodyObj = @{
-            build_id = $env:BUILD_ID
-            status = $status
-            download_key = $env:UPLOAD_KEY
-            filename = $env:UPLOAD_FILENAME
-          }
-          if ($status -eq "failed") {
-            $bodyObj.error = "Compilation failed"
-          }
-          $body = $bodyObj | ConvertTo-Json -Compress
-          
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($env:CALLBACK_SECRET)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          
-          try {
-            Invoke-RestMethod -Uri $env:CALLBACK_URL -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body
-            Write-Host "Webhook sent successfully"
-          } catch {
-            Write-Warning "Failed to send webhook: $_"
-          }
-
-  compile-nodejs:
-    if: ${{ github.event.inputs.language == 'nodejs' }}
-    runs-on: windows-latest
-    timeout-minutes: 60
-    
-    steps:
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      
-      - name: Install pkg
+      - name: Install pkg (Node.js)
+        if: ${{ github.event.inputs.language == 'nodejs' }}
         run: npm install -g pkg
       
       - name: Download source code
-        shell: pwsh
-        env:
-          SOURCE_URL: ${{ github.event.inputs.source_url }}
         run: |
-          curl -o source.zip "$env:SOURCE_URL"
+          curl -o source.zip "${{ github.event.inputs.source_url }}"
           Expand-Archive -Path source.zip -DestinationPath ./project
-      
-      - name: Create license wrapper script
         shell: pwsh
-        run: |
-          $wrapper = @'
-          // === CodeVault License Validation ===
-          const os = require('os');
-          const crypto = require('crypto');
-          const https = require('https');
-          const http = require('http');
-          const CV_LICENSE_KEY = '__LICENSE_KEY__';
-          const CV_API_URL = '__API_URL__';
-          
-          function getHWID() {
-            const cpus = os.cpus()[0]?.model || 'unknown';
-            const networkInterfaces = os.networkInterfaces();
-            const mac = Object.values(networkInterfaces).flat().find(i => !i.internal && i.mac)?.mac || '00:00:00:00:00:00';
-            return crypto.createHash('sha256').update(cpus + '|' + mac).digest('hex');
-          }
-          
-          async function validateLicense() {
-            if (!CV_LICENSE_KEY || CV_LICENSE_KEY === 'GENERIC_BUILD') {
-              return true; // Skip validation for generic builds
-            }
-            
-            const hwid = getHWID();
-            const nonce = crypto.randomBytes(16).toString('hex');
-            const timestamp = Math.floor(Date.now() / 1000);
-            
-            const payload = JSON.stringify({
-              license_key: CV_LICENSE_KEY,
-              hwid: hwid,
-              nonce: nonce,
-              timestamp: timestamp
-            });
-            
-            return new Promise((resolve, reject) => {
-              const url = new URL(CV_API_URL);
-              const protocol = url.protocol === 'https:' ? https : http;
-              
-              const req = protocol.request({
-                hostname: url.hostname,
-                port: url.port || (url.protocol === 'https:' ? 443 : 80),
-                path: url.pathname,
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(payload)
-                },
-                timeout: 10000
-              }, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                  try {
-                    const response = JSON.parse(data);
-                    if (res.statusCode === 200 && response.valid === true) {
-                      console.log('[CodeVault] License validated successfully');
-                      resolve(true);
-                    } else {
-                      console.error('[CodeVault] License validation failed:', response.message || 'Invalid license');
-                      process.exit(1);
-                    }
-                  } catch (e) {
-                    console.error('[CodeVault] License validation error:', e.message);
-                    process.exit(1);
-                  }
-                });
-              });
-              
-              req.on('error', (e) => {
-                console.error('[CodeVault] License server unreachable:', e.message);
-                process.exit(1);
-              });
-              
-              req.on('timeout', () => {
-                req.destroy();
-                console.error('[CodeVault] License validation timed out');
-                process.exit(1);
-              });
-              
-              req.write(payload);
-              req.end();
-            });
-          }
-          
-          // Validate license on startup
-          // Logic moved to bootstrap
-
-          // === End CodeVault ===
-          '@
-          Set-Content -Path "./wrapper_template.js" -Value $wrapper
       
-      - name: Inject wrapper and compile
-        id: compile
-        shell: pwsh
-        env:
-          CONFIG_JSON: ${{ github.event.inputs.config_json }}
+      - name: Parse config
+        id: prepare
         run: |
-          $config = $env:CONFIG_JSON | ConvertFrom-Json
-          
-          $entryFile = Join-Path "./project" $config.entry_file
-          if (-not (Test-Path $entryFile)) {
-            $entryFile = Join-Path "./project/source" $config.entry_file
-          }
-          
-          if (-not (Test-Path $entryFile)) {
-            Write-Error "Entry file not found: $($config.entry_file)"
-            exit 1
-          }
-          
-          $licenseKey = if ($config.license_key) { $config.license_key } else { "GENERIC_BUILD" }
-          $apiUrl = if ($config.api_url) { $config.api_url } else { "" }
-          
-          $wrapper = Get-Content "./wrapper_template.js" -Raw
-          $wrapper = $wrapper.Replace("__LICENSE_KEY__", $licenseKey)
-          $wrapper = $wrapper.Replace("__API_URL__", $apiUrl)
-          
-          # Rename original file to allow async bootstrap
-          $entryDir = Split-Path -Parent $entryFile
-          $entryName = Split-Path -Leaf $entryFile
-          $renamedEntry = "__original_" + $entryName
-          
-          Rename-Item -Path $entryFile -NewName $renamedEntry
-          
-          $bootstrap = "(async () => { try { if (CV_LICENSE_KEY && CV_LICENSE_KEY !== 'GENERIC_BUILD') await validateLicense(); } catch (e) { process.exit(1); } require('./$renamedEntry'); })();"
-          
-          Set-Content -Path $entryFile -Value ($wrapper + "`n" + $bootstrap) -Encoding UTF8
-          
-          $sourceDir = Split-Path -Parent $entryFile
-          $entryFileName = Split-Path -Leaf $entryFile
-          $outputName = if ($config.output_name) { $config.output_name } else { "app" }
-          
-          Push-Location $sourceDir
-          if (Test-Path "package.json") { npm install --production }
-          pkg $entryFileName --targets node18-win-x64 --output "$outputName.exe"
-          Pop-Location
-          
-          $exe = Get-ChildItem -Path $sourceDir -Filter "*.exe" | Select-Object -First 1
-          if ($exe) {
-            echo "EXE_PATH=$($exe.FullName)" >> $env:GITHUB_ENV
-            echo "EXE_NAME=$($exe.Name)" >> $env:GITHUB_ENV
+          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
+          echo "entry_file=$($config.entry_file)" >> $env:GITHUB_OUTPUT
+          echo "output_name=$($config.output_name)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Install project dependencies (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          if (Test-Path "requirements.txt") {
+            Write-Host "Installing dependencies from requirements.txt..."
+            pip install -r requirements.txt
           } else {
-            Write-Error "No executable produced"
-            exit 1
+            Write-Host "No requirements.txt found, skipping dependency install"
           }
-      
-      - name: Install AWS CLI
         shell: pwsh
-        run: choco install awscli -y
+      
+      - name: Inject license wrapper (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          # Download the wrapper template from the repo
+          $wrapperUrl = "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py"
+          Invoke-WebRequest -Uri $wrapperUrl -OutFile wrapper_template.py
+          
+          # Read wrapper and entry file
+          $wrapper = Get-Content wrapper_template.py -Raw
+          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
+          $entryPath = "project/source/${{ steps.prepare.outputs.entry_file }}"
+          $originalCode = Get-Content $entryPath -Raw
+          
+          # Replace placeholders in wrapper
+          $wrapper = $wrapper -replace '__LICENSE_KEY__', $config.license_key
+          $wrapper = $wrapper -replace '__API_URL__', $config.api_url
+          
+          # Combine wrapper + original code
+          $combined = $wrapper + "`n`n" + $originalCode
+          Set-Content -Path $entryPath -Value $combined -Encoding UTF8
+          Write-Host "Injected license wrapper into ${{ steps.prepare.outputs.entry_file }}"
+        shell: pwsh
+      
+      - name: Compile with Nuitka
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          python -m nuitka `
+            --standalone `
+            --onefile `
+            --assume-yes-for-downloads `
+            --windows-disable-console=false `
+            --output-filename="${{ steps.prepare.outputs.output_name }}.exe" `
+            "${{ steps.prepare.outputs.entry_file }}"
+        shell: pwsh
+
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
+        shell: pwsh
       
       - name: Upload to R2
-        shell: pwsh
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
+          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" | Select-Object -First 1
+          
           aws configure set aws_access_key_id $env:R2_ACCESS_KEY
           aws configure set aws_secret_access_key $env:R2_SECRET_KEY
-          aws configure set default.region auto
           
-          $key = "builds/${{ github.event.inputs.build_id }}/$env:EXE_NAME"
-          aws s3 cp $env:EXE_PATH "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
+          $key = "builds/${{ github.event.inputs.build_id }}/windows/$($exe.Name)"
+          aws s3 cp $exe.FullName "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
           
           echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
-          echo "UPLOAD_FILENAME=$env:EXE_NAME" >> $env:GITHUB_ENV
+          echo "UPLOAD_FILENAME=$($exe.Name)" >> $env:GITHUB_ENV
+        shell: pwsh
       
       - name: Notify completion
         if: always()
-        shell: pwsh
-        env:
-          CALLBACK_SECRET: ${{ github.event.inputs.callback_secret }}
-          CALLBACK_URL: ${{ github.event.inputs.callback_url }}
-          BUILD_ID: ${{ github.event.inputs.build_id }}
         run: |
           $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
           
-          $bodyObj = @{
-            build_id = $env:BUILD_ID
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            platform = "windows"
             status = $status
             download_key = $env:UPLOAD_KEY
             filename = $env:UPLOAD_FILENAME
-          }
-          if ($status -eq "failed") {
-            $bodyObj.error = "Compilation failed"
-          }
-          $body = $bodyObj | ConvertTo-Json -Compress
+            error = if ($status -eq "failed") { "Compilation failed" } else { $null }
+          } | ConvertTo-Json -Compress
           
+          # Create HMAC signature
+          $secret = "${{ github.event.inputs.callback_secret }}"
           $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($env:CALLBACK_SECRET)
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
           $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
           
-          try {
-            Invoke-RestMethod -Uri $env:CALLBACK_URL -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body
-            Write-Host "Webhook sent successfully"
-          } catch {
-            Write-Warning "Failed to send webhook: $_"
+          Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
+            -Method POST `
+            -ContentType "application/json" `
+            -Headers @{ "X-Signature" = $signature } `
+            -Body $body
+        shell: pwsh
+
+  build-linux:
+    if: contains(github.event.inputs.target_platforms, 'linux')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+          pip install nuitka ordered-set zstandard requests cryptography
+
+      - name: Install pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: npm install -g pkg
+
+      - name: Download source code
+        run: |
+          curl -L -o source.zip "${{ github.event.inputs.source_url }}"
+          unzip source.zip -d ./project
+
+      - name: Parse config
+        id: prepare
+        run: |
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['entry_file'])")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['output_name'])")
+          echo "entry_file=$config" >> $GITHUB_OUTPUT
+          echo "output_name=$output" >> $GITHUB_OUTPUT
+
+      - name: Install project dependencies (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          if [ -f "requirements.txt" ]; then
+            echo "Installing dependencies from requirements.txt..."
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping dependency install"
+          fi
+
+      - name: Inject license wrapper (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py" -o wrapper_template.py
+          license_key=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('license_key', 'GENERIC_BUILD'))")
+          api_url=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('api_url', ''))")
+          entry_file="project/source/${{ steps.prepare.outputs.entry_file }}"
+          python3 -c "
+          with open('wrapper_template.py', 'r') as f:
+              wrapper = f.read()
+          wrapper = wrapper.replace('__LICENSE_KEY__', '$license_key').replace('__API_URL__', '$api_url')
+          with open('$entry_file', 'r') as f:
+              original = f.read()
+          with open('$entry_file', 'w') as f:
+              f.write(wrapper + '\n\n' + original)
+          print('Injected license wrapper')
+          "
+
+      - name: Compile with Nuitka
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          python -m nuitka \
+            --standalone \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-filename="${{ steps.prepare.outputs.output_name }}" \
+            "${{ steps.prepare.outputs.entry_file }}"
+
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-linux-x64 --output "${{ steps.prepare.outputs.output_name }}"
+
+      - name: Package Output
+        run: |
+          cd project/source
+          chmod +x "${{ steps.prepare.outputs.output_name }}"
+          tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "${{ steps.prepare.outputs.output_name }}"
+
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          cd project/source
+          # Find the tar.gz
+          artifact=$(ls *.tar.gz | head -1)
+          
+          # Install AWS CLI
+          pip install awscli
+          aws configure set aws_access_key_id $R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $R2_SECRET_KEY
+          
+          key="builds/${{ github.event.inputs.build_id }}/linux/$artifact"
+          aws s3 cp "$artifact" "s3://$R2_BUCKET/$key" --endpoint-url $R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $GITHUB_ENV
+
+      - name: Notify completion
+        if: always()
+        run: |
+          if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
+          
+          payload=$(cat << EOF
+          {
+            "build_id": "${{ github.event.inputs.build_id }}",
+            "platform": "linux",
+            "status": "$status",
+            "download_key": "$UPLOAD_KEY",
+            "filename": "$UPLOAD_FILENAME",
+            "error": null
           }
+          EOF
+          )
+          
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          
+          curl -X POST "${{ github.event.inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload"
+
+  build-macos:
+    if: contains(github.event.inputs.target_platforms, 'macos')
+    runs-on: macos-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: pip install nuitka ordered-set zstandard requests cryptography
+
+      - name: Install pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: npm install -g pkg
+
+      - name: Download source code
+        run: |
+          curl -L -o source.zip "${{ github.event.inputs.source_url }}"
+          unzip source.zip -d ./project
+
+      - name: Parse config
+        id: prepare
+        run: |
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['entry_file'])")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['output_name'])")
+          echo "entry_file=$config" >> $GITHUB_OUTPUT
+          echo "output_name=$output" >> $GITHUB_OUTPUT
+
+      - name: Install project dependencies (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          if [ -f "requirements.txt" ]; then
+            echo "Installing dependencies from requirements.txt..."
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping dependency install"
+          fi
+
+      - name: Inject license wrapper (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py" -o wrapper_template.py
+          license_key=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('license_key', 'GENERIC_BUILD'))")
+          api_url=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('api_url', ''))")
+          entry_file="project/source/${{ steps.prepare.outputs.entry_file }}"
+          python3 -c "
+          with open('wrapper_template.py', 'r') as f:
+              wrapper = f.read()
+          wrapper = wrapper.replace('__LICENSE_KEY__', '$license_key').replace('__API_URL__', '$api_url')
+          with open('$entry_file', 'r') as f:
+              original = f.read()
+          with open('$entry_file', 'w') as f:
+              f.write(wrapper + '\n\n' + original)
+          print('Injected license wrapper')
+          "
+
+      - name: Compile with Nuitka
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          cd project/source
+          python -m nuitka \
+            --standalone \
+            --onefile \
+            --assume-yes-for-downloads \
+            --macos-create-app-bundle \
+            --output-filename="${{ steps.prepare.outputs.output_name }}" \
+            "${{ steps.prepare.outputs.entry_file }}"
+
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-macos-x64 --output "${{ steps.prepare.outputs.output_name }}"
+
+      - name: Package Output (Zip App)
+        run: |
+          cd project/source
+          if [ -d "${{ steps.prepare.outputs.output_name }}.app" ]; then
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}.app"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          else
+             # For pkg or binary
+             chmod +x "${{ steps.prepare.outputs.output_name }}"
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          fi
+
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          cd project/source
+          artifact=$ARTIFACT_NAME
+          
+          pip install awscli
+          aws configure set aws_access_key_id $R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $R2_SECRET_KEY
+          
+          key="builds/${{ github.event.inputs.build_id }}/macos/$artifact"
+          aws s3 cp "$artifact" "s3://$R2_BUCKET/$key" --endpoint-url $R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $GITHUB_ENV
+
+      - name: Notify completion
+        if: always()
+        run: |
+          if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
+          
+          payload=$(cat << EOF
+          {
+            "build_id": "${{ github.event.inputs.build_id }}",
+            "platform": "macos",
+            "status": "$status",
+            "download_key": "$UPLOAD_KEY",
+            "filename": "$UPLOAD_FILENAME",
+            "error": null
+          }
+          EOF
+          )
+          
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          
+          curl -X POST "${{ github.event.inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload"
