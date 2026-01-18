@@ -255,6 +255,37 @@ const publicApi = axios.create({
     headers: { 'Content-Type': 'application/json' },
 });
 
+// Cloud Build API
+export const cloudBuild = {
+    // Start a cloud build
+    start: (projectId, data = {}) => 
+        api.post('/cloud-build/start', { project_id: projectId, ...data }).then(res => res.data),
+    
+    // Get build status with stage progress
+    getStatus: (buildId) => 
+        api.get(`/cloud-build/${buildId}/status`).then(res => res.data),
+    
+    // Cancel a running build
+    cancel: (buildId) => 
+        api.post(`/cloud-build/${buildId}/cancel`).then(res => res.data),
+    
+    // Retry a failed build
+    retry: (buildId) => 
+        api.post(`/cloud-build/${buildId}/retry`).then(res => res.data),
+    
+    // Cleanup build artifacts
+    cleanup: (buildId) => 
+        api.post(`/cloud-build/${buildId}/cleanup`).then(res => res.data),
+    
+    // Get build history
+    getHistory: (limit = 20, offset = 0) => 
+        api.get('/cloud-build/history', { params: { limit, offset } }).then(res => res.data),
+    
+    // Get artifacts for a build (deprecated - use getStatus instead)
+    getArtifacts: (buildId) => 
+        api.get(`/cloud-build/${buildId}/status`).then(res => res.data.artifacts),
+};
+
 export const publicStore = {
     getProject: (storeSlug) => publicApi.get(`/public/store/${storeSlug}`).then(res => res.data),
     purchaseLicense: (storeSlug, buyerEmail, buyerName, successUrl, cancelUrl) =>

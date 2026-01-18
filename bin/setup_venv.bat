@@ -8,7 +8,7 @@ echo   Installing CodeVault Dependencies
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0..\"
 
 echo [1/3] Activating virtual environment...
 call venv\Scripts\activate.bat

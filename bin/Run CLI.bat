@@ -5,7 +5,7 @@ mode con: cols=100
 color 0A
 
 :: Get the directory where this script is located
-set "ROOT_DIR=%~dp0"
+set "ROOT_DIR=%~dp0..\"
 
 cls
 echo.
