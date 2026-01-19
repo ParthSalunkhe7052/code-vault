@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, RefreshCw } from 'lucide-react';
-import api from '../services/api';
+import { Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, RefreshCw, X, RotateCcw } from 'lucide-react';
+import { cloudBuild } from '../../services/api';
 
 /**
  * Platform configuration for display
@@ -29,35 +29,41 @@ const MultiPlatformBuildStatus = ({
   buildId, 
   platforms = ['windows'],
   autoRefresh = true,
-  onAllComplete 
+  onAllComplete,
+  onCancel,
+  onRetry,
 }) => {
+  const [buildStatus, setBuildStatus] = useState(null);
   const [artifacts, setArtifacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const pollIntervalRef = useRef(null);
 
   useEffect(() => {
     if (!buildId) return;
 
-    const fetchArtifacts = async () => {
+    const fetchStatus = async () => {
       try {
-        const response = await api.get(`/cloud-build/${buildId}/artifacts`);
-        setArtifacts(response.data);
+        const data = await cloudBuild.getStatus(buildId);
+        setBuildStatus(data);
+        setArtifacts(data.artifacts || []);
         setLoading(false);
         setError(null);
 
         // Check if all done
-        const allDone = response.data.every(
-          a => a.status === 'completed' || a.status === 'failed'
+        const allDone = (data.artifacts || []).every(
+          a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
         );
         
         if (allDone && onAllComplete) {
-          onAllComplete(response.data);
+          onAllComplete(data.artifacts);
         }
         
-        return allDone;
+        return allDone || data.status === 'cancelled';
       } catch (err) {
-        console.error('Failed to fetch artifacts:', err);
+        console.error('Failed to fetch build status:', err);
         setError('Failed to fetch build status');
         setLoading(false);
         return true; // Stop polling on error
@@ -65,12 +71,12 @@ const MultiPlatformBuildStatus = ({
     };
 
     // Initial fetch
-    fetchArtifacts();
+    fetchStatus();
 
     // Set up polling if autoRefresh is enabled
     if (autoRefresh) {
       const poll = async () => {
-        const done = await fetchArtifacts();
+        const done = await fetchStatus();
         if (!done) {
           pollIntervalRef.current = setTimeout(poll, 3000);
         }
@@ -88,13 +94,40 @@ const MultiPlatformBuildStatus = ({
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/cloud-build/${buildId}/artifacts`);
-      setArtifacts(response.data);
+      const data = await cloudBuild.getStatus(buildId);
+      setBuildStatus(data);
+      setArtifacts(data.artifacts || []);
       setError(null);
     } catch (err) {
       setError('Failed to refresh');
     }
     setLoading(false);
+  };
+
+  const handleCancel = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await cloudBuild.cancel(buildId);
+      handleRefresh();
+      onCancel?.();
+    } catch (err) {
+      console.error('Failed to cancel build:', err);
+    }
+    setCancelling(false);
+  };
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const result = await cloudBuild.retry(buildId);
+      onRetry?.(result.new_build_id);
+    } catch (err) {
+      console.error('Failed to retry build:', err);
+      setError(err.response?.data?.detail || 'Failed to retry build');
+    }
+    setRetrying(false);
   };
 
   // Calculate overall progress
@@ -110,7 +143,10 @@ const MultiPlatformBuildStatus = ({
 
   const completedCount = artifacts.filter(a => a.status === 'completed').length;
   const failedCount = artifacts.filter(a => a.status === 'failed').length;
-  const isAllDone = completedCount + failedCount === artifacts.length && artifacts.length > 0;
+  const cancelledCount = artifacts.filter(a => a.status === 'cancelled').length;
+  const isAllDone = completedCount + failedCount + cancelledCount === artifacts.length && artifacts.length > 0;
+  const isRunning = artifacts.some(a => a.status === 'running' || a.status === 'pending');
+  const hasFailed = failedCount > 0 && isAllDone;
 
   if (loading && artifacts.length === 0) {
     return (
@@ -143,11 +179,52 @@ const MultiPlatformBuildStatus = ({
     <div className="space-y-4">
       {/* Header with overall progress */}
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-medium text-white">Build Progress</h3>
+        <div className="flex flex-col">
+          <h3 className="text-base font-medium text-white">Build Progress</h3>
+          {/* Stage display from server */}
+          {buildStatus?.stage && isRunning && (
+            <span className="text-xs text-blue-400 mt-0.5">{buildStatus.stage}</span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-slate-400">
             {completedCount}/{artifacts.length} complete
           </span>
+          
+          {/* Cancel button for running builds */}
+          {isRunning && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors disabled:opacity-50"
+              title="Cancel build"
+            >
+              {cancelling ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <X size={12} />
+              )}
+              Cancel
+            </button>
+          )}
+          
+          {/* Retry button for failed builds */}
+          {hasFailed && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 rounded-lg transition-colors disabled:opacity-50"
+              title="Retry failed build"
+            >
+              {retrying ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RotateCcw size={12} />
+              )}
+              Retry
+            </button>
+          )}
+          
           {!autoRefresh && (
             <button
               onClick={handleRefresh}
@@ -188,7 +265,9 @@ const MultiPlatformBuildStatus = ({
                   ? 'bg-emerald-500/10 border-emerald-500/20' 
                   : artifact.status === 'failed'
                     ? 'bg-red-500/10 border-red-500/20'
-                    : 'bg-slate-800/50 border-slate-700'
+                    : artifact.status === 'cancelled'
+                      ? 'bg-slate-500/10 border-slate-500/20'
+                      : 'bg-slate-800/50 border-slate-700'
                 }
               `}
             >
@@ -241,7 +320,14 @@ const MultiPlatformBuildStatus = ({
                 {artifact.status === 'running' && (
                   <div className="flex items-center gap-2 text-blue-400">
                     <Loader2 size={16} className="animate-spin" />
-                    <span className="text-sm">Building...</span>
+                    <span className="text-sm">{buildStatus?.stage || 'Building...'}</span>
+                  </div>
+                )}
+                
+                {artifact.status === 'cancelled' && (
+                  <div className="flex items-center gap-2">
+                    <X size={16} className="text-slate-400" />
+                    <span className="text-sm text-slate-400">Cancelled</span>
                   </div>
                 )}
                 
@@ -295,10 +381,19 @@ const MultiPlatformBuildStatus = ({
       )}
 
       {/* Success message */}
-      {isAllDone && failedCount === 0 && (
+      {isAllDone && failedCount === 0 && cancelledCount === 0 && (
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-center">
           <p className="text-emerald-400 font-medium">
             All {completedCount} platform builds completed successfully!
+          </p>
+        </div>
+      )}
+      
+      {/* Cancelled message */}
+      {cancelledCount > 0 && isAllDone && (
+        <div className="bg-slate-500/10 border border-slate-500/20 rounded-lg p-3 text-center">
+          <p className="text-slate-400 font-medium">
+            Build was cancelled. {completedCount > 0 ? `${completedCount} platform(s) completed before cancellation.` : ''}
           </p>
         </div>
       )}

@@ -36,27 +36,77 @@ on:
         description: 'HMAC secret for webhook'
         required: true
         type: string
+      plan_tier:
+        description: 'User plan tier (free/pro/enterprise)'
+        required: false
+        type: string
+        default: 'free'
 
 jobs:
   build-windows:
     if: contains(github.event.inputs.target_platforms, 'windows')
     runs-on: windows-latest
-    timeout-minutes: 60
+    # Dynamic timeout based on tier: enterprise=120min, others=60min
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      # Send progress update - Starting
+      - name: Update progress - Starting
+        run: |
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            platform = "windows"
+            progress = 5
+            stage = "Starting build"
+            github_run_id = "${{ github.run_id }}"
+          } | ConvertTo-Json -Compress
+          
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          
+          try {
+            Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" `
+              -Method POST `
+              -ContentType "application/json" `
+              -Headers @{ "X-Signature" = $signature } `
+              -Body $body
+          } catch { Write-Host "Progress update failed (non-critical)" }
+        shell: pwsh
+        continue-on-error: true
+
       - name: Setup Python
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' # Enable standard pip caching
       
       - name: Setup Node.js
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm' # Enable standard npm caching
+      
+      # Cache pip packages for Python builds
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: windows-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            windows-pip-nuitka-
+      
+      # Cache npm packages for Node.js builds
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\npm-cache
+          key: windows-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            windows-npm-pkg-
       
       - name: Install Nuitka (Python)
         if: ${{ github.event.inputs.language == 'python' }}
@@ -73,6 +123,18 @@ jobs:
           curl -o source.zip "${{ github.event.inputs.source_url }}"
           Expand-Archive -Path source.zip -DestinationPath ./project
         shell: pwsh
+      
+      # Update progress - Source downloaded
+      - name: Update progress - Source downloaded
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 15; stage = "Downloading source" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
       
       - name: Parse config
         id: prepare
@@ -93,6 +155,18 @@ jobs:
             Write-Host "No requirements.txt found, skipping dependency install"
           }
         shell: pwsh
+      
+      # Update progress - Dependencies installed
+      - name: Update progress - Dependencies
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 25; stage = "Installing dependencies" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
       
       - name: Inject license wrapper (Python)
         if: ${{ github.event.inputs.language == 'python' }}
@@ -117,6 +191,18 @@ jobs:
           Write-Host "Injected license wrapper into ${{ steps.prepare.outputs.entry_file }}"
         shell: pwsh
       
+      # Update progress - Wrapper injected
+      - name: Update progress - Wrapper injected
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 35; stage = "Injecting license protection" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
+      
       - name: Compile with Nuitka
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
@@ -137,6 +223,18 @@ jobs:
           npm install --production
           pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
         shell: pwsh
+      
+      # Update progress - Compilation done
+      - name: Update progress - Compiled
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 80; stage = "Compiling binary" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
       
       - name: Upload to R2
         env:
@@ -187,22 +285,52 @@ jobs:
   build-linux:
     if: contains(github.event.inputs.target_platforms, 'linux')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Dynamic timeout based on tier: enterprise=120min, others=60min
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      # Send progress update - Starting
+      - name: Update progress - Starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+      
       - name: Setup Python
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: Setup Node.js
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+      
+      # Cache pip packages for Python builds
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: linux-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            linux-pip-nuitka-
+      
+      # Cache npm packages for Node.js builds
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: linux-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            linux-npm-pkg-
 
       - name: Install dependencies
         if: ${{ github.event.inputs.language == 'python' }}
@@ -330,22 +458,52 @@ jobs:
   build-macos:
     if: contains(github.event.inputs.target_platforms, 'macos')
     runs-on: macos-latest
-    timeout-minutes: 60
+    # Dynamic timeout based on tier: enterprise=120min, others=60min
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      # Send progress update - Starting
+      - name: Update progress - Starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+      
       - name: Setup Python
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: Setup Node.js
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+      
+      # Cache pip packages for Python builds
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: macos-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            macos-pip-nuitka-
+      
+      # Cache npm packages for Node.js builds
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: macos-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          restore-keys: |
+            macos-npm-pkg-
 
       - name: Install dependencies
         if: ${{ github.event.inputs.language == 'python' }}

@@ -326,3 +326,9 @@ password_reset_rate_limit = RateLimitDependency(
     window_seconds=300,  # 5 minutes
     prefix="auth:reset"
 )
+
+
+# Redis client getter for external use (e.g., build queue)
+async def get_redis_client() -> Optional[redis.Redis]:
+    """Get the Redis client instance for use in other modules."""
+    return _redis_client

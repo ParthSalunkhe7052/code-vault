@@ -117,8 +117,11 @@ async def app_lifespan(app: FastAPI):
 
     async with lifespan(app):
         import asyncio
+        from routes.cloud_build_routes import scheduled_cloud_build_cleanup
 
         asyncio.create_task(cleanup_compile_cache())
+        asyncio.create_task(scheduled_cloud_build_cleanup())
+        logging.getLogger(__name__).info("[Startup] Background cleanup tasks started")
         yield
 
     # Cleanup on shutdown

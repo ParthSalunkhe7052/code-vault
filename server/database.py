@@ -445,6 +445,47 @@ async def init_database():
         except Exception:
             pass
 
+        # =============================================================================
+        # Migration 008: Cloud Build Improvements
+        # =============================================================================
+        cloud_build_columns = [
+            ("cloud_builds", "logs", "JSONB DEFAULT '[]'"),
+            ("cloud_builds", "retry_count", "INTEGER DEFAULT 0"),
+            ("cloud_builds", "plan_tier", "VARCHAR(20) DEFAULT 'free'"),
+        ]
+        
+        for table, column, column_type in cloud_build_columns:
+            try:
+                await conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {column_type}"
+                )
+                print(f"[Migration] Added '{column}' column to {table} table")
+            except Exception:
+                pass
+
+        # Create build_logs table for detailed progress tracking
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS build_logs (
+                id SERIAL PRIMARY KEY,
+                build_id TEXT NOT NULL REFERENCES cloud_builds(id) ON DELETE CASCADE,
+                platform VARCHAR(20),
+                stage VARCHAR(100),
+                progress INTEGER,
+                message TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_build_logs_build ON build_logs(build_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_build_logs_created ON build_logs(created_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_builds_deleted ON cloud_builds(deleted_at) WHERE deleted_at IS NULL"
+        )
+
 
         # =============================================================================
         # Migration 005: Tier Sync Improvements (Phase 1 Fix)
