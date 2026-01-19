@@ -109,7 +109,7 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                 Params={'Bucket': bucket, 'Key': project_source_key},
                 ExpiresIn=3600
             )
-        except:
+        except Exception:
             # No cached source - create and upload new zip
             pass
     
@@ -162,6 +162,13 @@ async def trigger_github_build(build_id: str, config: dict, source_dir: Path):
         source_url = await upload_source_to_r2(build_id, source_dir)
         
         public_api_url = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+        
+        # Validate webhook URL accessibility (especially for ngrok in development)
+        if ENVIRONMENT == "development" and "ngrok" in public_api_url.lower():
+            logger.warning(f"[CloudBuild] Using ngrok tunnel: {public_api_url}")
+            logger.warning("[CloudBuild] Ensure ngrok tunnel is active! Build webhooks will fail if offline.")
+        elif not public_api_url or public_api_url == "http://localhost:8000":
+            logger.warning("[CloudBuild] Using localhost URL - webhooks may not work from GitHub Actions runners!")
         
         # Convert list of platforms to comma-separated string for GitHub Action
         target_platforms_str = ",".join(config.get("target_platforms", ["windows"]))
@@ -610,7 +617,7 @@ async def scheduled_cloud_build_cleanup():
             
             # Clean up completed builds based on tier retention
             # Free tier: 7 days
-            free_deleted = await conn.execute("""
+            await conn.execute("""
                 UPDATE cloud_builds 
                 SET deleted_at = NOW()
                 WHERE deleted_at IS NULL
@@ -624,7 +631,7 @@ async def scheduled_cloud_build_cleanup():
             """)
             
             # Pro tier: 30 days
-            pro_deleted = await conn.execute("""
+            await conn.execute("""
                 UPDATE cloud_builds 
                 SET deleted_at = NOW()
                 WHERE deleted_at IS NULL
@@ -634,7 +641,7 @@ async def scheduled_cloud_build_cleanup():
             """)
             
             # Enterprise tier: 90 days
-            ent_deleted = await conn.execute("""
+            await conn.execute("""
                 UPDATE cloud_builds 
                 SET deleted_at = NOW()
                 WHERE deleted_at IS NULL
@@ -688,9 +695,11 @@ async def scheduled_cloud_build_cleanup():
 
 
 def get_build_stage(build: dict) -> tuple[str, int]:
-    """Calculate build stage and detailed progress from build status and logs."""
+    """Calculate build stage and detailed progress from build status, logs, and timing."""
     status = build["status"]
     logs = build.get("logs") or []
+    started_at = build.get("started_at")
+    current_progress = build.get("progress", 0)
     
     if isinstance(logs, str):
         try:
@@ -705,18 +714,48 @@ def get_build_stage(build: dict) -> tuple[str, int]:
     elif status == "running":
         # Check logs for stage keywords
         logs_str = " ".join(str(log).lower() for log in logs)
+        log_based_progress = 15  # Default
+        stage = "Processing"
+        
         if "upload" in logs_str:
-            return "Uploading artifact", 90
+            stage = "Uploading artifact"
+            log_based_progress = 90
         elif "compil" in logs_str or "nuitka" in logs_str or "pkg" in logs_str:
-            return "Compiling binary", 55
+            stage = "Compiling binary"
+            log_based_progress = 55
         elif "inject" in logs_str or "wrapper" in logs_str:
-            return "Injecting license protection", 35
+            stage = "Injecting license protection"
+            log_based_progress = 35
         elif "dependenc" in logs_str or "install" in logs_str or "pip" in logs_str or "npm" in logs_str:
-            return "Installing dependencies", 20
+            stage = "Installing dependencies"
+            log_based_progress = 20
         elif "download" in logs_str or "source" in logs_str:
-            return "Downloading source", 12
-        else:
-            return "Processing", 15
+            stage = "Downloading source"
+            log_based_progress = 12
+        
+        # Time-based progress interpolation for smoother updates
+        if started_at:
+            try:
+                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+                # Estimate ~3-4 minutes for typical build (180-240 seconds)
+                estimated_duration = 210  # 3.5 minutes average
+                time_progress = min(85, int((elapsed / estimated_duration) * 85) + 10)
+                
+                # Use the maximum of time-based and log-based progress
+                # But never exceed current_progress from webhooks if available
+                if current_progress and current_progress > 0:
+                    # Webhooks provide more accurate progress
+                    final_progress = max(current_progress, time_progress, log_based_progress)
+                else:
+                    final_progress = max(time_progress, log_based_progress)
+                
+                return stage, min(95, final_progress)  # Cap at 95% until actually complete
+            except Exception:
+                pass
+        
+        # Fallback to log-based or webhook progress
+        return stage, max(current_progress or 0, log_based_progress)
+    
     elif status == "completed":
         return "Completed", 100
     elif status == "failed":

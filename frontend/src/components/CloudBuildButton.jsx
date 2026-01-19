@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal } from 'lucide-react';
+import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X } from 'lucide-react';
 import api from '../services/api';
 
 /**
@@ -27,9 +27,10 @@ export function CloudBuildButton({
   onComplete, 
   className = "" 
 }) {
-  const [status, setStatus] = useState('idle'); // idle, starting, building, completed, failed
+  const [status, setStatus] = useState('idle'); // idle, starting, building, completed, failed, cancelled
   const [buildId, setBuildId] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [displayProgress, setDisplayProgress] = useState(0); // Animated progress for smooth transitions
   const [error, setError] = useState(null);
   
   // For single-platform builds (legacy/simple mode)
@@ -41,6 +42,21 @@ export function CloudBuildButton({
   
   // Polling interval ref for cleanup
   const pollIntervalRef = useRef(null);
+
+  // Animated progress effect - smoothly animate to target progress
+  useEffect(() => {
+    if (displayProgress < progress) {
+      const diff = progress - displayProgress;
+      const step = Math.max(1, Math.ceil(diff / 10));
+      const timer = setTimeout(() => {
+        setDisplayProgress(prev => Math.min(prev + step, progress));
+      }, 100);
+      return () => clearTimeout(timer);
+    } else if (displayProgress > progress) {
+      // Allow progress to decrease if needed (e.g., on reset)
+      setDisplayProgress(progress);
+    }
+  }, [progress, displayProgress]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -176,11 +192,28 @@ export function CloudBuildButton({
     setStatus('idle');
     setError(null);
     setProgress(0);
+    setDisplayProgress(0);
     setDownloadUrl(null);
     setPlatformArtifacts({});
     setBuildId(null);
     if (pollIntervalRef.current) {
       clearTimeout(pollIntervalRef.current);
+    }
+  };
+
+  const cancelBuild = async () => {
+    if (!buildId || status !== 'building') return;
+    
+    try {
+      await api.post(`/cloud-build/${buildId}/cancel`);
+      setStatus('cancelled');
+      setError('Build cancelled by user');
+      if (pollIntervalRef.current) {
+        clearTimeout(pollIntervalRef.current);
+      }
+    } catch (err) {
+      console.error('Failed to cancel build:', err);
+      setError(err.response?.data?.detail || 'Failed to cancel build');
     }
   };
 
@@ -221,14 +254,14 @@ export function CloudBuildButton({
                 {isMultiPlatform ? 'Compiling for multiple platforms...' : 'Compiling in cloud...'}
               </span>
             </div>
-            <span className="text-sm text-slate-400">{progress}%</span>
+            <span className="text-sm text-slate-400">{displayProgress}%</span>
           </div>
           
           {/* Overall progress bar */}
           <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
             <div 
-              className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500 relative"
-              style={{ width: `${Math.max(5, progress)}%` }}
+              className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-300 ease-out relative"
+              style={{ width: `${Math.max(5, displayProgress)}%` }}
             >
               <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
             </div>
@@ -286,6 +319,30 @@ export function CloudBuildButton({
               ? 'Multi-platform builds may take 5-10 minutes' 
               : 'This usually takes 2-5 minutes'}
           </p>
+          
+          {/* Cancel button */}
+          <button
+            onClick={cancelBuild}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm transition-colors"
+          >
+            <X className="w-4 h-4" />
+            Cancel Build
+          </button>
+        </div>
+      )}
+
+      {status === 'cancelled' && (
+        <div className="space-y-3 p-4 bg-amber-500/10 rounded-lg border border-amber-500/20">
+          <div className="flex items-center gap-2 text-amber-400 font-medium">
+            <XCircle className="w-5 h-5" />
+            Build cancelled
+          </div>
+          <button
+            onClick={resetBuild}
+            className="text-sm text-amber-400 hover:text-amber-300 underline underline-offset-4"
+          >
+            Start new build
+          </button>
         </div>
       )}
 
