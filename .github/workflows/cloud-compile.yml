@@ -46,11 +46,9 @@ jobs:
   build-windows:
     if: contains(github.event.inputs.target_platforms, 'windows')
     runs-on: windows-latest
-    # Dynamic timeout based on tier: enterprise=120min, others=60min
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
-      # Send progress update - Starting
       - name: Update progress - Starting
         run: |
           $body = @{
@@ -88,7 +86,6 @@ jobs:
         with:
           node-version: '18'
       
-      # Cache pip packages for Python builds
       - name: Cache pip packages
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/cache@v4
@@ -98,7 +95,6 @@ jobs:
           restore-keys: |
             windows-pip-nuitka-
       
-      # Cache npm packages for Node.js builds
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
@@ -123,10 +119,7 @@ jobs:
           curl -o source.zip "${{ github.event.inputs.source_url }}"
           Expand-Archive -Path source.zip -DestinationPath ./project
         shell: pwsh
-      
 
-
-      # Normalize directory structure - ensure files are in project/source
       - name: Normalize source directory structure
         run: |
           if (Test-Path "./project/source") {
@@ -147,28 +140,6 @@ jobs:
           }
         shell: pwsh
 
-      # Normalize directory structure - ensure files are in project/source
-      - name: Normalize source directory structure
-        run: |
-          if (Test-Path "./project/source") {
-            Write-Host "Source directory found at ./project/source"
-          } elseif ((Get-ChildItem ./project -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
-            Write-Host "Source files in ./project root, moving to source subfolder"
-            New-Item -ItemType Directory -Force -Path "./project/source_temp" | Out-Null
-            Get-ChildItem ./project -Exclude source_temp | Move-Item -Destination ./project/source_temp -Force
-            Rename-Item ./project/source_temp ./project/source
-          } else {
-            $subfolders = Get-ChildItem ./project -Directory -ErrorAction SilentlyContinue
-            if ($subfolders.Count -eq 1) {
-              Rename-Item $subfolders[0].FullName ./project/source
-            } else {
-              Write-Host "ERROR: Could not determine source structure"
-              exit 1
-            }
-          }
-        shell: pwsh
-
-      # Update progress - Source downloaded
       - name: Update progress - Source downloaded
         run: |
           $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 15; stage = "Downloading source" } | ConvertTo-Json -Compress
@@ -200,7 +171,6 @@ jobs:
           }
         shell: pwsh
       
-      # Update progress - Dependencies installed
       - name: Update progress - Dependencies
         run: |
           $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 25; stage = "Installing dependencies" } | ConvertTo-Json -Compress
@@ -215,27 +185,22 @@ jobs:
       - name: Inject license wrapper (Python)
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          # Download the wrapper template from the repo
           $wrapperUrl = "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py"
           Invoke-WebRequest -Uri $wrapperUrl -OutFile wrapper_template.py
           
-          # Read wrapper and entry file
           $wrapper = Get-Content wrapper_template.py -Raw
           $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
           $entryPath = "project/source/${{ steps.prepare.outputs.entry_file }}"
           $originalCode = Get-Content $entryPath -Raw
           
-          # Replace placeholders in wrapper
           $wrapper = $wrapper -replace '__LICENSE_KEY__', $config.license_key
           $wrapper = $wrapper -replace '__API_URL__', $config.api_url
           
-          # Combine wrapper + original code
           $combined = $wrapper + "`n`n" + $originalCode
           Set-Content -Path $entryPath -Value $combined -Encoding UTF8
           Write-Host "Injected license wrapper into ${{ steps.prepare.outputs.entry_file }}"
         shell: pwsh
       
-      # Update progress - Wrapper injected
       - name: Update progress - Wrapper injected
         run: |
           $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 35; stage = "Injecting license protection" } | ConvertTo-Json -Compress
@@ -246,34 +211,19 @@ jobs:
           try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
         shell: pwsh
         continue-on-error: true
+
+      - name: Update progress - Compilation starting
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 45; stage = "Starting compilation" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
       
       - name: Compile with Nuitka
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 45; stage = "Starting compilation" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 45; stage = "Starting compilation" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
           cd project/source
@@ -294,7 +244,6 @@ jobs:
           pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
         shell: pwsh
       
-      # Update progress - Compilation done
       - name: Update progress - Compiled
         run: |
           $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 80; stage = "Compiling binary" } | ConvertTo-Json -Compress
@@ -305,34 +254,19 @@ jobs:
           try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
         shell: pwsh
         continue-on-error: true
+
+      - name: Update progress - Starting upload
+        run: |
+          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 85; stage = "Uploading artifact" } | ConvertTo-Json -Compress
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
+        shell: pwsh
+        continue-on-error: true
       
       - name: Upload to R2
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 85; stage = "Uploading artifact" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 85; stage = "Uploading artifact" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -366,7 +300,6 @@ jobs:
             error = if ($status -eq "failed") { "Compilation failed" } else { $null }
           } | ConvertTo-Json -Compress
           
-          # Create HMAC signature
           $secret = "${{ github.event.inputs.callback_secret }}"
           $hmac = New-Object System.Security.Cryptography.HMACSHA256
           $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
@@ -382,11 +315,9 @@ jobs:
   build-linux:
     if: contains(github.event.inputs.target_platforms, 'linux')
     runs-on: ubuntu-latest
-    # Dynamic timeout based on tier: enterprise=120min, others=60min
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
-      # Send progress update - Starting
       - name: Update progress - Starting
         run: |
           payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
@@ -409,7 +340,6 @@ jobs:
         with:
           node-version: '18'
       
-      # Cache pip packages for Python builds
       - name: Cache pip packages
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/cache@v4
@@ -419,7 +349,6 @@ jobs:
           restore-keys: |
             linux-pip-nuitka-
       
-      # Cache npm packages for Node.js builds
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
@@ -445,30 +374,6 @@ jobs:
           curl -L -o source.zip "${{ github.event.inputs.source_url }}"
           unzip source.zip -d ./project
 
-
-
-      # Normalize directory structure - ensure files are in project/source
-      - name: Normalize source directory structure
-        run: |
-          if [ -d "./project/source" ]; then
-            echo "Source directory found at ./project/source"
-          elif [ "$(find ./project -maxdepth 1 -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-            echo "Source files in ./project root, moving to source subfolder"
-            mkdir -p ./project/source
-            find ./project -maxdepth 1 -type f -exec mv {} ./project/source/ \;
-          else
-            subfolders=$(find ./project -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-            if [ "$subfolders" -eq 1 ]; then
-              subfolder=$(find ./project -maxdepth 1 -mindepth 1 -type d | head -1)
-              mv "$subfolder" ./project/source
-            else
-              echo "ERROR: Could not determine source structure"
-              ls -la ./project
-              exit 1
-            fi
-          fi
-
-      # Normalize directory structure - ensure files are in project/source
       - name: Normalize source directory structure
         run: |
           if [ -d "./project/source" ]; then
@@ -526,29 +431,17 @@ jobs:
           print('Injected license wrapper')
           "
 
+      - name: Update progress - Compilation starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":45,"stage":"Starting compilation"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+
       - name: Compile with Nuitka
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
           cd project/source
@@ -572,29 +465,17 @@ jobs:
           chmod +x "${{ steps.prepare.outputs.output_name }}"
           tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "${{ steps.prepare.outputs.output_name }}"
 
+      - name: Update progress - Starting upload
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+
       - name: Upload to R2
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -602,10 +483,8 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           cd project/source
-          # Find the tar.gz
           artifact=$(ls *.tar.gz | head -1)
           
-          # Install AWS CLI
           pip install awscli
           aws configure set aws_access_key_id $R2_ACCESS_KEY
           aws configure set aws_secret_access_key $R2_SECRET_KEY
@@ -644,11 +523,9 @@ jobs:
   build-macos:
     if: contains(github.event.inputs.target_platforms, 'macos')
     runs-on: macos-latest
-    # Dynamic timeout based on tier: enterprise=120min, others=60min
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
-      # Send progress update - Starting
       - name: Update progress - Starting
         run: |
           payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
@@ -671,7 +548,6 @@ jobs:
         with:
           node-version: '18'
       
-      # Cache pip packages for Python builds
       - name: Cache pip packages
         if: ${{ github.event.inputs.language == 'python' }}
         uses: actions/cache@v4
@@ -681,7 +557,6 @@ jobs:
           restore-keys: |
             macos-pip-nuitka-
       
-      # Cache npm packages for Node.js builds
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
@@ -704,30 +579,6 @@ jobs:
           curl -L -o source.zip "${{ github.event.inputs.source_url }}"
           unzip source.zip -d ./project
 
-
-
-      # Normalize directory structure - ensure files are in project/source
-      - name: Normalize source directory structure
-        run: |
-          if [ -d "./project/source" ]; then
-            echo "Source directory found at ./project/source"
-          elif [ "$(find ./project -maxdepth 1 -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-            echo "Source files in ./project root, moving to source subfolder"
-            mkdir -p ./project/source
-            find ./project -maxdepth 1 -type f -exec mv {} ./project/source/ \;
-          else
-            subfolders=$(find ./project -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-            if [ "$subfolders" -eq 1 ]; then
-              subfolder=$(find ./project -maxdepth 1 -mindepth 1 -type d | head -1)
-              mv "$subfolder" ./project/source
-            else
-              echo "ERROR: Could not determine source structure"
-              ls -la ./project
-              exit 1
-            fi
-          fi
-
-      # Normalize directory structure - ensure files are in project/source
       - name: Normalize source directory structure
         run: |
           if [ -d "./project/source" ]; then
@@ -785,29 +636,17 @@ jobs:
           print('Injected license wrapper')
           "
 
+      - name: Update progress - Compilation starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+
       - name: Compile with Nuitka
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-
-      # Update progress - Compilation starting
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
           cd project/source
@@ -833,35 +672,22 @@ jobs:
              zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}.app"
              echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
           else
-             # For pkg or binary
              chmod +x "${{ steps.prepare.outputs.output_name }}"
              zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}"
              echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
           fi
 
+      - name: Update progress - Starting upload
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":85,"stage":"Uploading artifact"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+
       - name: Upload to R2
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":85,"stage":"Uploading artifact"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-
-      # Update progress - Starting upload
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":85,"stage":"Uploading artifact"}'\n          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
