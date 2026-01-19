@@ -59,21 +59,15 @@ export function CloudBuildButton({
     setPlatformArtifacts({});
     
     try {
-      // Use multiplatform endpoint if multiple platforms, otherwise use standard
-      const endpoint = isMultiPlatform ? '/cloud-build/start-multiplatform' : '/cloud-build/start';
+      // Always use the same endpoint - backend handles both single and multi-platform
+      const endpoint = '/cloud-build/start';
       
+      // Backend expects target_platforms as an array always
       const payload = {
         project_id: projectId,
         license_id: licenseId,
+        target_platforms: targetPlatforms, // Always send as array
       };
-      
-      // Add target_platforms for multi-platform builds
-      if (isMultiPlatform) {
-        payload.target_platforms = targetPlatforms;
-      } else {
-        // For single platform, include the target
-        payload.target_platform = targetPlatforms[0] || 'windows';
-      }
       
       const response = await api.post(endpoint, payload);
       
