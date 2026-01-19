@@ -257,6 +257,7 @@ jobs:
       
       - name: Notify completion
         if: always()
+        continue-on-error: true
         run: |
           $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
           
@@ -433,6 +434,7 @@ jobs:
 
       - name: Notify completion
         if: always()
+        continue-on-error: true
         run: |
           if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
           
@@ -609,6 +611,7 @@ jobs:
 
       - name: Notify completion
         if: always()
+        continue-on-error: true
         run: |
           if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
           
