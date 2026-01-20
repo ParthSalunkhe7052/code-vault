@@ -1,9 +1,9 @@
 import React, { useRef, useState, useMemo, useCallback, memo } from 'react';
-import { Upload, Package, Loader, FileCode, X } from 'lucide-react';
+import { Upload, Package, Loader, FileCode, X, Cloud, ArrowUpCircle } from 'lucide-react';
 
 /**
- * Step1Upload - First step of the wizard - Optimized with memo
- * Handles single file or ZIP upload with drag-and-drop support
+ * Step1Upload - Redesigned for Mission Control
+ * "Hero" style upload area
  */
 const Step1Upload = memo(({
     onFileUpload,
@@ -72,165 +72,200 @@ const Step1Upload = memo(({
     const hasFiles = useMemo(() => files.length > 0 || fileTree, [files, fileTree]);
 
     return (
-        <div className="space-y-6">
-            <div className="text-center mb-6">
-                <h2 className="text-xl font-bold text-white mb-2">Upload Your Project</h2>
-                <p className="text-slate-400 text-sm">
-                    Upload your {langName} project as a ZIP file or individual files
+        <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto">
+            <div className="text-left">
+                <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Project Source</h2>
+                <p className="text-slate-400">
+                    Import your {langName} codebase. We support ZIP archives or direct file uploads.
                 </p>
             </div>
 
-            {/* Upload Type Selector */}
-            <div className="flex gap-3 mb-6">
-                <button
-                    type="button"
-                    onClick={toggleToZip}
-                    className={`flex-1 px-4 py-3 rounded-xl border transition-all ${uploadType === 'zip'
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                        : 'bg-white/5 border-white/10 text-slate-400 hover:border-indigo-500/50'
-                        }`}
-                >
-                    <Package size={20} className="inline mr-2" />
-                    📁 Entire Project (ZIP)
-                </button>
-                <button
-                    type="button"
-                    onClick={toggleToSingle}
-                    className={`flex-1 px-4 py-3 rounded-xl border transition-all ${uploadType === 'single'
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                        : 'bg-white/5 border-white/10 text-slate-400 hover:border-indigo-500/50'
-                        }`}
-                >
-                    <FileCode size={20} className="inline mr-2" />
-                    Single Files
-                </button>
-            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Left Column: Controls & Instructions */}
+                <div className="space-y-6">
+                    <div className="bg-white/5 rounded-2xl p-1 border border-white/10 flex">
+                        <button
+                            type="button"
+                            onClick={toggleToZip}
+                            className={`flex-1 px-4 py-3 rounded-xl transition-all font-medium text-sm flex items-center justify-center gap-2 ${uploadType === 'zip'
+                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20'
+                                : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                        >
+                            <Package size={18} />
+                            ZIP Archive
+                        </button>
+                        <button
+                            type="button"
+                            onClick={toggleToSingle}
+                            className={`flex-1 px-4 py-3 rounded-xl transition-all font-medium text-sm flex items-center justify-center gap-2 ${uploadType === 'single'
+                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20'
+                                : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                        >
+                            <FileCode size={18} />
+                            Files
+                        </button>
+                    </div>
 
-            {/* Upload Zone */}
-            {uploadType === 'zip' ? (
-                <div>
-                    <input
-                        ref={zipInputRef}
-                        type="file"
-                        accept=".zip"
-                        onChange={onZipUpload}
-                        className="hidden"
-                    />
-                    <div
-                        onClick={handleZipClick}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
-                        className="border-2 border-dashed border-white/20 rounded-2xl p-12 flex flex-col items-center justify-center text-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer group"
-                    >
-                        {uploadProgress ? (
-                            <div className="flex items-center gap-3 text-indigo-400">
-                                <Loader size={32} className="animate-spin" />
-                                <span className="text-lg">Uploading & extracting ZIP...</span>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                                    <Package size={40} className="text-slate-400 group-hover:text-indigo-400" />
-                                </div>
-                                <p className="text-lg text-slate-300 font-medium mb-2">
-                                    Drop your ZIP file here
-                                </p>
-                                <p className="text-sm text-slate-500 mb-4">
-                                    or click to browse
-                                </p>
-                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 text-left max-w-sm">
-                                    <p className="text-xs font-semibold text-blue-400 mb-2">📝 How to prepare:</p>
-                                    <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
-                                        <li>Put all project files in one folder</li>
-                                        <li>Include <code className="bg-white/10 px-1 rounded">{depFile}</code> if needed</li>
-                                        <li>Right-click → Send to → Compressed folder</li>
-                                    </ol>
-                                </div>
-                            </>
-                        )}
+                    <div className="bg-blue-500/5 border border-blue-500/10 rounded-2xl p-6">
+                        <h3 className="text-blue-400 font-semibold mb-3 flex items-center gap-2">
+                            <Cloud size={18} />
+                            Preparation Guide
+                        </h3>
+                        <ul className="space-y-3 text-sm text-slate-300">
+                            <li className="flex items-start gap-3">
+                                <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold mt-0.5">1</span>
+                                <span>Ensure all source files are in the root or structured folders.</span>
+                            </li>
+                            <li className="flex items-start gap-3">
+                                <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold mt-0.5">2</span>
+                                <span>Include <code className="bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">{depFile}</code> for auto-dependency detection.</span>
+                            </li>
+                            <li className="flex items-start gap-3">
+                                <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold mt-0.5">3</span>
+                                <span>Remove build artifacts (node_modules, venv, __pycache__) to save time.</span>
+                            </li>
+                        </ul>
                     </div>
                 </div>
-            ) : (
-                <div>
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept={isNodeJS
-                            ? ".js,.mjs,.cjs,.ts,.tsx,.jsx,.json,.yaml,.yml"
-                            : ".py,.pyw,.txt,.json,.yaml,.yml,.toml,.ini,.cfg"}
-                        onChange={onFileUpload}
-                        className="hidden"
-                    />
-                    <div
-                        onClick={handleFileClick}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
-                        className="border-2 border-dashed border-white/20 rounded-2xl p-12 flex flex-col items-center justify-center text-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer group"
-                    >
-                        {uploadProgress ? (
-                            <div className="flex items-center gap-3 text-indigo-400">
-                                <Loader size={32} className="animate-spin" />
-                                <span className="text-lg">Uploading files...</span>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                                    <Upload size={40} className="text-slate-400 group-hover:text-indigo-400" />
-                                </div>
-                                <p className="text-lg text-slate-300 font-medium mb-2">
-                                    Drop {langName} files here
-                                </p>
-                                <p className="text-sm text-slate-500">
-                                    or click to browse ({fileTypes})
-                                </p>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
 
-            {/* Uploaded Files Display */}
-            {files.length > 0 && !fileTree && (
-                <div className="space-y-2 mt-6">
-                    <label className="text-sm font-medium text-slate-400">
-                        Uploaded Files ({files.length})
-                    </label>
-                    <div className="max-h-48 overflow-y-auto space-y-2">
-                        {files.map((file) => (
+                {/* Right Column: Upload Zone (Spans 2 cols) */}
+                <div className="lg:col-span-2">
+                    {uploadType === 'zip' ? (
+                        <div className="h-full">
+                            <input
+                                ref={zipInputRef}
+                                type="file"
+                                accept=".zip"
+                                onChange={onZipUpload}
+                                className="hidden"
+                            />
                             <div
-                                key={file.id}
-                                className="flex items-center justify-between bg-white/5 rounded-lg p-3 border border-white/10"
+                                onClick={handleZipClick}
+                                onDragOver={handleDragOver}
+                                onDrop={handleDrop}
+                                className={`
+                                    h-80 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-center transition-all cursor-pointer group relative overflow-hidden
+                                    ${uploadProgress 
+                                        ? 'border-indigo-500/50 bg-indigo-500/5' 
+                                        : 'border-white/10 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-white/5'
+                                    }
+                                `}
                             >
-                                <div className="flex items-center gap-3">
-                                    <FileCode size={18} className="text-indigo-400" />
-                                    <div>
-                                        <p className="text-sm text-white font-medium">{file.original_filename}</p>
-                                        <p className="text-xs text-slate-500">{formatFileSize(file.file_size)}</p>
+                                {/* Background decoration */}
+                                <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                                {uploadProgress ? (
+                                    <div className="relative z-10 flex flex-col items-center gap-4">
+                                        <div className="relative">
+                                            <div className="w-20 h-20 rounded-full border-4 border-indigo-500/30 border-t-indigo-500 animate-spin" />
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <Cloud size={24} className="text-indigo-400" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-xl font-bold text-white mb-1">Uploading...</h3>
+                                            <p className="text-slate-400">Extracting project files</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="relative z-10 flex flex-col items-center gap-6 p-8">
+                                        <div className="w-24 h-24 rounded-full bg-indigo-500/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                            <ArrowUpCircle size={48} className="text-indigo-400" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-2xl font-bold text-white mb-2">Drop Project ZIP</h3>
+                                            <p className="text-slate-400">or click to browse</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="h-full flex flex-col">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                multiple
+                                accept={isNodeJS
+                                    ? ".js,.mjs,.cjs,.ts,.tsx,.jsx,.json,.yaml,.yml"
+                                    : ".py,.pyw,.txt,.json,.yaml,.yml,.toml,.ini,.cfg"}
+                                onChange={onFileUpload}
+                                className="hidden"
+                            />
+                            
+                            {!hasFiles && (
+                                <div
+                                    onClick={handleFileClick}
+                                    onDragOver={handleDragOver}
+                                    onDrop={handleDrop}
+                                    className="flex-1 h-80 border-2 border-dashed border-white/10 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-white/5 rounded-3xl flex flex-col items-center justify-center text-center transition-all cursor-pointer group"
+                                >
+                                    <div className="w-20 h-20 rounded-full bg-indigo-500/10 flex items-center justify-center group-hover:scale-110 transition-transform mb-4">
+                                        <FileCode size={40} className="text-indigo-400" />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-white mb-2">Select Source Files</h3>
+                                    <p className="text-slate-400">Drag & drop {fileTypes}</p>
+                                </div>
+                            )}
+
+                            {hasFiles && (
+                                <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden flex flex-col h-80">
+                                    <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+                                        <span className="font-semibold text-white">Files Ready ({files.length})</span>
+                                        <button 
+                                            onClick={handleFileClick}
+                                            className="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg hover:bg-indigo-500/30 transition-colors"
+                                        >
+                                            + Add More
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                                        {files.map((file) => (
+                                            <div
+                                                key={file.id}
+                                                className="flex items-center justify-between p-3 rounded-xl hover:bg-white/5 group transition-colors"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                                                        <FileCode size={16} />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-medium text-white">{file.original_filename}</p>
+                                                        <p className="text-xs text-slate-500">{formatFileSize(file.file_size)}</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleDeleteFile(file.id)}
+                                                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => handleDeleteFile(file.id)}
-                                    className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-                                >
-                                    <X size={16} />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
+                            )}
+                        </div>
+                    )}
                 </div>
-            )}
+            </div>
 
             {/* Success indicator */}
             {hasFiles && (
-                <div className="mt-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
-                    <p className="text-emerald-400 font-medium">
-                        ✓ {fileTree ? `${fileTree.total_files} files ready` : `${files.length} files uploaded`}
-                    </p>
-                    <p className="text-sm text-slate-400 mt-1">
-                        Click "Next" to review your project structure
-                    </p>
+                <div className="flex items-center justify-between p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl animate-in slide-in-from-bottom-2">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                            <Package size={20} />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-white">Project Uploaded</h4>
+                            <p className="text-sm text-emerald-400/70">
+                                {fileTree ? `${fileTree.total_files} files processed successfully` : `${files.length} files staged`}
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
