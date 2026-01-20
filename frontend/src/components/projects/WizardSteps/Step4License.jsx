@@ -42,11 +42,8 @@ const BrandingNotice = memo(({ isPro, canRemoveBranding }) => {
 BrandingNotice.displayName = 'BrandingNotice';
 
 /**
- * Step4License - Protection Settings - Optimized with memo
- * REDESIGNED: Now focuses on Generic Build workflow
- * - Generic Build: Customers enter keys at runtime
- * - Demo Mode: Trial period before requiring key
- * - No Protection: Unprotected build
+ * Step4License - Redesigned for Mission Control
+ * Uses Bento-style cards for selection
  */
 const Step4License = memo(({
     // Protection mode: 'generic' | 'demo' | 'none'
@@ -77,248 +74,222 @@ const Step4License = memo(({
     }, [setDemoDuration]);
 
     return (
-        <div className="space-y-6">
-            <div className="text-center mb-6">
-                <h2 className="text-xl font-bold text-white mb-2">Protection Settings</h2>
-                <p className="text-slate-400 text-sm">
-                    Choose how your app will be protected with license validation
+        <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto">
+            <div className="text-left">
+                <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Licensing & Protection</h2>
+                <p className="text-slate-400">
+                    Choose how your application will be distributed and protected.
                 </p>
             </div>
 
             {/* Branding Notice for Free/Pro tier */}
             <BrandingNotice isPro={isPro} canRemoveBranding={canRemoveBranding} />
 
-            {/* Protection Mode Options */}
-            <div className="space-y-3">
-                {/* Generic Build - Recommended */}
-                <label className={`
-                    block p-5 rounded-xl border-2 cursor-pointer transition-all
-                    ${protectionMode === 'generic'
-                        ? 'border-emerald-500 bg-emerald-500/10'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
-                    }
-                `}>
-                    <input
-                        type="radio"
-                        name="protectionMode"
-                        value="generic"
-                        checked={protectionMode === 'generic'}
-                        onChange={() => handleModeChange('generic')}
-                        className="hidden"
-                    />
-                    <div className="flex items-start gap-4">
-                        <div className={`
-                            w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0
-                            ${protectionMode === 'generic' ? 'bg-emerald-500/30' : 'bg-white/10'}
-                        `}>
-                            <Sparkles size={24} className={protectionMode === 'generic' ? 'text-emerald-400' : 'text-slate-400'} />
-                        </div>
-                        <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-white">Generic Build</h3>
-                                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded-full font-medium">
-                                    Recommended
-                                </span>
-                            </div>
-                            <p className="text-sm text-slate-400 mt-1">
-                                Build once, distribute to unlimited customers. Each customer enters their own license key when they run the app.
-                            </p>
-                            <div className="flex items-center gap-4 mt-3 text-xs text-emerald-400">
-                                <span className="flex items-center gap-1">
-                                    <Users size={14} />
-                                    Unlimited distribution
-                                </span>
-                                <span className="flex items-center gap-1">
-                                    <Key size={14} />
-                                    Runtime key entry
-                                </span>
-                            </div>
-                        </div>
-                        <div className={`
-                            w-5 h-5 rounded-full border-2 flex-shrink-0
-                            ${protectionMode === 'generic'
-                                ? 'border-emerald-500 bg-emerald-500'
-                                : 'border-slate-500'
-                            }
-                        `}>
-                            {protectionMode === 'generic' && (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <div className="w-2 h-2 rounded-full bg-white" />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </label>
-
-                {/* Demo/Trial Mode */}
-                <label className={`
-                    block p-5 rounded-xl border-2 cursor-pointer transition-all
-                    ${protectionMode === 'demo'
-                        ? 'border-amber-500 bg-amber-500/10'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
-                    }
-                `}>
-                    <input
-                        type="radio"
-                        name="protectionMode"
-                        value="demo"
-                        checked={protectionMode === 'demo'}
-                        onChange={() => handleModeChange('demo')}
-                        className="hidden"
-                    />
-                    <div className="flex items-start gap-4">
-                        <div className={`
-                            w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0
-                            ${protectionMode === 'demo' ? 'bg-amber-500/30' : 'bg-white/10'}
-                        `}>
-                            <Timer size={24} className={protectionMode === 'demo' ? 'text-amber-400' : 'text-slate-400'} />
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="font-semibold text-white">Demo / Trial Mode</h3>
-                            <p className="text-sm text-slate-400 mt-1">
-                                App works without a license for a limited time, then requires activation. Perfect for try-before-you-buy.
-                            </p>
-                        </div>
-                        <div className={`
-                            w-5 h-5 rounded-full border-2 flex-shrink-0
-                            ${protectionMode === 'demo'
-                                ? 'border-amber-500 bg-amber-500'
-                                : 'border-slate-500'
-                            }
-                        `}>
-                            {protectionMode === 'demo' && (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <div className="w-2 h-2 rounded-full bg-white" />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Demo Duration Selector */}
-                    {protectionMode === 'demo' && (
-                        <div className="mt-4 pt-4 border-t border-amber-500/20">
-                            <label className="text-sm text-slate-300 mb-2 block">Trial Duration:</label>
-                            <select
-                                value={demoDuration}
-                                onChange={(e) => handleDemoDurationChange(e.target.value)}
-                                className="w-full px-3 py-2 bg-black/30 border border-amber-500/30 rounded-lg text-white focus:outline-none focus:border-amber-500"
-                            >
-                                <option value="30">30 minutes</option>
-                                <option value="60">1 hour</option>
-                                <option value="120">2 hours</option>
-                                <option value="240">4 hours</option>
-                                <option value="1440">24 hours (1 day)</option>
-                                <option value="4320">3 days</option>
-                                <option value="10080">7 days</option>
-                                <option value="20160">14 days</option>
-                                <option value="43200">30 days</option>
-                            </select>
-                            <p className="text-xs text-amber-400/70 mt-2">
-                                After trial expires, user will need to enter a license key to continue using the app.
-                            </p>
+            {/* Protection Mode Options - 3 Column Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* 1. Generic Build - Hero Card */}
+                <div 
+                    onClick={() => handleModeChange('generic')}
+                    className={`
+                        relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 group
+                        ${protectionMode === 'generic'
+                            ? 'border-emerald-500 bg-emerald-500/10 scale-[1.02] shadow-xl shadow-emerald-500/10'
+                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        }
+                    `}
+                >
+                     {protectionMode === 'generic' && (
+                        <div className="absolute top-0 right-0 p-3">
+                             <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg">
+                                <CheckCircle size={14} className="text-white" />
+                             </div>
                         </div>
                     )}
-                </label>
+                    
+                    <div className="p-6 h-full flex flex-col">
+                        <div className={`
+                            w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-colors
+                            ${protectionMode === 'generic' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-white/10 text-slate-400'}
+                        `}>
+                            <Key size={28} />
+                        </div>
 
-                {/* No Protection */}
-                <label className={`
-                    block p-5 rounded-xl border-2 cursor-pointer transition-all
-                    ${protectionMode === 'none'
-                        ? 'border-red-500 bg-red-500/10'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
-                    }
-                `}>
-                    <input
-                        type="radio"
-                        name="protectionMode"
-                        value="none"
-                        checked={protectionMode === 'none'}
-                        onChange={() => handleModeChange('none')}
-                        className="hidden"
-                    />
-                    <div className="flex items-start gap-4">
-                        <div className={`
-                            w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0
-                            ${protectionMode === 'none' ? 'bg-red-500/30' : 'bg-white/10'}
-                        `}>
-                            <Unlock size={24} className={protectionMode === 'none' ? 'text-red-400' : 'text-slate-400'} />
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="font-semibold text-white">No Protection</h3>
-                            <p className="text-sm text-slate-400 mt-1">
-                                Anyone can run the app without a license key. No validation required.
-                            </p>
-                            {protectionMode === 'none' && (
-                                <p className="text-xs text-red-400 mt-2">
-                                    ⚠️ Your app will have no license protection
-                                </p>
-                            )}
-                        </div>
-                        <div className={`
-                            w-5 h-5 rounded-full border-2 flex-shrink-0
-                            ${protectionMode === 'none'
-                                ? 'border-red-500 bg-red-500'
-                                : 'border-slate-500'
-                            }
-                        `}>
-                            {protectionMode === 'none' && (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <div className="w-2 h-2 rounded-full bg-white" />
-                                </div>
-                            )}
+                        <h3 className="text-xl font-bold text-white mb-2">Standard License</h3>
+                        <p className="text-sm text-slate-400 mb-6 flex-1">
+                            Distribute one build. Customers activate it with their unique license key at runtime.
+                        </p>
+
+                        <div className="space-y-2">
+                             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                <CheckCircle size={12} className="text-emerald-500" />
+                                <span>Unlimited Users</span>
+                             </div>
+                             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                <CheckCircle size={12} className="text-emerald-500" />
+                                <span>HWID Locking</span>
+                             </div>
+                             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                <CheckCircle size={12} className="text-emerald-500" />
+                                <span>Offline Access</span>
+                             </div>
                         </div>
                     </div>
-                </label>
+                </div>
+
+                {/* 2. Demo Mode */}
+                <div 
+                    onClick={() => handleModeChange('demo')}
+                    className={`
+                        relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 group
+                        ${protectionMode === 'demo'
+                            ? 'border-amber-500 bg-amber-500/10 scale-[1.02] shadow-xl shadow-amber-500/10'
+                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        }
+                    `}
+                >
+                    {protectionMode === 'demo' && (
+                        <div className="absolute top-0 right-0 p-3">
+                             <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center shadow-lg">
+                                <CheckCircle size={14} className="text-white" />
+                             </div>
+                        </div>
+                    )}
+
+                    <div className="p-6 h-full flex flex-col">
+                        <div className={`
+                            w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-colors
+                            ${protectionMode === 'demo' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30' : 'bg-white/10 text-slate-400'}
+                        `}>
+                            <Timer size={28} />
+                        </div>
+
+                        <h3 className="text-xl font-bold text-white mb-2">Time-Limited Trial</h3>
+                        <p className="text-sm text-slate-400 mb-6 flex-1">
+                            Users can run the app freely for a set duration, then must purchase a key to continue.
+                        </p>
+
+                        {protectionMode === 'demo' ? (
+                             <div className="bg-amber-500/20 rounded-xl p-3 border border-amber-500/30 animate-in fade-in slide-in-from-bottom-2">
+                                <label className="text-xs font-bold text-amber-200 uppercase tracking-wider mb-1 block">Trial Duration</label>
+                                <select
+                                    value={demoDuration}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => handleDemoDurationChange(e.target.value)}
+                                    className="w-full bg-black/30 text-white text-sm rounded-lg px-2 py-2 border border-white/10 focus:outline-none focus:border-amber-500"
+                                >
+                                    <option value="30">30 Minutes</option>
+                                    <option value="60">1 Hour</option>
+                                    <option value="120">2 Hours</option>
+                                    <option value="1440">1 Day</option>
+                                    <option value="10080">7 Days</option>
+                                    <option value="43200">30 Days</option>
+                                </select>
+                             </div>
+                        ) : (
+                            <div className="mt-auto pt-4 border-t border-white/5">
+                                <span className="text-xs font-medium text-slate-500">Ideal for Shareware / Demos</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* 3. No Protection */}
+                <div 
+                    onClick={() => handleModeChange('none')}
+                    className={`
+                        relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 group
+                        ${protectionMode === 'none'
+                            ? 'border-red-500 bg-red-500/10 scale-[1.02] shadow-xl shadow-red-500/10'
+                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        }
+                    `}
+                >
+                     {protectionMode === 'none' && (
+                        <div className="absolute top-0 right-0 p-3">
+                             <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center shadow-lg">
+                                <CheckCircle size={14} className="text-white" />
+                             </div>
+                        </div>
+                    )}
+
+                    <div className="p-6 h-full flex flex-col">
+                        <div className={`
+                            w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-colors
+                            ${protectionMode === 'none' ? 'bg-red-500 text-white shadow-lg shadow-red-500/30' : 'bg-white/10 text-slate-400'}
+                        `}>
+                            <Unlock size={28} />
+                        </div>
+
+                        <h3 className="text-xl font-bold text-white mb-2">Unprotected</h3>
+                        <p className="text-sm text-slate-400 mb-6 flex-1">
+                            No license key required. The executable can be run by anyone, anywhere.
+                        </p>
+
+                        <div className="mt-auto p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2">
+                            <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                            <p className="text-xs text-red-200">
+                                Warning: This removes all piracy protection. Only use for free tools.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {/* How It Works - Educational Panel */}
-            {protectionMode === 'generic' && (
-                <div className="bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 rounded-xl p-5">
-                    <div className="flex items-center gap-2 mb-4">
-                        <Info size={18} className="text-emerald-400" />
-                        <h4 className="font-semibold text-white">How Generic Build Works</h4>
-                    </div>
-                    <div className="space-y-3">
-                        <div className="flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">1</div>
-                            <p className="text-sm text-slate-300"><strong className="text-white">Build your app</strong> — Creates a protected .exe file</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">2</div>
-                            <p className="text-sm text-slate-300"><strong className="text-white">Create license keys</strong> — Go to Licenses page → Generate keys for each customer</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">3</div>
-                            <p className="text-sm text-slate-300"><strong className="text-white">Distribute</strong> — Send the .exe and license key to your customer</p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">4</div>
-                            <p className="text-sm text-slate-300"><strong className="text-white">Customer activates</strong> — They enter the key when running the app</p>
-                        </div>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-emerald-500/20 text-xs text-slate-400">
-                        💡 The key is saved locally after first use, so customers only need to enter it once.
-                    </div>
-                </div>
-            )}
+            {/* How It Works - Educational Panel (Bottom) */}
+             <div className="mt-8 bg-white/5 border border-white/10 rounded-2xl p-6">
+                 <h4 className="font-bold text-white mb-4 flex items-center gap-2">
+                    <Info size={18} className="text-indigo-400" />
+                    Workflow Preview
+                </h4>
+                
+                {protectionMode === 'generic' && (
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm relative">
+                         {/* Connecting Line (Desktop) */}
+                        <div className="hidden md:block absolute top-1/2 left-10 right-10 h-0.5 bg-white/5 -z-0" />
 
-            {protectionMode === 'demo' && (
-                <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-xl p-5">
-                    <div className="flex items-center gap-2 mb-4">
-                        <Info size={18} className="text-amber-400" />
-                        <h4 className="font-semibold text-white">How Trial Mode Works</h4>
+                        <div className="relative z-10 bg-gray-900 px-4 py-2 rounded-xl border border-white/10 text-center w-full md:w-auto">
+                            <span className="block text-xs text-slate-500 mb-1">Step 1</span>
+                            <span className="text-emerald-400 font-bold">Build .exe</span>
+                        </div>
+                         <div className="hidden md:block text-slate-600"><ArrowRight size={16} /></div>
+                        <div className="relative z-10 bg-gray-900 px-4 py-2 rounded-xl border border-white/10 text-center w-full md:w-auto">
+                            <span className="block text-xs text-slate-500 mb-1">Step 2</span>
+                            <span className="text-white font-bold">Generate Keys</span>
+                        </div>
+                         <div className="hidden md:block text-slate-600"><ArrowRight size={16} /></div>
+                        <div className="relative z-10 bg-gray-900 px-4 py-2 rounded-xl border border-white/10 text-center w-full md:w-auto">
+                            <span className="block text-xs text-slate-500 mb-1">Step 3</span>
+                            <span className="text-white font-bold">Send to User</span>
+                        </div>
+                         <div className="hidden md:block text-slate-600"><ArrowRight size={16} /></div>
+                        <div className="relative z-10 bg-gray-900 px-4 py-2 rounded-xl border border-white/10 text-center w-full md:w-auto">
+                            <span className="block text-xs text-slate-500 mb-1">Step 4</span>
+                            <span className="text-indigo-400 font-bold">Activation</span>
+                        </div>
                     </div>
-                    <div className="space-y-2 text-sm text-slate-300">
-                        <p>• Customer runs the app → Trial timer starts</p>
-                        <p>• App works fully during trial period</p>
-                        <p>• After trial expires → License key prompt appears</p>
-                        <p>• Customer enters key to unlock permanently</p>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-amber-500/20 text-xs text-slate-400">
-                        💡 Great for "try before you buy" software distribution model.
-                    </div>
-                </div>
-            )}
+                )}
+
+                 {protectionMode === 'demo' && (
+                     <div className="flex items-center gap-4 text-sm text-slate-400">
+                        <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">!</div>
+                        <p>
+                            Users will enjoy <span className="text-white font-bold">{demoDuration < 60 ? `${demoDuration} minutes` : `${demoDuration/60} hours`}</span> of full access. 
+                            When the timer hits zero, the app locks instantly and requests a purchased license key.
+                        </p>
+                     </div>
+                )}
+
+                {protectionMode === 'none' && (
+                     <div className="flex items-center gap-4 text-sm text-slate-400">
+                        <div className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-bold">!</div>
+                        <p>
+                            Your application will have <span className="text-white font-bold">zero restrictions</span>. 
+                            It can be copied, shared, and run on unlimited devices without your permission.
+                        </p>
+                     </div>
+                )}
+            </div>
         </div>
     );
 });

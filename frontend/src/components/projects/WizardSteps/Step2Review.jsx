@@ -1,10 +1,9 @@
 import React, { useMemo, memo } from 'react';
-import { FolderTree, FileCode, Package, CheckCircle, AlertCircle } from 'lucide-react';
+import { FolderTree, FileCode, Package, CheckCircle, AlertCircle, FileText, Layers, GitBranch } from 'lucide-react';
 
 /**
- * Step2Review - Optimized with memo
- * Review the project structure after upload
- * Shows file tree, detected entry point, and dependencies
+ * Step2Review - Redesigned for Mission Control
+ * Full-height file tree and improved typography
  */
 const Step2Review = memo(({ fileTree, files = [], entryPoint, entryPointConfidence, onEntryPointChange }) => {
     const hasFileTree = useMemo(() => fileTree && fileTree.files && fileTree.files.length > 0, [fileTree]);
@@ -17,10 +16,12 @@ const Step2Review = memo(({ fileTree, files = [], entryPoint, entryPointConfiden
         }
     };
 
-    const getConfidenceIcon = (confidence) => {
-        return confidence === 'high' || confidence === 'medium'
-            ? <CheckCircle size={16} className={getConfidenceColor(confidence)} />
-            : <AlertCircle size={16} className={getConfidenceColor(confidence)} />;
+    const getConfidenceBg = (confidence) => {
+        switch (confidence) {
+            case 'high': return 'bg-emerald-500/10 border-emerald-500/20';
+            case 'medium': return 'bg-amber-500/10 border-amber-500/20';
+            default: return 'bg-red-500/10 border-red-500/20';
+        }
     };
 
     // Build folder structure for display - memoized
@@ -70,140 +71,159 @@ const Step2Review = memo(({ fileTree, files = [], entryPoint, entryPointConfiden
     }, [structure, entryPoint]);
 
     return (
-        <div className="space-y-6">
-            <div className="text-center mb-6">
-                <h2 className="text-xl font-bold text-white mb-2">Review Project Structure</h2>
-                <p className="text-slate-400 text-sm">
-                    Verify your project files and detected entry point
+        <div className="space-y-8 animate-in fade-in duration-500 h-full flex flex-col">
+            <div className="text-left shrink-0">
+                <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Structure Review</h2>
+                <p className="text-slate-400">
+                    We've analyzed your project. Please confirm the structure and entry point detection.
                 </p>
             </div>
 
-            {/* File Tree Display */}
-            {hasFileTree && (
-                <div className="bg-white/5 rounded-xl border border-white/10 p-4">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                            <FolderTree size={20} className="text-indigo-400" />
-                            <h3 className="font-semibold text-white">Project Structure</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
+                
+                {/* Left Column: File Tree (Scrollable) */}
+                <div className="lg:col-span-2 bg-white/5 rounded-2xl border border-white/10 flex flex-col overflow-hidden h-[500px] lg:h-auto">
+                    <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+                         <div className="flex items-center gap-3">
+                            <FolderTree size={18} className="text-indigo-400" />
+                            <h3 className="font-bold text-white">Project Files</h3>
                         </div>
-                        <span className="text-xs text-slate-400 bg-white/10 px-2 py-1 rounded">
-                            {fileTree.total_files} files
+                        <span className="text-xs font-mono text-slate-400 bg-black/20 px-2 py-1 rounded">
+                            {fileTree?.total_files || files.length} files
                         </span>
                     </div>
 
-                    <div className="font-mono text-sm max-h-64 overflow-y-auto space-y-1">
-                        {/* Root files first */}
-                        {renderData?.rootFiles.map(({ key, file, isEntry }) => (
-                            <div
-                                key={key}
-                                className={`flex items-center gap-2 pl-2 py-1 rounded ${isEntry
-                                    ? 'bg-emerald-500/20 text-emerald-400'
-                                    : 'text-slate-300'
-                                    }`}
-                            >
-                                <FileCode size={14} />
-                                <span>{file}</span>
-                                {isEntry && (
-                                    <span className="text-xs bg-emerald-500/30 px-2 py-0.5 rounded ml-2">
-                                        Entry Point
+                    {hasFileTree ? (
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-black/20">
+                            <div className="space-y-1 font-mono text-sm">
+                                {/* Root files */}
+                                {renderData?.rootFiles.map(({ key, file, isEntry }) => (
+                                    <div
+                                        key={key}
+                                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${isEntry
+                                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/10'
+                                            : 'text-slate-300 hover:bg-white/5'
+                                            }`}
+                                    >
+                                        <FileCode size={14} className={isEntry ? 'text-emerald-400' : 'text-slate-500'} />
+                                        <span>{file}</span>
+                                        {isEntry && (
+                                            <span className="ml-auto text-[10px] uppercase font-bold tracking-wider bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-300">
+                                                Entry Point
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+
+                                {/* Folders */}
+                                {renderData?.folders.map(({ key, folder, files, hasMore, moreCount }) => (
+                                    <div key={key} className="mt-4">
+                                        <div className="flex items-center gap-2 text-amber-400 px-3 mb-2 font-bold opacity-80">
+                                            <Package size={14} />
+                                            <span>{folder}/</span>
+                                        </div>
+                                        <div className="pl-4 border-l border-white/10 ml-4 space-y-1">
+                                            {files.map((file, i) => {
+                                                const fullPath = `${folder}/${file}`;
+                                                const isEntry = fullPath === entryPoint;
+                                                return (
+                                                    <div
+                                                        key={`${key}-${i}`}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isEntry
+                                                            ? 'bg-emerald-500/20 text-emerald-400'
+                                                            : 'text-slate-400 hover:text-slate-300'
+                                                            }`}
+                                                    >
+                                                        <FileText size={12} />
+                                                        <span>{file}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                            {hasMore && (
+                                                <div className="text-slate-600 px-3 text-xs italic">
+                                                    + {moreCount} more files...
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                         files.length > 0 ? (
+                            <div className="flex-1 p-4 overflow-y-auto space-y-2">
+                                {files.map((file) => (
+                                    <div key={file.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                                        <FileCode size={18} className="text-slate-400" />
+                                        <span className="text-slate-300 text-sm font-mono">{file.original_filename}</span>
+                                    </div>
+                                ))}
+                            </div>
+                         ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4">
+                                <AlertCircle size={48} className="opacity-20" />
+                                <p>No files loaded</p>
+                            </div>
+                         )
+                    )}
+                </div>
+
+                {/* Right Column: Analysis Cards */}
+                <div className="space-y-6 flex flex-col">
+                    
+                    {/* Entry Point Analysis */}
+                    <div className={`rounded-2xl border p-6 ${getConfidenceBg(entryPointConfidence)}`}>
+                        <div className="flex items-center gap-3 mb-4">
+                            <GitBranch size={20} className={getConfidenceColor(entryPointConfidence)} />
+                            <h3 className="font-bold text-white">Entry Detection</h3>
+                        </div>
+                        
+                        <div className="mb-4">
+                            <p className="text-xs text-slate-400 mb-1 uppercase tracking-wider font-semibold">Detected Main File</p>
+                            <div className="bg-black/30 rounded-xl p-3 font-mono text-sm text-white border border-white/10 flex items-center justify-between">
+                                {entryPoint || 'None detected'}
+                                {entryPointConfidence === 'high' && <CheckCircle size={16} className="text-emerald-500" />}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                             <span className="text-slate-400">Confidence Score</span>
+                             <span className={`font-bold px-2 py-1 rounded bg-black/20 ${getConfidenceColor(entryPointConfidence)} uppercase`}>
+                                {entryPointConfidence || 'N/A'}
+                             </span>
+                        </div>
+                    </div>
+
+                    {/* Dependencies Analysis */}
+                    {fileTree?.dependencies?.has_requirements && (
+                        <div className="bg-white/5 rounded-2xl border border-white/10 p-6 flex-1">
+                            <div className="flex items-center gap-3 mb-4">
+                                <Layers size={20} className="text-blue-400" />
+                                <div>
+                                    <h3 className="font-bold text-white">Dependencies</h3>
+                                    <p className="text-xs text-slate-400">{fileTree.dependencies.python.length} packages identified</p>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 content-start h-full max-h-60 overflow-y-auto custom-scrollbar">
+                                {fileTree.dependencies.python.slice(0, 15).map((dep, i) => (
+                                    <span
+                                        key={i}
+                                        className="px-3 py-1.5 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded-lg text-xs font-mono"
+                                    >
+                                        {dep}
+                                    </span>
+                                ))}
+                                {fileTree.dependencies.python.length > 15 && (
+                                    <span className="px-3 py-1.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs">
+                                        +{fileTree.dependencies.python.length - 15} more
                                     </span>
                                 )}
                             </div>
-                        ))}
-
-                        {/* Folders */}
-                        {renderData?.folders.map(({ key, folder, files, hasMore, moreCount }) => (
-                            <div key={key} className="mt-2">
-                                <div className="flex items-center gap-2 text-amber-400 pl-2">
-                                    <Package size={14} />
-                                    <span>{folder}/</span>
-                                </div>
-                                {files.map((file, i) => {
-                                    const fullPath = `${folder}/${file}`;
-                                    const isEntry = fullPath === entryPoint;
-                                    return (
-                                        <div
-                                            key={`${key}-${i}`}
-                                            className={`flex items-center gap-2 pl-6 py-0.5 ${isEntry
-                                                ? 'text-emerald-400'
-                                                : 'text-slate-400'
-                                                }`}
-                                        >
-                                            <FileCode size={12} />
-                                            <span>{file}</span>
-                                        </div>
-                                    );
-                                })}
-                                {hasMore && (
-                                    <div className="text-slate-500 pl-6 text-xs">
-                                        ... and {moreCount} more
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+                        </div>
+                    )}
                 </div>
-            )}
-
-            {/* Entry Point Detection */}
-            <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-xl border border-indigo-500/20 p-5">
-                <div className="flex items-center gap-3 mb-4">
-                    {getConfidenceIcon(entryPointConfidence)}
-                    <div>
-                        <h3 className="font-semibold text-white">Detected Entry Point</h3>
-                        <p className="text-xs text-slate-400">
-                            Confidence: <span className={getConfidenceColor(entryPointConfidence)}>{entryPointConfidence || 'low'}</span>
-                        </p>
-                    </div>
-                </div>
-
-                <div className="bg-white/5 rounded-lg p-3 font-mono text-emerald-400">
-                    {entryPoint || 'No entry point detected'}
-                </div>
-
-                {entryPointConfidence !== 'high' && (
-                    <p className="text-xs text-amber-400 mt-3">
-                        ⚠️ Detection confidence is not high. You can change this in the next step.
-                    </p>
-                )}
             </div>
-
-            {/* Dependencies */}
-            {fileTree?.dependencies?.has_requirements && (
-                <div className="bg-white/5 rounded-xl border border-white/10 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Package size={18} className="text-blue-400" />
-                        <h3 className="font-semibold text-white">Dependencies Found</h3>
-                        <span className="text-xs text-slate-400">
-                            ({fileTree.dependencies.python.length} packages)
-                        </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                        {fileTree.dependencies.python.slice(0, 10).map((dep, i) => (
-                            <span
-                                key={i}
-                                className="px-3 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg text-sm"
-                            >
-                                {dep}
-                            </span>
-                        ))}
-                        {fileTree.dependencies.python.length > 10 && (
-                            <span className="px-3 py-1.5 bg-slate-500/20 text-slate-400 rounded-lg text-sm">
-                                +{fileTree.dependencies.python.length - 10} more
-                            </span>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* No files warning */}
-            {!hasFileTree && files.length === 0 && (
-                <div className="text-center py-12 text-slate-400">
-                    <AlertCircle size={48} className="mx-auto mb-4 opacity-50" />
-                    <p>No files to review. Please go back and upload your project.</p>
-                </div>
-            )}
         </div>
     );
 });

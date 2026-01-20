@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
-import WizardStepIndicator from './WizardStepIndicator';
+import { X, ChevronLeft, ChevronRight, Maximize2, Minimize2 } from 'lucide-react';
+import WizardSidebar from './WizardSidebar';
 import { Step1Upload, Step2Review, Step3Configure, Step4License, Step5Build } from './WizardSteps';
 import PrerequisitesCheck from '../PrerequisitesCheck';
 import { useSettings } from '../../contexts/SettingsContext';
@@ -13,8 +13,10 @@ const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
 /**
  * ProjectWizard - Multi-step wizard for configuring and building projects
- * Replaces the old ConfigureProjectModal with a guided flow
+ * REDESIGN: "Mission Control" Full Screen Layout
  */
+import WizardErrorBoundary from './WizardErrorBoundary';
+
 const ProjectWizard = ({
     isOpen,
     onClose,
@@ -353,18 +355,9 @@ const ProjectWizard = ({
         if (currentStep < 5 && canProceed()) {
             // Auto-save config when leaving Step 3 (Configure) to persist settings
             if (currentStep === 3) {
-                if (import.meta.env.DEV) {
-                    console.log('[WIZARD] Auto-saving config when leaving Step 3');
-                }
                 try {
                     await onConfigSave();
-                    if (import.meta.env.DEV) {
-                        console.log('[WIZARD] Config saved successfully');
-                    }
                 } catch (error) {
-                    if (import.meta.env.DEV) {
-                        console.error('[WIZARD] Failed to auto-save config:', error);
-                    }
                     // Show user feedback for save failure
                     if (window.showToast) {
                         window.showToast('Failed to save configuration', 'error');
@@ -445,15 +438,8 @@ const ProjectWizard = ({
                     return;
                 }
 
-
-                // Use the entry file path as-is (it's a relative path from project root)
-                // This preserves subdirectory paths like "src/main.js"
                 let entryFileName = configData.entry_file || '';
 
-                // Smart path alignment: if the user selected a folder that's already
-                // part of the entry file path, extract just the remaining portion.
-                // E.g., if entry is "test_project/src/main.js" and user selected
-                //       "C:\...\test_project\src", we should look for just "main.js"
                 if (entryFileName && projectPath) {
                     // Normalize paths for comparison
                     const normalizedEntry = entryFileName.replace(/\\/g, '/');
@@ -468,9 +454,6 @@ const ProjectWizard = ({
                         if (normalizedEntry.startsWith(suffix + '/')) {
                             // Found overlap! Extract just the remaining file path
                             entryFileName = normalizedEntry.slice(suffix.length + 1);
-                            if (import.meta.env.DEV) {
-                                console.log(`Path alignment: adjusted entry from "${normalizedEntry}" to "${entryFileName}"`);
-                            }
                             break;
                         }
                     }
@@ -485,9 +468,7 @@ const ProjectWizard = ({
                 projectBuild.addLog(`📁 Project: ${projectPath}`);
                 projectBuild.addLog(`📄 Entry: ${entryFileName}`);
 
-                // Check if entry file exists in the selected folder before compiling
-                projectBuild.addLog('🔍 Checking if file exists...');
-
+                // Check if entry file exists
                 try {
                     const fileExists = await invoke('check_file_exists', {
                         projectPath: projectPath,
@@ -496,30 +477,17 @@ const ProjectWizard = ({
 
                     if (!fileExists) {
                         projectBuild.addLog(`❌ Entry file NOT found: ${entryFileName}`);
-                        projectBuild.addLog(`📌 Make sure you selected the correct folder containing your ${project?.language === 'nodejs' ? 'JavaScript' : 'Python'} files.`);
-                        projectBuild.addLog(`   Selected: ${projectPath}`);
-                        projectBuild.addLog(`   Looking for: ${entryFileName}`);
                         projectBuild.fail('Entry file not found');
                         return;
                     }
                     projectBuild.addLog('✅ Entry file found');
                 } catch (fsError) {
-                    // If fs check fails, try anyway (permission issues)
-                    if (import.meta.env.DEV) {
-                        console.warn('Could not check file existence:', fsError);
-                    }
                     projectBuild.addLog('⚠️ Could not verify file, attempting build anyway...');
                 }
 
-                // Use the new professional installer build system
-                // This calls the build orchestrator API which handles both portable and installer modes
                 const language = project?.language === 'nodejs' ? 'nodejs' : 'python';
                 const compilerName = language === 'nodejs' ? 'Node.js (pkg → NSIS)' : 'Python (Nuitka → NSIS)';
                 const outputBaseName = entryFileName.split(/[/\\]/).pop().replace(/\.(py|js|ts|mjs|cjs)$/, '') || 'output';
-
-                // Distribution settings now use the state variables from Step5Build
-                // (distributionType, createDesktopShortcut, createStartMenu, publisher)
-                // which the user can edit before building
 
                 projectBuild.addLog('🔧 Build System: Professional Installer');
                 projectBuild.addLog(`📦 Distribution: ${distributionType === 'installer' ? 'Windows Installer' : 'Portable Executable'}`);
@@ -545,19 +513,12 @@ const ProjectWizard = ({
                     }
                 });
 
-
-                // Note: Results come through the event listener above
-
             } else {
                 // Web mode - just save config, can't compile
                 projectBuild.addLog('⚠️ Compilation only available in desktop app.');
-                projectBuild.addLog('Use the CLI tool to build locally.');
                 projectBuild.complete('N/A - Web Mode');
             }
         } catch (error) {
-            if (import.meta.env.DEV) {
-                console.error('Build error:', error);
-            }
             projectBuild.addLog(`❌ Error: ${error.message || error}`);
             projectBuild.fail(error.message || String(error));
         }
@@ -572,23 +533,11 @@ const ProjectWizard = ({
     const handleClose = async () => {
         // Save config if we're on or past Step 3 (where settings are configured)
         if (currentStep >= 3 && configData.entry_file) {
-            if (import.meta.env.DEV) {
-                console.log('[WIZARD] Auto-saving config before closing');
-            }
             try {
                 await onConfigSave();
-                if (import.meta.env.DEV) {
-                    console.log('[WIZARD] Config saved before close');
-                }
             } catch (error) {
-                if (import.meta.env.DEV) {
-                    console.error('[WIZARD] Failed to save on close:', error);
-                }
-                // Show user feedback
                 if (window.showToast) {
                     window.showToast('Failed to save configuration', 'error');
-                } else {
-                    alert('Failed to save configuration. Changes may be lost.');
                 }
             }
         }
@@ -613,13 +562,11 @@ const ProjectWizard = ({
     // Handle stop/cancel build
     const handleStopBuild = async () => {
         if (!currentJobId) {
-            // For Tauri local builds, just update status via context
             projectBuild.cancel();
             return;
         }
 
         try {
-            // Call the server cancel endpoint
             const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/build/installer/${currentJobId}/cancel`, {
                 method: 'DELETE'
             });
@@ -628,10 +575,6 @@ const ProjectWizard = ({
                 projectBuild.cancel();
             }
         } catch (error) {
-            if (import.meta.env.DEV) {
-                console.error('Failed to cancel build:', error);
-            }
-            // Still mark as cancelled locally via context
             projectBuild.cancel();
         }
     };
@@ -757,86 +700,109 @@ const ProjectWizard = ({
     return (
         <>
             {createPortal(
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fade-in">
-                    {/* Removed backdrop-filter blur for better GPU performance */}
-                    {/* Click outside to close */}
-                    <div className="absolute inset-0" onClick={handleClose} />
-
-                    <div className="relative max-w-4xl w-full bg-gray-900 border border-white/15 rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-                        {/* Reduced effects for better performance */}
-                        {/* Header */}
-                        <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-white/5 to-transparent shrink-0">
-                            <h3 className="font-bold text-lg text-white">
-                                Configure Project: {project?.name || ''}
-                            </h3>
-                            <button
-                                onClick={handleClose}
-                                className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        {/* Step Indicator */}
-                        <div className="border-b border-white/10 shrink-0">
-                            <WizardStepIndicator
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in">
+                    {/* Full Screen Workspace "Mission Control" */}
+                    <div className="w-full h-full flex flex-row overflow-hidden">
+                        
+                        {/* Sidebar */}
+                        <aside className="w-72 bg-gray-950 border-r border-white/10 shrink-0 hidden md:block z-10">
+                            <WizardSidebar 
                                 currentStep={currentStep}
                                 completedSteps={completedSteps}
                             />
-                        </div>
+                        </aside>
 
-                        {/* Content */}
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {configLoading ? (
-                                <div className="flex items-center justify-center py-20">
-                                    <div className="rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" style={{ animation: 'spin 1s linear infinite' }} />
+                        {/* Main Content Area */}
+                        <main className="flex-1 flex flex-col relative z-0 bg-gray-900/50">
+                            {/* Background Texture/Effect */}
+                            <div className="absolute inset-0 pointer-events-none opacity-20"
+                                style={{
+                                    backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%)'
+                                }}
+                            />
+
+                            {/* Header */}
+                            <header className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-white/5 shrink-0 backdrop-blur-md z-10">
+                                <div>
+                                    <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                                        <span className="text-indigo-400">/</span>
+                                        {project?.name || 'Untitled Project'}
+                                    </h2>
                                 </div>
-                            ) : (
-                                renderStep()
-                            )}
-                        </div>
-
-                        {/* Footer Navigation */}
-                        <div className="flex items-center justify-between p-5 border-t border-white/10 bg-white/5 shrink-0">
-                            <button
-                                onClick={handleBack}
-                                disabled={currentStep === 1}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${currentStep === 1
-                                    ? 'text-slate-600 cursor-not-allowed'
-                                    : 'text-slate-400 hover:text-white hover:bg-white/10'
-                                    }`}
-                            >
-                                <ChevronLeft size={18} />
-                                Back
-                            </button>
-
-                            <div className="flex items-center gap-3">
-                                <span className="text-sm text-slate-400">
-                                    Step {currentStep} of 5
-                                </span>
-
-                                {currentStep < 5 ? (
-                                    <button
-                                        onClick={handleNext}
-                                        disabled={!canProceed()}
-                                        className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition-all ${canProceed()
-                                            ? 'bg-indigo-600 text-white hover:bg-indigo-500'
-                                            : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                            }`}
-                                    >
-                                        Next
-                                        <ChevronRight size={18} />
-                                    </button>
-                                ) : (
+                                <div className="flex items-center gap-3">
                                     <button
                                         onClick={handleClose}
-                                        className="px-5 py-2.5 rounded-lg font-medium bg-white/10 text-white hover:bg-white/20 transition-colors"
+                                        aria-label="Close Wizard"
+                                        className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all group"
+                                        title="Close Wizard"
                                     >
-                                        Done
+                                        <X size={20} className="group-hover:rotate-90 transition-transform" />
                                     </button>
-                                )}
+                                </div>
+                            </header>
+
+                            {/* Scrollable Content */}
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 lg:p-10">
+                                <div className="max-w-4xl mx-auto">
+                                    {configLoading ? (
+                                        <div className="flex flex-col items-center justify-center py-20">
+                                            <div className="rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-500 animate-spin" />
+                                            <p className="mt-4 text-slate-400">Loading configuration...</p>
+                                        </div>
+                                    ) : (
+                                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                            <WizardErrorBoundary>
+                                                {renderStep()}
+                                            </WizardErrorBoundary>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+
+                            {/* Footer / Action Bar */}
+                            <footer className="h-20 px-6 border-t border-white/10 bg-gray-950 flex items-center justify-between shrink-0 z-10">
+                                <button
+                                    onClick={handleBack}
+                                    disabled={currentStep === 1}
+                                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all ${currentStep === 1
+                                        ? 'text-slate-600 cursor-not-allowed'
+                                        : 'text-slate-400 hover:text-white hover:bg-white/10'
+                                        }`}
+                                >
+                                    <ChevronLeft size={18} />
+                                    Back
+                                </button>
+
+                                <div className="flex items-center gap-4">
+                                    {/* Step Counter (Mobile Only) */}
+                                    <span className="md:hidden text-sm text-slate-500">
+                                        Step {currentStep} / 5
+                                    </span>
+
+                                    {currentStep < 5 ? (
+                                        <button
+                                            onClick={handleNext}
+                                            disabled={!canProceed()}
+                                            aria-disabled={!canProceed()}
+                                            className={`flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-sm uppercase tracking-wide transition-all shadow-lg ${canProceed()
+                                                ? 'bg-indigo-600 text-white hover:bg-indigo-500 hover:shadow-indigo-500/25 hover:-translate-y-0.5'
+                                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                                }`}
+                                        >
+                                            Next Step
+                                            <ChevronRight size={18} />
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={handleClose}
+                                            className="flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-sm uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg hover:shadow-emerald-500/25 hover:-translate-y-0.5 transition-all"
+                                        >
+                                            Finish Setup
+                                        </button>
+                                    )}
+                                </div>
+                            </footer>
+                        </main>
                     </div>
                 </div>,
                 document.body
@@ -854,5 +820,5 @@ const ProjectWizard = ({
     );
 };
 
-export default ProjectWizard;
-
+const MemoizedProjectWizard = memo(ProjectWizard);
+export default MemoizedProjectWizard;

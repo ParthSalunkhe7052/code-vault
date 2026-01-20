@@ -126,15 +126,16 @@ jobs:
             Write-Host "Source directory found at ./project/source"
           } elseif ((Get-ChildItem ./project -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
             Write-Host "Source files in ./project root, moving to source subfolder"
-            New-Item -ItemType Directory -Force -Path "./project/source_temp" | Out-Null
-            Get-ChildItem ./project -Exclude source_temp | Move-Item -Destination ./project/source_temp -Force
-            Rename-Item ./project/source_temp ./project/source
+            New-Item -ItemType Directory -Force -Path "./project/source" | Out-Null
+            Get-ChildItem ./project -Exclude source | Move-Item -Destination "./project/source" -Force
           } else {
             $subfolders = Get-ChildItem ./project -Directory -ErrorAction SilentlyContinue
             if ($subfolders.Count -eq 1) {
-              Rename-Item $subfolders[0].FullName ./project/source
+              Move-Item -Path $subfolders[0].FullName -Destination "./project/source" -Force
             } else {
               Write-Host "ERROR: Could not determine source structure"
+              Write-Host "Contents of ./project:"
+              Get-ChildItem ./project -Force | Format-Table Name, Mode
               exit 1
             }
           }
