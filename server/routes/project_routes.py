@@ -10,11 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
 
 from database import get_db, release_db
-from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits, get_user_tier
-from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR
+from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits, get_user_tier, sanitize_filename
+from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR, validate_file_size, MAX_ZIP_SIZE
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from middleware.rate_limiter import RateLimitDependency
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -476,5 +477,261 @@ async def upload_project_zip(
 
         logging.error(f"Failed to process ZIP: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to process ZIP file")
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Presigned Upload Endpoints (Direct R2 Upload - Bypasses Backend Bandwidth)
+# =============================================================================
+
+class PresignedUploadRequest(BaseModel):
+    """Request model for presigned upload URL generation."""
+    filename: str
+    file_size: int
+    content_type: str = "application/zip"
+
+
+class PresignedUploadResponse(BaseModel):
+    """Response model for presigned upload URL."""
+    upload_url: str
+    key: str
+    expires_in: int
+    max_size: int
+
+
+class UploadCompleteRequest(BaseModel):
+    """Request model for upload completion notification."""
+    key: str
+    filename: str
+    file_size: int
+
+
+@router.post("/{project_id}/presigned-upload", response_model=PresignedUploadResponse)
+async def get_presigned_upload_url(
+    project_id: str,
+    data: PresignedUploadRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Generate a presigned URL for direct frontend → R2 upload.
+    
+    This bypasses the backend for large file transfers, reducing:
+    - Backend bandwidth usage
+    - Upload latency (direct to Cloudflare edge)
+    - Timeout risks on serverless platforms
+    
+    Flow:
+    1. Frontend requests presigned URL with file metadata
+    2. Backend validates ownership and generates presigned PUT URL
+    3. Frontend uploads directly to R2 using the presigned URL
+    4. Frontend calls /upload-complete to notify backend
+    """
+    conn = await get_db()
+    try:
+        # Validate project_id format
+        validate_project_id(project_id)
+        
+        # Verify project ownership
+        project = await conn.fetchrow(
+            "SELECT id, name FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Validate file size
+        is_zip = data.filename.lower().endswith('.zip')
+        is_valid, error_msg = validate_file_size(data.file_size, is_zip=is_zip)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Check if cloud storage is available
+        if not storage_service.is_cloud_enabled():
+            raise HTTPException(
+                status_code=503, 
+                detail="Cloud storage not configured. Use standard upload endpoint."
+            )
+        
+        # Generate unique key for the upload
+        safe_filename = sanitize_filename(data.filename)
+        key = f"uploads/{project_id}/direct/{secrets.token_hex(8)}_{safe_filename}"
+        
+        # Generate presigned PUT URL
+        try:
+            upload_url = storage_service.client.generate_presigned_url(
+                ClientMethod='put_object',
+                Params={
+                    'Bucket': storage_service.bucket,
+                    'Key': key,
+                    'ContentType': data.content_type,
+                },
+                ExpiresIn=3600,  # 1 hour
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {e}")
+            raise HTTPException(status_code=500, detail="Failed to generate upload URL")
+        
+        return PresignedUploadResponse(
+            upload_url=upload_url,
+            key=key,
+            expires_in=3600,
+            max_size=MAX_ZIP_SIZE if is_zip else 100 * 1024 * 1024,
+        )
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+    finally:
+        await release_db(conn)
+
+
+@router.post("/{project_id}/upload-complete")
+async def complete_presigned_upload(
+    project_id: str,
+    data: UploadCompleteRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Complete a presigned upload by processing the uploaded file.
+    
+    Called after frontend successfully uploads to R2 using presigned URL.
+    This endpoint:
+    1. Verifies the file exists in R2
+    2. Downloads and extracts if ZIP
+    3. Updates project settings with file structure
+    """
+    conn = await get_db()
+    try:
+        validate_project_id(project_id)
+        
+        project = await conn.fetchrow(
+            "SELECT id, name, language, settings FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Verify the file exists in R2
+        if not storage_service.is_cloud_enabled():
+            raise HTTPException(status_code=503, detail="Cloud storage not configured")
+        
+        try:
+            # Check file exists
+            storage_service.client.head_object(
+                Bucket=storage_service.bucket,
+                Key=data.key
+            )
+        except Exception:
+            raise HTTPException(status_code=404, detail="Uploaded file not found in storage")
+        
+        # If it's a ZIP file, download and extract it
+        if data.filename.lower().endswith('.zip'):
+            # Download from R2
+            response = storage_service.client.get_object(
+                Bucket=storage_service.bucket,
+                Key=data.key
+            )
+            content = response['Body'].read()
+            
+            # Process like standard ZIP upload
+            project_dir = safe_join(UPLOAD_DIR, project_id)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            
+            zip_path = safe_join(project_dir, "project.zip")
+            with open(zip_path, "wb") as f:
+                f.write(content)
+            
+            source_dir = safe_join(project_dir, "source")
+            if source_dir.exists():
+                shutil.rmtree(source_dir)
+            source_dir.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    # Validate paths for Zip Slip protection
+                    for member in zip_ref.namelist():
+                        member_path = (source_dir / member).resolve()
+                        if not str(member_path).startswith(str(source_dir.resolve())):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Invalid ZIP: contains path traversal attempt"
+                            )
+                    zip_ref.extractall(source_dir)
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid ZIP file")
+            
+            language = project["language"] or "python"
+            
+            if language == "nodejs":
+                file_tree = scan_nodejs_project_structure(source_dir)
+            else:
+                file_tree = scan_project_structure(source_dir)
+            
+            if file_tree["total_files"] == 0:
+                lang_name = "JavaScript/TypeScript" if language == "nodejs" else "Python"
+                raise HTTPException(
+                    status_code=400, detail=f"No {lang_name} files found in ZIP"
+                )
+            
+            # Update project settings
+            settings = project["settings"] or {}
+            if isinstance(settings, str):
+                settings = json.loads(settings) if settings else {}
+            
+            settings["file_tree"] = file_tree
+            settings["is_multi_folder"] = True
+            settings["zip_uploaded_at"] = utc_now().isoformat()
+            settings["upload_method"] = "presigned_direct"
+            
+            await conn.execute(
+                "UPDATE projects SET settings = $1, updated_at = NOW() WHERE id = $2",
+                json.dumps(settings),
+                project_id,
+            )
+            
+            # Clean up
+            zip_path.unlink()
+            
+            # Optionally delete the R2 temp file (keep for debugging initially)
+            # storage_service.client.delete_object(Bucket=storage_service.bucket, Key=data.key)
+            
+            return {
+                "success": True,
+                "file_count": file_tree["total_files"],
+                "structure": file_tree,
+                "message": f"Successfully processed {file_tree['total_files']} files via direct upload",
+                "upload_method": "presigned_direct",
+            }
+        else:
+            # Non-ZIP file - just record it in project_files
+            file_id = secrets.token_hex(16)
+            await conn.execute(
+                """
+                INSERT INTO project_files (id, project_id, filename, original_filename, file_path, file_size, is_cloud)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                file_id,
+                project_id,
+                Path(data.key).name,
+                data.filename,
+                data.key,
+                data.file_size,
+                True,  # is_cloud = True for R2 files
+            )
+            
+            return {
+                "success": True,
+                "file_id": file_id,
+                "message": f"File '{data.filename}' uploaded successfully via direct upload",
+                "upload_method": "presigned_direct",
+            }
+    except HTTPException:
+        raise
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+    except Exception as e:
+        logger.error(f"Failed to complete presigned upload: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to process uploaded file")
     finally:
         await release_db(conn)

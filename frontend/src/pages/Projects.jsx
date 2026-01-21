@@ -261,7 +261,18 @@ const Projects = () => {
 
         setUploadProgress(true);
         try {
-            const result = await projectApi.uploadZip(selectedProject.id, file);
+            // Use smart upload: direct R2 for large files, standard for small
+            // This bypasses backend bandwidth for files > 10MB
+            const result = await projectApi.uploadZipSmart(
+                selectedProject.id, 
+                file,
+                (progress) => {
+                    // Progress callback - could be used for UI feedback
+                    if (import.meta.env.DEV) {
+                        console.log(`Upload progress: ${progress}%`);
+                    }
+                }
+            );
 
             setConfigData(prev => ({
                 ...prev,
@@ -270,7 +281,9 @@ const Projects = () => {
                 files: [] // Clear individual files when ZIP is uploaded
             }));
 
-            toast.success(`✅ Uploaded ${result.file_count} files from ZIP!`);
+            // Show upload method in dev mode
+            const uploadMethod = result.upload_method === 'presigned_direct' ? '(Direct Upload)' : '';
+            toast.success(`✅ Uploaded ${result.file_count} files from ZIP! ${uploadMethod}`);
         } catch (error) {
             console.error('Failed to upload ZIP:', error);
             toast.error('Failed to upload ZIP: ' + (error.response?.data?.detail || error.message));

@@ -40,10 +40,16 @@ let cachedToken = null;
 // Detect if running in Tauri desktop app
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
-// In Tauri, we need the full URL since there's no Vite proxy
-// In browser dev mode, use relative path (Vite proxy handles it)
-const API_BASE_URL = isTauri
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1`  // Direct to backend server
+// Detect if VITE_API_URL is explicitly set (production deployment)
+const hasExplicitApiUrl = import.meta.env.VITE_API_URL && 
+    import.meta.env.VITE_API_URL !== 'http://localhost:8000';
+
+// API Base URL Logic:
+// 1. Tauri desktop app: Use full URL (no proxy available)
+// 2. Production build with VITE_API_URL: Use full URL (Vercel → Digital Ocean)
+// 3. Local development: Use relative path (Vite proxy handles it)
+const API_BASE_URL = (isTauri || hasExplicitApiUrl)
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1`  // Full URL
     : '/api/v1';                       // Vite proxy in dev
 
 const api = axios.create({
@@ -162,6 +168,111 @@ export const projects = {
     },
     listFiles: (id) => api.get(`/projects/${id}/files`).then(res => res.data),
     deleteFile: (projectId, fileId) => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),
+    
+    // ==========================================================================
+    // Presigned Direct Upload (Bypasses backend for large files → Direct to R2)
+    // ==========================================================================
+    
+    /**
+     * Upload a ZIP file directly to R2 storage using presigned URL.
+     * This is faster and doesn't consume backend bandwidth.
+     * 
+     * @param {string} id - Project ID
+     * @param {File} file - ZIP file to upload
+     * @param {function} onProgress - Optional progress callback (0-100)
+     * @returns {Promise<object>} Upload result with file structure
+     */
+    uploadZipDirect: async (id, file, onProgress = null) => {
+        // Step 1: Get presigned URL from backend
+        const presignedResponse = await api.post(`/projects/${id}/presigned-upload`, {
+            filename: file.name,
+            file_size: file.size,
+            content_type: file.type || 'application/zip',
+        });
+        
+        const { upload_url, key, max_size } = presignedResponse.data;
+        
+        // Validate file size against server limit
+        if (file.size > max_size) {
+            throw new Error(`File size (${(file.size / 1024 / 1024).toFixed(1)} MB) exceeds limit (${(max_size / 1024 / 1024).toFixed(0)} MB)`);
+        }
+        
+        // Step 2: Upload directly to R2 using presigned URL
+        // Use XMLHttpRequest for progress tracking
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.addEventListener('progress', (event) => {
+                if (event.lengthComputable && onProgress) {
+                    const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    onProgress(percentComplete);
+                }
+            });
+            
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve();
+                } else {
+                    reject(new Error(`Upload failed with status ${xhr.status}`));
+                }
+            });
+            
+            xhr.addEventListener('error', () => {
+                reject(new Error('Upload failed - network error'));
+            });
+            
+            xhr.addEventListener('abort', () => {
+                reject(new Error('Upload cancelled'));
+            });
+            
+            xhr.open('PUT', upload_url);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/zip');
+            xhr.send(file);
+        });
+        
+        // Step 3: Notify backend that upload is complete
+        const completeResponse = await api.post(`/projects/${id}/upload-complete`, {
+            key: key,
+            filename: file.name,
+            file_size: file.size,
+        });
+        
+        return completeResponse.data;
+    },
+    
+    /**
+     * Smart upload: Automatically choose between direct (presigned) and standard upload
+     * based on file size and cloud storage availability.
+     * 
+     * @param {string} id - Project ID  
+     * @param {File} file - ZIP file to upload
+     * @param {function} onProgress - Optional progress callback (0-100)
+     * @returns {Promise<object>} Upload result
+     */
+    uploadZipSmart: async (id, file, onProgress = null) => {
+        // Use direct upload for files > 10MB (faster, bypasses backend)
+        const DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024; // 10MB
+        
+        if (file.size > DIRECT_UPLOAD_THRESHOLD) {
+            try {
+                return await projects.uploadZipDirect(id, file, onProgress);
+            } catch (error) {
+                // If presigned upload fails (e.g., R2 not configured), fall back to standard
+                if (error.response?.status === 503) {
+                    console.warn('Direct upload unavailable, falling back to standard upload');
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    return api.post(`/projects/${id}/upload-zip`, formData).then(res => res.data);
+                }
+                throw error;
+            }
+        }
+        
+        // Use standard upload for small files (simpler, less overhead)
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post(`/projects/${id}/upload-zip`, formData).then(res => res.data);
+    },
 };
 
 export const compile = {
