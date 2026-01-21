@@ -512,6 +512,7 @@ async def get_presigned_upload_url(
     project_id: str,
     data: PresignedUploadRequest,
     user: dict = Depends(get_current_user),
+    _rate_limit: None = Depends(RateLimitDependency(max_requests=10, window_seconds=60, prefix="presigned")),
 ):
     """
     Generate a presigned URL for direct frontend → R2 upload.
@@ -693,8 +694,12 @@ async def complete_presigned_upload(
             # Clean up
             zip_path.unlink()
             
-            # Optionally delete the R2 temp file (keep for debugging initially)
-            # storage_service.client.delete_object(Bucket=storage_service.bucket, Key=data.key)
+            # Clean up R2 temp file after successful processing
+            try:
+                storage_service.client.delete_object(Bucket=storage_service.bucket, Key=data.key)
+                logger.debug(f"Cleaned up R2 temp file: {data.key}")
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up R2 temp file {data.key}: {cleanup_err}")
             
             return {
                 "success": True,
