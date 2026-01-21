@@ -30,7 +30,7 @@ const PricingCard: React.FC<{
       ))}
     </ul>
 
-    <a href="http://localhost:5173/login" className={`w-full py-3 rounded-lg font-medium transition-all text-center inline-block ${
+    <a href="https://app.codevault.parth7.me/login" className={`w-full py-3 rounded-lg font-medium transition-all text-center inline-block ${
       recommended 
         ? 'bg-blue-600 hover:bg-blue-500 text-white' 
         : 'bg-white/10 hover:bg-white/20 text-white'
