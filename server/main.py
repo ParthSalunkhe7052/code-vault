@@ -200,12 +200,13 @@ if __name__ == '__main__':
     from email_service import email_service
     from storage_service import storage_service
 
-    print(f'\n{'=' * 60}\n  License-Wrapper API Server ({ENVIRONMENT})\n{'=' * 60}')
+    separator = '=' * 60
+    print(f'\n{separator}\n  License-Wrapper API Server ({ENVIRONMENT})\n{separator}')
     print('  Database: PostgreSQL')
-    print(
-        f'  Storage: {'Cloudflare R2' if storage_service.is_cloud_enabled() else 'Local'}'
-    )
-    print(f'  Email: {'Enabled' if email_service.is_configured() else 'Disabled'}')
-    print(f'  API Docs: http://localhost:8000/docs\n{'=' * 60}\n')
+    storage_type = 'Cloudflare R2' if storage_service.is_cloud_enabled() else 'Local'
+    print(f'  Storage: {storage_type}')
+    email_status = 'Enabled' if email_service.is_configured() else 'Disabled'
+    print(f'  Email: {email_status}')
+    print(f'  API Docs: http://localhost:8000/docs\n{separator}\n')
     uvicorn.run(app, host='0.0.0.0', port=8000)
 
