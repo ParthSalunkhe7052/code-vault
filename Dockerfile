@@ -55,9 +55,9 @@ USER codevault
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (endpoint is /health, not /api/v1/health)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application with 500MB upload limit
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--limit-max-body-size", "524288000"]
