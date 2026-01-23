@@ -166,7 +166,24 @@ jobs:
           cd project/source
           if (Test-Path "requirements.txt") {
             Write-Host "Installing dependencies from requirements.txt..."
-            pip install -r requirements.txt
+            # Filter out ta-lib which requires C libraries
+            $content = Get-Content requirements.txt
+            $filtered = $content | Where-Object { 
+              $_ -notmatch '^\s*(ta-lib|TA-Lib)\s*' -and 
+              $_ -notmatch '^\s*#' -and
+              $_.Trim() -ne ''
+            }
+            
+            if ($filtered) {
+              $filtered | Set-Content requirements_filtered.txt
+              pip install -r requirements_filtered.txt
+              
+              # Check if ta-lib was skipped
+              if ($content -match 'ta-lib') {
+                Write-Host "WARNING: ta-lib requires C libraries. Skipping."
+                echo "TALIB_SKIPPED=true" >> $env:GITHUB_ENV
+              }
+            }
           } else {
             Write-Host "No requirements.txt found, skipping dependency install"
           }
@@ -292,13 +309,26 @@ jobs:
         run: |
           $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
           
+          # Capture detailed error message based on job outcome
+          $errorMsg = $null
+          if ($status -eq "failed") {
+            if ($env:TALIB_SKIPPED -eq "true") {
+              $errorMsg = "Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            } elseif (-not (Test-Path "project/source/${{ steps.prepare.outputs.entry_file }}")) {
+              $errorMsg = "Build failed: Entry file not found"
+            } else {
+              $errorMsg = "Compilation failed. Check GitHub Actions logs."
+            }
+          }
+          
           $body = @{
             build_id = "${{ github.event.inputs.build_id }}"
             platform = "windows"
             status = $status
             download_key = $env:UPLOAD_KEY
             filename = $env:UPLOAD_FILENAME
-            error = if ($status -eq "failed") { "Compilation failed" } else { $null }
+            error = $errorMsg
+            github_run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } | ConvertTo-Json -Compress
           
           $secret = "${{ github.event.inputs.callback_secret }}"
@@ -306,11 +336,27 @@ jobs:
           $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
           $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
           
-          Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
-            -Method POST `
-            -ContentType "application/json" `
-            -Headers @{ "X-Signature" = $signature } `
-            -Body $body
+          # Retry webhook delivery
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+          
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
+                -Method POST `
+                -ContentType "application/json" `
+                -Headers @{ "X-Signature" = $signature } `
+                -Body $body `
+                -TimeoutSec 10
+              $success = $true
+              Write-Host "Webhook delivered successfully"
+            } catch {
+              $retryCount++
+              Write-Host "Webhook failed (attempt $retryCount/$maxRetries): $($_.Exception.Message)"
+              Start-Sleep -Seconds 2
+            }
+          }
         shell: pwsh
 
   build-linux:
@@ -409,7 +455,18 @@ jobs:
           cd project/source
           if [ -f "requirements.txt" ]; then
             echo "Installing dependencies from requirements.txt..."
-            pip install -r requirements.txt
+            # Filter out ta-lib which requires system libraries
+            grep -vE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt > requirements_filtered.txt || true
+            
+            if [ -s requirements_filtered.txt ]; then
+              pip install -r requirements_filtered.txt
+            fi
+            
+            # Check if ta-lib was in requirements
+            if grep -qE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt; then
+              echo "WARNING: ta-lib requires system libraries. Skipping ta-lib installation."
+              echo "TALIB_SKIPPED=true" >> $GITHUB_ENV
+            fi
           else
             echo "No requirements.txt found, skipping dependency install"
           fi
@@ -500,7 +557,27 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
+          if [ -n "$UPLOAD_KEY" ]; then 
+            status="completed"
+            error_msg=""
+          else 
+            status="failed"
+            # Capture detailed error message
+            if [ "$TALIB_SKIPPED" = "true" ]; then
+              error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
+              error_msg="Build failed: Entry file not found"
+            else
+              error_msg="Compilation failed. Check GitHub Actions logs."
+            fi
+          fi
+          
+          # Build JSON payload properly
+          if [ -n "$error_msg" ]; then
+            error_json="\"$error_msg\""
+          else
+            error_json="null"
+          fi
           
           payload=$(cat << EOF
           {
@@ -509,17 +586,33 @@ jobs:
             "status": "$status",
             "download_key": "$UPLOAD_KEY",
             "filename": "$UPLOAD_FILENAME",
-            "error": null
+            "error": $error_json,
+            "github_run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           }
           EOF
           )
           
           signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
           
-          curl -X POST "${{ github.event.inputs.callback_url }}" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload"
+          # Retry webhook delivery
+          max_retries=3
+          retry_count=0
+          success=false
+          
+          while [ "$success" = "false" ] && [ $retry_count -lt $max_retries ]; do
+            if curl -sf -X POST "${{ github.event.inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: $signature" \
+              --connect-timeout 10 \
+              -d "$payload"; then
+              success=true
+              echo "Webhook delivered successfully"
+            else
+              retry_count=$((retry_count + 1))
+              echo "Webhook failed (attempt $retry_count/$max_retries)"
+              sleep 2
+            fi
+          done
 
   build-macos:
     if: contains(github.event.inputs.target_platforms, 'macos')
@@ -614,7 +707,18 @@ jobs:
           cd project/source
           if [ -f "requirements.txt" ]; then
             echo "Installing dependencies from requirements.txt..."
-            pip install -r requirements.txt
+            # Filter out ta-lib which requires system libraries
+            grep -vE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt > requirements_filtered.txt || true
+            
+            if [ -s requirements_filtered.txt ]; then
+              pip install -r requirements_filtered.txt
+            fi
+            
+            # Check if ta-lib was in requirements
+            if grep -qE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt; then
+              echo "WARNING: ta-lib requires system libraries. Skipping ta-lib installation."
+              echo "TALIB_SKIPPED=true" >> $GITHUB_ENV
+            fi
           else
             echo "No requirements.txt found, skipping dependency install"
           fi
@@ -712,7 +816,27 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          if [ -n "$UPLOAD_KEY" ]; then status="completed"; else status="failed"; fi
+          if [ -n "$UPLOAD_KEY" ]; then 
+            status="completed"
+            error_msg=""
+          else 
+            status="failed"
+            # Capture detailed error message
+            if [ "$TALIB_SKIPPED" = "true" ]; then
+              error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
+              error_msg="Build failed: Entry file not found"
+            else
+              error_msg="Compilation failed. Check GitHub Actions logs."
+            fi
+          fi
+          
+          # Build JSON payload properly
+          if [ -n "$error_msg" ]; then
+            error_json="\"$error_msg\""
+          else
+            error_json="null"
+          fi
           
           payload=$(cat << EOF
           {
@@ -721,14 +845,30 @@ jobs:
             "status": "$status",
             "download_key": "$UPLOAD_KEY",
             "filename": "$UPLOAD_FILENAME",
-            "error": null
+            "error": $error_json,
+            "github_run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           }
           EOF
           )
           
           signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
           
-          curl -X POST "${{ github.event.inputs.callback_url }}" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload"
+          # Retry webhook delivery
+          max_retries=3
+          retry_count=0
+          success=false
+          
+          while [ "$success" = "false" ] && [ $retry_count -lt $max_retries ]; do
+            if curl -sf -X POST "${{ github.event.inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: $signature" \
+              --connect-timeout 10 \
+              -d "$payload"; then
+              success=true
+              echo "Webhook delivered successfully"
+            else
+              retry_count=$((retry_count + 1))
+              echo "Webhook failed (attempt $retry_count/$max_retries)"
+              sleep 2
+            fi
+          done

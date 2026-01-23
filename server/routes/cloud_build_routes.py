@@ -808,6 +808,15 @@ async def get_build_status(build_id: str, user: dict = Depends(get_current_user)
         stage, detailed_progress = get_build_stage(dict(build))
         progress = build["progress"] if build["progress"] else detailed_progress
 
+        # Get build-level error message (from trigger failures or first artifact error)
+        build_error = build.get("error_message") if hasattr(build, "get") else build["error_message"] if "error_message" in build.keys() else None
+        if not build_error:
+            # Check artifacts for errors
+            for art in artifact_list:
+                if art.get("error"):
+                    build_error = art["error"]
+                    break
+        
         response = {
             "id": build["id"],
             "status": build["status"],
@@ -815,6 +824,7 @@ async def get_build_status(build_id: str, user: dict = Depends(get_current_user)
             "progress": progress,
             "target_platforms": json.loads(build["target_platforms"] or '["windows"]'),
             "artifacts": artifact_list,
+            "error": build_error,  # Include error at build level for frontend
             "created_at": build["created_at"].isoformat() if build["created_at"] else None,
             "completed_at": build["completed_at"].isoformat() if build["completed_at"] else None,
             "retry_count": build["retry_count"] if build["retry_count"] else 0,

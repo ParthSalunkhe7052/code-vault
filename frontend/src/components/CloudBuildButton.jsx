@@ -160,18 +160,39 @@ export function CloudBuildButton({
         } else {
           // Single platform - use existing status endpoint
           const response = await api.get(`/cloud-build/${id}/status`);
-          const { status: buildStatus, progress: buildProgress, download_url, error: buildError } = response.data;
+          const { 
+            status: buildStatus, 
+            progress: buildProgress, 
+            download_url, 
+            download_key,  // Backward compatibility
+            error: buildError,
+            artifacts  // Also check artifacts for error/download
+          } = response.data;
           
           setProgress(buildProgress || 0);
           
+          // Get download URL from artifacts if not at build level
+          let finalDownloadUrl = download_url || download_key;
+          let finalError = buildError;
+          
+          if (artifacts && artifacts.length > 0) {
+            const artifact = artifacts[0];
+            if (!finalDownloadUrl && artifact.download_url) {
+              finalDownloadUrl = artifact.download_url;
+            }
+            if (!finalError && artifact.error) {
+              finalError = artifact.error;
+            }
+          }
+          
           if (buildStatus === 'completed') {
             setStatus('completed');
-            setDownloadUrl(download_url);
+            setDownloadUrl(finalDownloadUrl);
             if (onComplete) onComplete(response.data);
             return; // Stop polling
           } else if (buildStatus === 'failed') {
             setStatus('failed');
-            setError(buildError || "Build failed - unknown error");
+            setError(finalError || "Build failed - check GitHub Actions logs for details");
             return; // Stop polling
           }
         }
