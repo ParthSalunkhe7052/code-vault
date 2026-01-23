@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
 from database import get_db, release_db
 from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits, get_user_tier
-from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR
+from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR, validate_file_size
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from middleware.rate_limiter import RateLimitDependency
@@ -264,8 +264,6 @@ async def upload_files(
             filename = upload_file.filename or "unnamed_file"
             content = await upload_file.read()
 
-            from storage_service import validate_file_size
-
             is_valid, error_msg = validate_file_size(len(content), is_zip=False)
             if not is_valid:
                 raise HTTPException(
@@ -397,8 +395,6 @@ async def upload_project_zip(
         zip_path = safe_join(project_dir, "project.zip")
         content = await file.read()
 
-        from storage_service import validate_file_size
-
         is_valid, error_msg = validate_file_size(len(content), is_zip=True)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
@@ -471,10 +467,17 @@ async def upload_project_zip(
         raise
     except SecurityError:
         raise HTTPException(status_code=400, detail="Invalid project ID format")
+    except zipfile.BadZipFile as e:
+        logger.error(f"Invalid ZIP file for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+    except PermissionError as e:
+        logger.error(f"Permission error processing ZIP for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Server permission error - please contact support")
+    except OSError as e:
+        logger.error(f"OS error processing ZIP for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"File system error: {str(e)}")
     except Exception as e:
-        import logging
-
-        logging.error(f"Failed to process ZIP: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to process ZIP file")
+        logger.error(f"Unexpected error processing ZIP for project {project_id}: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}")
     finally:
         await release_db(conn)

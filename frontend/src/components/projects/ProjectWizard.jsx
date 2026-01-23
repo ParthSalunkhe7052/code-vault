@@ -351,7 +351,7 @@ const ProjectWizard = ({
         }
     };
 
-    const handleNext = async () => {
+    const handleNext = useCallback(async () => {
         if (currentStep < 5 && canProceed()) {
             // Auto-save config when leaving Step 3 (Configure) to persist settings
             if (currentStep === 3) {
@@ -373,18 +373,18 @@ const ProjectWizard = ({
             setCompletedSteps(prev => [...new Set([...prev, currentStep])]);
             setCurrentStep(currentStep + 1);
         }
-    };
+    }, [currentStep, canProceed, onConfigSave]);
 
-    const handleBack = () => {
+    const handleBack = useCallback(() => {
         if (currentStep > 1) {
             const prevStep = currentStep - 1;
             setCurrentStep(prevStep);
             // Remove any steps >= the step we're moving back to from completed steps
             setCompletedSteps(prev => prev.filter(step => step < prevStep));
         }
-    };
+    }, [currentStep]);
 
-    const handleBrowseProjectPath = async () => {
+    const handleBrowseProjectPath = useCallback(async () => {
         if (!isTauri) return;
 
         try {
@@ -403,20 +403,10 @@ const ProjectWizard = ({
                 console.error('Failed to open folder picker:', error);
             }
         }
-    };
-
-    // Show prerequisites check before starting build
-    const handleCheckPrerequisites = () => {
-        if (isTauri) {
-            setShowPrereqs(true);
-        } else {
-            // Web mode - skip prerequisites check
-            doStartBuild();
-        }
-    };
+    }, [project?.language]);
 
     // Called after prerequisites check passes
-    const doStartBuild = async () => {
+    const doStartBuild = useCallback(async () => {
         setShowPrereqs(false);
 
         // Use context methods to update build state (persists across tab switches)
@@ -522,15 +512,20 @@ const ProjectWizard = ({
             projectBuild.addLog(`❌ Error: ${error.message || error}`);
             projectBuild.fail(error.message || String(error));
         }
-    };
+    }, [projectPath, configData.entry_file, project?.name, project?.language, protectionMode, distributionType, createDesktopShortcut, createStartMenu, publisher, projectBuild, onConfigSave]);
 
-    const handleViewLicenses = async () => {
-        await handleClose(); // Close with auto-save
-        navigate('/licenses'); // Navigate to licenses page
-    };
+    // Show prerequisites check before starting build
+    const handleCheckPrerequisites = useCallback(() => {
+        if (isTauri) {
+            setShowPrereqs(true);
+        } else {
+            // Web mode - skip prerequisites check
+            doStartBuild();
+        }
+    }, [doStartBuild]);
 
     // Auto-save config before closing wizard
-    const handleClose = async () => {
+    const handleClose = useCallback(async () => {
         // Save config if we're on or past Step 3 (where settings are configured)
         if (currentStep >= 3 && configData.entry_file) {
             try {
@@ -542,9 +537,14 @@ const ProjectWizard = ({
             }
         }
         onClose();
-    };
+    }, [currentStep, configData.entry_file, onConfigSave, onClose]);
 
-    const handleOpenOutputFolder = async () => {
+    const handleViewLicenses = useCallback(async () => {
+        await handleClose(); // Close with auto-save
+        navigate('/licenses'); // Navigate to licenses page
+    }, [handleClose, navigate]);
+
+    const handleOpenOutputFolder = useCallback(async () => {
         if (!outputPath || !isTauri) return;
 
         try {
@@ -557,10 +557,10 @@ const ProjectWizard = ({
                 console.error('Failed to open folder:', error);
             }
         }
-    };
+    }, [outputPath]);
 
     // Handle stop/cancel build
-    const handleStopBuild = async () => {
+    const handleStopBuild = useCallback(async () => {
         if (!currentJobId) {
             projectBuild.cancel();
             return;
@@ -577,7 +577,11 @@ const ProjectWizard = ({
         } catch (error) {
             projectBuild.cancel();
         }
-    };
+    }, [currentJobId, projectBuild]);
+
+    const handleSetEntryFile = useCallback((value) => {
+        setConfigData({ ...configData, entry_file: value });
+    }, [configData, setConfigData]);
 
     const renderStep = () => {
         switch (currentStep) {
@@ -609,7 +613,7 @@ const ProjectWizard = ({
                         fileTree={configData.file_tree}
                         files={configData.files || []}
                         entryFile={configData.entry_file}
-                        setEntryFile={(value) => setConfigData({ ...configData, entry_file: value })}
+                        setEntryFile={handleSetEntryFile}
                         entryPointCandidates={configData.file_tree?.entry_point_candidates || []}
                         showConsole={showConsole}
                         setShowConsole={setShowConsole}
