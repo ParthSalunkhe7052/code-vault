@@ -249,7 +249,6 @@ jobs:
             --standalone `
             --onefile `
             --assume-yes-for-downloads `
-            --windows-disable-console=false `
             --output-filename="${{ steps.prepare.outputs.output_name }}.exe" `
             "${{ steps.prepare.outputs.entry_file }}"
         shell: pwsh
