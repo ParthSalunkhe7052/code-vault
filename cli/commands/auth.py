@@ -131,3 +131,30 @@ def cmd_logout(args):
     """Logout and clear saved credentials."""
     clear_config()
     color_print("✅ Logged out successfully.", Colors.GREEN)
+
+def cmd_whoami(args):
+    """Show current user information."""
+    headers = check_logged_in()
+    config = load_config()
+    api_url = config.get("api_url", DEFAULT_API_BASE)
+    
+    try:
+        resp = requests.get(f"{api_url}/auth/me", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            user = resp.json()
+            print_header("CodeVault CLI - User Profile")
+            
+            color_print(f"  👤 Name:    {user.get('name')}", Colors.GREEN)
+            color_print(f"  📧 Email:   {user.get('email')}", Colors.CYAN)
+            color_print(f"  👑 Plan:    {user.get('plan', 'free').title()}", Colors.YELLOW)
+            color_print(f"  🏗️  Credits: {user.get('build_credits', 0)}", Colors.MAGENTA)
+            
+            role = user.get('role', 'user')
+            if role == 'admin':
+                color_print(f"  🛡️  Role:    Admin", Colors.RED)
+                
+            print()
+        else:
+            handle_error(resp)
+    except Exception as e:
+        color_print(f"❌ Error: {e}", Colors.RED)

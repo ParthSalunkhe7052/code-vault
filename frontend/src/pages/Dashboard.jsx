@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight } from 'lucide-react';
-import { stats } from '../services/api';
+import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
+import { stats, auth } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
 import ThemeToggle from '../components/ThemeToggle';
 
 const Dashboard = () => {
     const [dashboardStats, setDashboardStats] = useState(null);
+    const [userProfile, setUserProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const data = await stats.getDashboard();
-            setDashboardStats(data);
+            const [statsData, userData] = await Promise.all([
+                stats.getDashboard(),
+                auth.getProfile()
+            ]);
+            setDashboardStats(statsData);
+            setUserProfile(userData);
         } catch (error) {
             console.error('Failed to fetch dashboard data:', error);
         } finally {
@@ -107,18 +112,20 @@ const Dashboard = () => {
                     />
                 </Link>
 
+                {/* Cloud Build Credits */}
                 <StatCard
-                    title="Active Licenses"
-                    value={dashboardStats?.licenses?.active || 0}
-                    icon={CheckCircle}
-                    color="text-emerald-400"
+                    title="Build Credits"
+                    value={userProfile?.build_credits || 0}
+                    icon={CloudLightning}
+                    color="text-amber-400"
+                    subtitle={userProfile?.plan === 'free' ? 'Local builds only' : 'Monthly refill'}
                 />
 
                 <StatCard
                     title="Validations (24h)"
                     value={dashboardStats?.validations?.last_24h?.total || 0}
                     icon={Activity}
-                    color="text-amber-400"
+                    color="text-emerald-400"
                     subtitle={`${validationSuccessRate}% success rate`}
                 />
             </div>

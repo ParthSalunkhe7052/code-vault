@@ -164,17 +164,21 @@ if config_issues:
 # Log current environment for visibility
 print(f"[Config] Environment: {ENVIRONMENT}")
 
+# Build Credit Costs
+BUILD_COST_STANDARD = 1
+BUILD_COST_FAST = 0  # Free for now to encourage testing
+
 # Subscription Tier Limits
 # -1 means unlimited
 TIER_LIMITS = {
     "free": {
         "_tier_name": "Free",
         "max_projects": 1,
-        "max_licenses_per_project": 5,
+        "max_licenses_per_project": 50,
         "can_sell_licenses": False,
-        "cloud_compilation": True,  # Enable for freemium
-        "cloud_builds_per_month": 5,  # 5 free builds per month
-        "cloud_platforms": ["windows"],  # Free tier: Windows only
+        "cloud_compilation": False,  # No cloud builds for free tier
+        "cloud_builds_per_month": 0,
+        "cloud_platforms": ["windows"],
         "analytics": False,
         "webhooks": False,
         "team_seats": 1,
@@ -182,25 +186,25 @@ TIER_LIMITS = {
     },
     "pro": {
         "_tier_name": "Pro",
-        "max_projects": 10,
-        "max_licenses_per_project": 100,
+        "max_projects": -1,  # unlimited
+        "max_licenses_per_project": 500,
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 50,
-        "cloud_platforms": ["windows", "macos", "linux"],  # All platforms
+        "cloud_builds_per_month": 15,  # 15 credits
+        "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
         "team_seats": 1,
         "node_support": True,
     },
     "enterprise": {
-        "_tier_name": "Enterprise",
+        "_tier_name": "Agency",
         "max_projects": -1,  # unlimited
         "max_licenses_per_project": -1,  # unlimited
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": -1,  # unlimited
-        "cloud_platforms": ["windows", "macos", "linux"],  # All platforms
+        "cloud_builds_per_month": 50,  # 50 credits
+        "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
         "team_seats": 5,
@@ -215,29 +219,29 @@ PRICING_CONFIG = {
         "name": "Free",
         "price": 0,
         "currency": "USD",
-        "features": ["1 Project", "5 Licenses/Project", "Basic Support"],
+        "features": ["1 Project", "50 Licenses", "Local Compilation Only"],
     },
     "pro": {
         "name": "Pro",
-        "price": 20,
+        "price": 29,
         "currency": "USD",
         "price_id": STRIPE_PRICE_PRO,
         "features": [
-            "10 Projects",
-            "100 Licenses/Project",
-            "Sell Licenses",
-            "Cloud Compilation",
+            "Unlimited Projects",
+            "500 Licenses",
+            "15 Cloud Builds/mo",
+            "Whop Integration",
             "Analytics",
         ],
     },
     "enterprise": {
-        "name": "Enterprise",
-        "price": 50,
+        "name": "Agency",
+        "price": 99,
         "currency": "USD",
         "price_id": STRIPE_PRICE_ENTERPRISE,
         "features": [
-            "Unlimited Projects",
             "Unlimited Licenses",
+            "50 Cloud Builds/mo",
             "Priority Support",
             "White Labeling",
         ],

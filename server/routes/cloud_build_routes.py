@@ -266,31 +266,63 @@ async def start_cloud_build(
     """Start a new cloud build process."""
     conn = await get_db()
     try:
-        # 1. Tier Enforcement
+        # 1. Tier Enforcement & Platform Restrictions
         tier = await get_user_tier(user["id"], conn)
         limits = await get_user_tier_limits(user["id"], conn)
         
-        # Free Tier Restrictions: 5 total builds per month (any OS)
+        # Platform restrictions based on tier
         if tier["tier"] == "free":
-            current_month_builds = await conn.fetchval("""
-                SELECT COUNT(*) FROM cloud_builds 
-                WHERE user_id = $1 
-                AND created_at >= DATE_TRUNC('month', NOW())
-            """, user["id"])
-            
-            if current_month_builds >= 5:
-                raise HTTPException(403, "Free plan limit reached (5 builds/month). Upgrade for more.")
+            # Free tier: Windows & Linux only (macOS costs 10x GitHub minutes)
+            if "macos" in request.target_platforms:
+                raise HTTPException(
+                    403, 
+                    "macOS builds require Pro or Enterprise plan (10x compute cost). "
+                    "Upgrade or select Windows/Linux only."
+                )
         
-        # Pro/Enterprise Limit Check
-        max_builds = limits.get("cloud_builds_per_month", 0)
-        if max_builds != -1 and tier["tier"] != "free":
-            current_month_builds = await conn.fetchval("""
-                SELECT COUNT(*) FROM cloud_builds 
-                WHERE user_id = $1 
-                AND created_at >= DATE_TRUNC('month', NOW())
-            """, user["id"])
-            if current_month_builds >= max_builds:
-                 raise HTTPException(403, f"Monthly cloud build limit reached ({max_builds}).")
+        # Credit System Enforcement
+        # Enterprise has unlimited builds (no credit deduction)
+        if tier["tier"] != "enterprise":
+            from config import BUILD_COST_STANDARD
+            cost = BUILD_COST_STANDARD
+            
+            user_credits = await conn.fetchval(
+                "SELECT build_credits FROM users WHERE id = $1", 
+                user["id"]
+            )
+            
+            if user_credits is None:
+                user_credits = 0
+                
+            if user_credits < cost:
+                raise HTTPException(
+                    403, 
+                    f"Insufficient build credits ({user_credits}). "
+                    f"This build requires {cost} credits. "
+                    "Upgrade your plan or wait for your monthly refill."
+                )
+            
+            # Deduct credits
+            await conn.execute(
+                "UPDATE users SET build_credits = build_credits - $1 WHERE id = $2",
+                cost, user["id"]
+            )
+        
+        # Global concurrency limit (protect GitHub Actions quota)
+        active_builds = await conn.fetchval("""
+            SELECT COUNT(*) FROM cloud_builds 
+            WHERE status IN ('pending', 'queued', 'running')
+            AND created_at > NOW() - INTERVAL '2 hours'
+        """)
+        
+        MAX_CONCURRENT_BUILDS = 15  # Leave headroom for GitHub's 20-job limit
+        
+        if active_builds >= MAX_CONCURRENT_BUILDS:
+            raise HTTPException(
+                503, 
+                f"Build queue is full ({active_builds} active builds). "
+                "Please try again in a few minutes."
+            )
 
         # 2. Project Info
         project = await conn.fetchrow(

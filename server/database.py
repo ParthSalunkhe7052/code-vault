@@ -574,6 +574,40 @@ async def init_database():
         """)
         print("[Maintenance] Reset zombie jobs to failed status")
 
+        # =============================================================================
+        # Migration: Whop Integration & Build Credits (Phase 1)
+        # =============================================================================
+        try:
+            await conn.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS build_credits INTEGER DEFAULT 0"
+            )
+            print("[Migration] Added 'build_credits' column to users table")
+        except Exception:
+            pass
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS whop_integrations (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                whop_company_id TEXT,
+                whop_api_key TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS whop_purchases (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                whop_payment_id TEXT UNIQUE,
+                license_id TEXT REFERENCES licenses(id) ON DELETE SET NULL,
+                buyer_email TEXT,
+                amount_cents INTEGER,
+                status TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         print("[OK] Database initialized (PostgreSQL)")
 
     finally:

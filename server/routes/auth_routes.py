@@ -140,6 +140,10 @@ async def get_me(user: dict = Depends(get_current_user)):
             WHERE user_id = $1
             ORDER BY created_at DESC LIMIT 1
         """, user["id"])
+        
+        # Get build credits
+        user_row = await conn.fetchrow("SELECT build_credits FROM users WHERE id = $1", user["id"])
+        build_credits = user_row["build_credits"] if user_row else 0
 
         # Use subscription tier if exists, otherwise fall back to users.plan
         plan = sub_row["plan_tier"] if sub_row else user.get("plan", "free")
@@ -151,6 +155,7 @@ async def get_me(user: dict = Depends(get_current_user)):
             "plan": plan,
             "role": user.get("role", "user"),
             "api_key": user.get("api_key"),
+            "build_credits": build_credits,
             "created_at": utc_now().isoformat(),
         }
     finally:

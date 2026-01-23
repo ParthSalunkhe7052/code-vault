@@ -41,6 +41,11 @@ on:
         required: false
         type: string
         default: 'free'
+      compatibility_mode:
+        description: 'Disable aggressive anti-bloat for problematic dependencies'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-windows:
@@ -49,6 +54,12 @@ jobs:
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      - name: Checkout Repo (for scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+      
       - name: Update progress - Starting
         run: |
           $body = @{
@@ -104,11 +115,21 @@ jobs:
           restore-keys: |
             windows-npm-pkg-
       
-      - name: Install Nuitka (Python)
+      - name: Cache Nuitka (Windows)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\Nuitka\Nuitka
+          key: windows-nuitka-v2-${{ hashFiles('project/source/requirements.txt', 'project/source/*.txt') }}
+          restore-keys: |
+            windows-nuitka-v2-
+      
+      - name: Install Build Tools
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          pip install nuitka ordered-set zstandard
-          pip install requests cryptography
+          # Install dependencies for Cloud Runner AND Nuitka
+          pip install nuitka ordered-set zstandard requests cryptography
       
       - name: Install pkg (Node.js)
         if: ${{ github.event.inputs.language == 'nodejs' }}
@@ -141,17 +162,6 @@ jobs:
           }
         shell: pwsh
 
-      - name: Update progress - Source downloaded
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 15; stage = "Downloading source" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-      
       - name: Parse config
         id: prepare
         run: |
@@ -160,102 +170,18 @@ jobs:
           echo "output_name=$($config.output_name)" >> $env:GITHUB_OUTPUT
         shell: pwsh
       
-      - name: Install project dependencies (Python)
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
         if: ${{ github.event.inputs.language == 'python' }}
+        env:
+          NUITKA_CACHE_DIR: ~\AppData\Local\Nuitka\Nuitka
         run: |
-          cd project/source
-          if (Test-Path "requirements.txt") {
-            Write-Host "Installing dependencies from requirements.txt..."
-            # Filter out ta-lib which requires C libraries
-            $content = Get-Content requirements.txt
-            $filtered = $content | Where-Object { 
-              $_ -notmatch '^\s*(ta-lib|TA-Lib)\s*' -and 
-              $_ -notmatch '^\s*#' -and
-              $_.Trim() -ne ''
-            }
-            
-            if ($filtered) {
-              $filtered | Set-Content requirements_filtered.txt
-              pip install -r requirements_filtered.txt
-              
-              # Check if ta-lib was skipped
-              if ($content -match 'ta-lib') {
-                Write-Host "WARNING: ta-lib requires C libraries. Skipping."
-                echo "TALIB_SKIPPED=true" >> $env:GITHUB_ENV
-              }
-            }
-          } else {
-            Write-Host "No requirements.txt found, skipping dependency install"
-          }
-        shell: pwsh
-      
-      - name: Update progress - Dependencies
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 25; stage = "Installing dependencies" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-      
-      - name: Inject license wrapper (Python)
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          $wrapperUrl = "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py"
-          Invoke-WebRequest -Uri $wrapperUrl -OutFile wrapper_template.py
-          
-          $wrapper = Get-Content wrapper_template.py -Raw
-          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
-          $entryPath = "project/source/${{ steps.prepare.outputs.entry_file }}"
-          $originalCode = Get-Content $entryPath -Raw
-          
-          $wrapper = $wrapper -replace '__LICENSE_KEY__', $config.license_key
-          $wrapper = $wrapper -replace '__API_URL__', $config.api_url
-          
-          $combined = $wrapper + "`n`n" + $originalCode
-          Set-Content -Path $entryPath -Value $combined -Encoding UTF8
-          Write-Host "Injected license wrapper into ${{ steps.prepare.outputs.entry_file }}"
-        shell: pwsh
-      
-      - name: Update progress - Wrapper injected
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 35; stage = "Injecting license protection" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
-      - name: Update progress - Compilation starting
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 45; stage = "Starting compilation" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-      
-      - name: Compile with Nuitka
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          cd project/source
-          python -m nuitka `
-            --standalone `
-            --onefile `
-            --assume-yes-for-downloads `
-            --enable-plugin=tk-inter `
-            --noinclude-unittest-mode=nofollow `
-            --noinclude-pytest-mode=nofollow `
-            --output-filename="${{ steps.prepare.outputs.output_name }}.exe" `
-            "${{ steps.prepare.outputs.entry_file }}"
+          python .github/scripts/cloud_runner.py `
+            --config '${{ github.event.inputs.config_json }}' `
+            --source ./project/source
         shell: pwsh
 
+      # === NODE.JS BUILD (Legacy) ===
       - name: Compile with pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}
         run: |
@@ -264,28 +190,6 @@ jobs:
           pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
         shell: pwsh
       
-      - name: Update progress - Compiled
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 80; stage = "Compiling binary" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-
-      - name: Update progress - Starting upload
-        run: |
-          $body = @{ build_id = "${{ github.event.inputs.build_id }}"; platform = "windows"; progress = 85; stage = "Uploading artifact" } | ConvertTo-Json -Compress
-          $secret = "${{ github.event.inputs.callback_secret }}"
-          $hmac = New-Object System.Security.Cryptography.HMACSHA256
-          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
-          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
-          try { Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" -Method POST -ContentType "application/json" -Headers @{ "X-Signature" = $signature } -Body $body } catch {}
-        shell: pwsh
-        continue-on-error: true
-      
       - name: Upload to R2
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -293,8 +197,17 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" | Select-Object -First 1
+          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" -Recurse | Select-Object -First 1
           
+          if ($null -eq $exe) {
+             $exe = Get-ChildItem -Path "./project/source/build_output" -Filter "*.exe" | Select-Object -First 1
+          }
+
+          if ($null -eq $exe) {
+             Write-Error "No executable found!"
+             exit 1
+          }
+
           aws configure set aws_access_key_id $env:R2_ACCESS_KEY
           aws configure set aws_secret_access_key $env:R2_SECRET_KEY
           
@@ -367,6 +280,12 @@ jobs:
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+
       - name: Update progress - Starting
         run: |
           payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
@@ -451,70 +370,15 @@ jobs:
           echo "entry_file=$config" >> $GITHUB_OUTPUT
           echo "output_name=$output" >> $GITHUB_OUTPUT
 
-      - name: Install project dependencies (Python)
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          cd project/source
-          if [ -f "requirements.txt" ]; then
-            echo "Installing dependencies from requirements.txt..."
-            # Filter out ta-lib which requires system libraries
-            grep -vE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt > requirements_filtered.txt || true
-            
-            if [ -s requirements_filtered.txt ]; then
-              pip install -r requirements_filtered.txt
-            fi
-            
-            # Check if ta-lib was in requirements
-            if grep -qE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt; then
-              echo "WARNING: ta-lib requires system libraries. Skipping ta-lib installation."
-              echo "TALIB_SKIPPED=true" >> $GITHUB_ENV
-            fi
-          else
-            echo "No requirements.txt found, skipping dependency install"
-          fi
+          python3 .github/scripts/cloud_runner.py \
+            --config '${{ github.event.inputs.config_json }}' \
+            --source ./project/source
 
-      - name: Inject license wrapper (Python)
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py" -o wrapper_template.py
-          license_key=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('license_key', 'GENERIC_BUILD'))")
-          api_url=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('api_url', ''))")
-          entry_file="project/source/${{ steps.prepare.outputs.entry_file }}"
-          python3 -c "
-          with open('wrapper_template.py', 'r') as f:
-              wrapper = f.read()
-          wrapper = wrapper.replace('__LICENSE_KEY__', '$license_key').replace('__API_URL__', '$api_url')
-          with open('$entry_file', 'r') as f:
-              original = f.read()
-          with open('$entry_file', 'w') as f:
-              f.write(wrapper + '\n\n' + original)
-          print('Injected license wrapper')
-          "
-
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":45,"stage":"Starting compilation"}'
-          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-      - name: Compile with Nuitka
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          cd project/source
-          python -m nuitka \
-            --standalone \
-            --onefile \
-            --assume-yes-for-downloads \
-            --enable-plugin=tk-inter \
-            --noinclude-unittest-mode=nofollow \
-            --noinclude-pytest-mode=nofollow \
-            --output-filename="${{ steps.prepare.outputs.output_name }}" \
-            "${{ steps.prepare.outputs.entry_file }}"
-
+      # === NODE.JS BUILD (Legacy) ===
       - name: Compile with pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}
         run: |
@@ -524,19 +388,21 @@ jobs:
 
       - name: Package Output
         run: |
+          # Find output exe (could be in build_output if using Runner)
           cd project/source
-          chmod +x "${{ steps.prepare.outputs.output_name }}"
-          tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "${{ steps.prepare.outputs.output_name }}"
-
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'
-          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
+          
+          # Check for build_output first
+          if [ -d "build_output" ]; then
+             find build_output -maxdepth 1 -type f -executable -exec cp {} . \;
+          fi
+          
+          exe_name="${{ steps.prepare.outputs.output_name }}"
+          if [ ! -f "$exe_name" ]; then
+             exe_name=$(find . -maxdepth 1 -type f -executable | head -1)
+          fi
+          
+          chmod +x "$exe_name"
+          tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "$exe_name"
 
       - name: Upload to R2
         env:
@@ -625,6 +491,12 @@ jobs:
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+
       - name: Update progress - Starting
         run: |
           payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
@@ -706,71 +578,15 @@ jobs:
           echo "entry_file=$config" >> $GITHUB_OUTPUT
           echo "output_name=$output" >> $GITHUB_OUTPUT
 
-      - name: Install project dependencies (Python)
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          cd project/source
-          if [ -f "requirements.txt" ]; then
-            echo "Installing dependencies from requirements.txt..."
-            # Filter out ta-lib which requires system libraries
-            grep -vE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt > requirements_filtered.txt || true
-            
-            if [ -s requirements_filtered.txt ]; then
-              pip install -r requirements_filtered.txt
-            fi
-            
-            # Check if ta-lib was in requirements
-            if grep -qE '^\s*(ta-lib|TA-Lib)\s*' requirements.txt; then
-              echo "WARNING: ta-lib requires system libraries. Skipping ta-lib installation."
-              echo "TALIB_SKIPPED=true" >> $GITHUB_ENV
-            fi
-          else
-            echo "No requirements.txt found, skipping dependency install"
-          fi
+          python3 .github/scripts/cloud_runner.py \
+            --config '${{ github.event.inputs.config_json }}' \
+            --source ./project/source
 
-      - name: Inject license wrapper (Python)
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/.github/workflows/wrapper_python.py" -o wrapper_template.py
-          license_key=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('license_key', 'GENERIC_BUILD'))")
-          api_url=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin).get('api_url', ''))")
-          entry_file="project/source/${{ steps.prepare.outputs.entry_file }}"
-          python3 -c "
-          with open('wrapper_template.py', 'r') as f:
-              wrapper = f.read()
-          wrapper = wrapper.replace('__LICENSE_KEY__', '$license_key').replace('__API_URL__', '$api_url')
-          with open('$entry_file', 'r') as f:
-              original = f.read()
-          with open('$entry_file', 'w') as f:
-              f.write(wrapper + '\n\n' + original)
-          print('Injected license wrapper')
-          "
-
-      - name: Update progress - Compilation starting
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":45,"stage":"Starting compilation"}'
-          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
-
-      - name: Compile with Nuitka
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          cd project/source
-          python -m nuitka \
-            --standalone \
-            --onefile \
-            --assume-yes-for-downloads \
-            --enable-plugin=tk-inter \
-            --noinclude-unittest-mode=nofollow \
-            --noinclude-pytest-mode=nofollow \
-            --macos-create-app-bundle \
-            --output-filename="${{ steps.prepare.outputs.output_name }}" \
-            "${{ steps.prepare.outputs.entry_file }}"
-
+      # === NODE.JS BUILD (Legacy) ===
       - name: Compile with pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}
         run: |
@@ -780,25 +596,32 @@ jobs:
 
       - name: Package Output (Zip App)
         run: |
+          # Find output exe (could be in build_output if using Runner)
           cd project/source
-          if [ -d "${{ steps.prepare.outputs.output_name }}.app" ]; then
-             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}.app"
-             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
-          else
-             chmod +x "${{ steps.prepare.outputs.output_name }}"
-             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "${{ steps.prepare.outputs.output_name }}"
-             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          
+          # Check for build_output first
+          if [ -d "build_output" ]; then
+             find build_output -maxdepth 1 -type f -executable -exec cp {} . \;
+          fi
+          
+          exe_name="${{ steps.prepare.outputs.output_name }}"
+          if [ ! -f "$exe_name" ]; then
+             # Try to find app bundle for Nuitka
+             if [ -d "${{ steps.prepare.outputs.output_name }}.app" ]; then
+                 exe_name="${{ steps.prepare.outputs.output_name }}.app"
+             else
+                 exe_name=$(find . -maxdepth 1 -type f -executable | head -1)
+             fi
           fi
 
-      - name: Update progress - Starting upload
-        run: |
-          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":85,"stage":"Uploading artifact"}'
-          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
-          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -d "$payload" || true
-        continue-on-error: true
+          if [ -d "$exe_name" ] && [[ "$exe_name" == *.app ]]; then
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "$exe_name"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          else
+             chmod +x "$exe_name"
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "$exe_name"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          fi
 
       - name: Upload to R2
         env:

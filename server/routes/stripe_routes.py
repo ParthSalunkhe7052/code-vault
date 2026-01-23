@@ -607,6 +607,15 @@ async def handle_subscription_checkout_completed(session, conn):
             # Critical Fix: Sync user tier to users table
             await sync_user_tier(user_id, tier, conn)
 
+            # Credit System: Refill credits on new subscription
+            credits = TIER_LIMITS.get(tier, {}).get("cloud_builds_per_month", 0)
+            if credits > 0:
+                await conn.execute(
+                    "UPDATE users SET build_credits = $1 WHERE id = $2",
+                    credits, user_id
+                )
+                logger.info(f"[Credit System] Refilled {credits} credits for user {user_id}")
+
             logger.info(
                 f"[Stripe Webhook] Subscription created/updated for user {user_id}: {tier}"
             )
@@ -796,6 +805,23 @@ async def handle_invoice_paid(invoice, conn):
         """,
             subscription_id,
         )
+        
+        # Credit System: Refill credits on successful payment (monthly reset)
+        sub = await conn.fetchrow(
+            "SELECT user_id, plan_tier FROM subscriptions WHERE stripe_subscription_id = $1", 
+            subscription_id
+        )
+        if sub:
+            credits = TIER_LIMITS.get(sub["plan_tier"], {}).get("cloud_builds_per_month", 0)
+            # -1 means unlimited, so we don't need to set credits (or set to high number)
+            # But the check in cloud_build_routes ignores enterprise, so this is mostly for Pro/Free
+            if credits > 0:
+                await conn.execute(
+                    "UPDATE users SET build_credits = $1 WHERE id = $2",
+                    credits, sub["user_id"]
+                )
+                logger.info(f"[Credit System] Monthly refill: {credits} credits for user {sub['user_id']}")
+
         logger.info(
             f"[Stripe Webhook] Invoice paid for subscription: {subscription_id}"
         )

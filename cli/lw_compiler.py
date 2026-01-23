@@ -27,7 +27,7 @@ except ImportError:
     import requests  # noqa: F401 - imported after auto-install
 
 from terminal import Colors
-from commands.auth import cmd_login, cmd_logout
+from commands.auth import cmd_login, cmd_logout, cmd_whoami
 from commands.projects import cmd_projects, cmd_licenses
 from commands.system import cmd_status
 from commands.build import cmd_build
@@ -42,6 +42,7 @@ def main():
         epilog="""
 Examples:
   lw-compiler login                           Login with your account
+  lw-compiler whoami                          Show your account info
   lw-compiler projects                        List your projects
   lw-compiler licenses PROJECT_ID             List licenses for a project
   lw-compiler build PROJECT_ID -l KEY         Build project with license
@@ -68,6 +69,7 @@ Build Tips:
 
     subparsers.add_parser("login", help="Login with your account")
     subparsers.add_parser("logout", help="Logout and clear credentials")
+    subparsers.add_parser("whoami", help="Show your account info")
     subparsers.add_parser("projects", help="List your projects")
     subparsers.add_parser("status", help="Show current status and environment")
     subparsers.add_parser("version", help="Show CLI version")
@@ -151,6 +153,7 @@ Build Tips:
     commands = {
         "login": cmd_login,
         "logout": cmd_logout,
+        "whoami": cmd_whoami,
         "projects": cmd_projects,
         "licenses": cmd_licenses,
         "build": cmd_build,
@@ -173,6 +176,7 @@ Build Tips:
 
 {Colors.CYAN}📋 All Commands:{Colors.RESET}
   login      Log in to your CodeVault account
+  whoami     Show your account info
   logout     Log out and clear credentials
   projects   List your projects
   build      Build a project into an executable
