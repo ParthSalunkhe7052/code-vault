@@ -700,7 +700,7 @@ const ProjectWizard = ({
     return (
         <>
             {createPortal(
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 animate-fade-in">
                     {/* Full Screen Workspace "Mission Control" */}
                     <div className="w-full h-full flex flex-row overflow-hidden">
                         
@@ -714,15 +714,15 @@ const ProjectWizard = ({
 
                         {/* Main Content Area */}
                         <main className="flex-1 flex flex-col relative z-0 bg-gray-900/50">
-                            {/* Background Texture/Effect */}
-                            <div className="absolute inset-0 pointer-events-none opacity-20"
+                            {/* Background Texture/Effect - reduced opacity for performance */}
+                            <div className="absolute inset-0 pointer-events-none opacity-10"
                                 style={{
                                     backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%)'
                                 }}
                             />
 
                             {/* Header */}
-                            <header className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-white/5 shrink-0 backdrop-blur-md z-10">
+                            <header className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-gray-950/95 shrink-0 z-10">
                                 <div>
                                     <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                                         <span className="text-indigo-400">/</span>

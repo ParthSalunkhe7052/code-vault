@@ -88,7 +88,7 @@ const Projects = () => {
                         console.error('Failed to fetch compile status:', error);
                     }
                 }
-            }, 2000);
+            }, 5000); // Increased from 2s to 5s to reduce GPU usage
         }
 
         return () => {

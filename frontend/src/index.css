@@ -231,24 +231,24 @@ body {
     /* Card with glass effect - theme aware */
     .card {
         background: var(--cv-card);
-        backdrop-filter: blur(16px);
         border: 1px solid var(--cv-border);
         border-radius: var(--cv-radius-lg);
         box-shadow:
             0 4px 6px -1px rgba(0, 0, 0, 0.3),
             0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        contain: layout style paint;
     }
 
     /* Glass card with enhanced visibility - theme aware */
     .glass-card {
         background: var(--cv-card);
-        backdrop-filter: blur(16px);
         border: 1px solid var(--cv-border);
         border-radius: var(--cv-radius-xl);
         box-shadow:
             0 4px 6px -1px rgba(0, 0, 0, 0.3),
             0 2px 4px -1px rgba(0, 0, 0, 0.2),
             inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+        contain: layout style paint;
     }
 
     /* Glass card hover - clean, no weird glow */
@@ -260,6 +260,7 @@ body {
             0 0 12px -2px var(--cv-primary-glow);
         transform: translateY(-2px);
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: transform;
     }
 
     /* Desktop-only hover enhancements (no touch devices) */
@@ -287,6 +288,7 @@ body {
         border: 1px solid color-mix(in srgb, var(--cv-primary) 70%, black 30%);
         position: relative;
         overflow: hidden;
+        contain: layout style paint;
     }
 
     /* Desktop hover - subtle glow without the weird pulsing */
@@ -296,6 +298,7 @@ body {
             box-shadow: 0 6px 16px -2px var(--cv-primary-glow);
             transform: translateY(-1px);
             transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
         }
 
         .btn-primary:active {
@@ -322,6 +325,7 @@ body {
         border: 1px solid var(--cv-border);
         position: relative;
         overflow: hidden;
+        contain: layout style paint;
     }
 
     @media (hover: hover) and (pointer: fine) {
@@ -330,6 +334,7 @@ body {
             border-color: var(--cv-border-muted);
             transform: translateY(-1px);
             transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
         }
 
         .btn-secondary:active {
@@ -594,18 +599,9 @@ body {
         }
     }
 
-    /* Pulse glow - reduced frequency and intensity */
+    /* Pulse glow - disabled for performance (was causing GPU issues) */
     .animate-pulse-glow {
-        animation: pulseGlow 4s ease-in-out infinite;
-    }
-
-    @keyframes pulseGlow {
-        0%, 100% {
-            box-shadow: 0 0 8px var(--primary-glow);
-        }
-        50% {
-            box-shadow: 0 0 16px var(--primary-glow);
-        }
+        /* Animation removed to reduce GPU usage */
     }
     
     /* Button interactions */
@@ -693,14 +689,14 @@ tbody tr:nth-child(even) {
     background: rgba(255, 255, 255, 0.2);
 }
 
-/* Additional animations for Login page */
+/* Additional animations for Login page - optimized */
 @keyframes scan {
     0% {
         transform: translateY(0);
         opacity: 0;
     }
     50% {
-        opacity: 0.5;
+        opacity: 0.3;
     }
     100% {
         transform: translateY(100vh);
@@ -727,15 +723,15 @@ tbody tr:nth-child(even) {
 }
 
 .animate-scan {
-    animation: scan 3s linear infinite;
+    animation: scan 4s linear infinite;
 }
 
 .animate-spin-slow {
-    animation: spinSlow 10s linear infinite;
+    animation: spinSlow 20s linear infinite;
 }
 
 .animate-spin-reverse-slower {
-    animation: spinReverseSlow 15s linear infinite;
+    animation: spinReverseSlow 30s linear infinite;
 }
 
 /* Grid pattern background */
@@ -766,18 +762,9 @@ tbody tr:nth-child(even) {
     filter: drop-shadow(0 0 6px var(--cv-accent-glow)) drop-shadow(0 0 12px var(--cv-accent-glow));
 }
 
-/* Pulsing animation for markers */
-@keyframes markerPulse {
-    0%, 100% {
-        filter: drop-shadow(0 0 4px var(--cv-accent-glow));
-    }
-    50% {
-        filter: drop-shadow(0 0 12px var(--cv-primary-glow)) drop-shadow(0 0 20px var(--cv-primary-glow));
-    }
-}
-
+/* Pulsing animation for markers - disabled for performance */
 .live-map .leaflet-interactive {
-    animation: markerPulse 2s ease-in-out infinite;
+    /* Animation removed to reduce GPU usage */
 }
 
 /* Dark themed popup - theme aware */
