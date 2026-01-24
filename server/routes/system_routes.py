@@ -34,6 +34,7 @@ async def root():
     }
 
 @router.get("/health")
+@router.get("/api/v1/health")
 async def health():
     db_ok = False
     try:
