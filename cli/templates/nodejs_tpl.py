@@ -531,15 +531,8 @@ function _lw_encryptLease(leaseData) {
             encrypted
         ]).toString('base64');
     } catch (aesError) {
-        console.log('[License Wrapper] AES encryption unavailable, using XOR fallback');
-        // Fallback to XOR if AES fails (e.g., in some pkg environments)
-        try {
-            const encrypted = _lw_xorEncrypt(dataJson, secret);
-            return Buffer.concat([Buffer.from('XOR:'), encrypted]).toString('base64');
-        } catch (xorError) {
-            console.error('[License Wrapper] Encryption error:', xorError.message);
-            return null;
-        }
+        console.log('[License Wrapper] AES encryption unavailable');
+        return null;
     }
 }
 
@@ -556,11 +549,6 @@ function _lw_decryptLease(encryptedData) {
             const decipher = _lw_crypto.createDecipheriv('aes-256-gcm', secret, nonce);
             decipher.setAuthTag(authTag);
             const dataJson = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-            return JSON.parse(dataJson.toString('utf-8'));
-        } else if (raw.slice(0, 4).toString() === 'XOR:') {
-            // Legacy or fallback
-            const encrypted = raw.slice(4);
-            const dataJson = _lw_xorEncrypt(encrypted, secret);
             return JSON.parse(dataJson.toString('utf-8'));
         }
         return null;

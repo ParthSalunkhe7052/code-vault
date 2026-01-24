@@ -14,8 +14,8 @@ echo Press Ctrl+C to stop all servers
 echo ========================================
 echo.
 
-:: Change to CodeVaultV1 directory
-cd /d "%~dp0"
+:: Change to CodeVaultV1 root directory (one level up from bin)
+cd /d "%~dp0.."
 
 :: Start Backend Server in new window
 start "CodeVault Backend" cmd /k "cd server && python main.py"

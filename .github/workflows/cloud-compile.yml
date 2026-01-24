@@ -280,7 +280,7 @@ jobs:
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repo (for scripts)
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
@@ -331,6 +331,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y patchelf python3-tk
+          # Install dependencies for Cloud Runner AND Nuitka
           pip install nuitka ordered-set zstandard requests cryptography
 
       - name: Install pkg
@@ -403,6 +404,16 @@ jobs:
           
           chmod +x "$exe_name"
           tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "$exe_name"
+
+      - name: Update progress - Starting upload
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
 
       - name: Upload to R2
         env:
@@ -491,7 +502,7 @@ jobs:
     timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
     
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repo (for scripts)
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
@@ -539,7 +550,9 @@ jobs:
 
       - name: Install dependencies
         if: ${{ github.event.inputs.language == 'python' }}
-        run: pip install nuitka ordered-set zstandard requests cryptography
+        run: |
+          # Install dependencies for Cloud Runner AND Nuitka
+          pip install nuitka ordered-set zstandard requests cryptography
 
       - name: Install pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}

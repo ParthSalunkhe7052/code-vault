@@ -278,9 +278,8 @@ def _cv_encrypt_lease(lease_data):
             ciphertext = aesgcm.encrypt(nonce, data_json, None)
             return _cv_base64.b64encode(b"AES:" + nonce + ciphertext).decode()
         except ImportError:
-            # Fallback to XOR if cryptography not available
-            encrypted = _cv_xor_encrypt(data_json, secret)
-            return _cv_base64.b64encode(b"XOR:" + encrypted).decode()
+            # Cryptography not available - fail securely
+            return None
     except Exception:
         return None
 
@@ -301,10 +300,6 @@ def _cv_decrypt_lease(encrypted_data):
                 return _cv_json.loads(data_json.decode('utf-8'))
             except Exception:
                 return None
-        elif raw.startswith(b"XOR:"):
-            encrypted = raw[4:]
-            data_json = _cv_xor_encrypt(encrypted, secret)
-            return _cv_json.loads(data_json.decode('utf-8'))
         else:
             return None
     except Exception:

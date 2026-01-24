@@ -275,7 +275,8 @@ Placeholders replaced at compile time:
         function setStatus(message, type) {
             status.className = 'status ' + type;
             if (type === 'loading') {
-                status.innerHTML = '<span class="spinner"></span>' + message;
+                status.innerHTML = '<span class="spinner"></span>';
+                status.appendChild(document.createTextNode(message));
             } else {
                 status.textContent = message;
             }

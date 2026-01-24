@@ -267,9 +267,8 @@ def _lw_encrypt_lease(lease_data):
             ciphertext = aesgcm.encrypt(nonce, data_json, None)
             return _lw_base64.b64encode(b"AES:" + nonce + ciphertext).decode()
         except ImportError:
-            # Fallback to XOR if cryptography not available
-            encrypted = _lw_xor_encrypt(data_json, secret)
-            return _lw_base64.b64encode(b"XOR:" + encrypted).decode()
+            # Cryptography not available - fail securely
+            return None
     except Exception as e:
         print(f"[License Wrapper] Encryption error: {e}")
         return None
@@ -291,10 +290,6 @@ def _lw_decrypt_lease(encrypted_data):
                 return _lw_json.loads(data_json.decode('utf-8'))
             except Exception:
                 return None
-        elif raw.startswith(b"XOR:"):
-            encrypted = raw[4:]
-            data_json = _lw_xor_encrypt(encrypted, secret)
-            return _lw_json.loads(data_json.decode('utf-8'))
         else:
             return None
     except Exception as e:

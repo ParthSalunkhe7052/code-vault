@@ -220,7 +220,7 @@ class TestStripeProductionRequirements:
 
         # Sensitive data that should be sanitized
         sensitive_data = [
-            "sk_live_abcdefghijklmnop",
+            "sk_test_abcdefghijklmnop",
             "whsec_secretkey123",
             "customer@email.com",
         ]
