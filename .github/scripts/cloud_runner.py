@@ -751,7 +751,9 @@ class CloudRunner:
             "test", "unittest", "pytest", "pdb", "doctest", "trace", "pyclbr", "pstats", "profile", "cProfile",
             "imaplib", "poplib", "smtplib", "nntplib", "ftplib", "telnetlib",
             "cgi", "cgitb", "wsgiref", "http.server", "xmlrpc", "pydoc", "webbrowser", "turtle", "turtledemo",
-            "idlelib", "tkinter", "curses"
+            "idlelib", "tkinter", "curses",
+            # Heavy libraries that cause Nuitka recursion issues - compiled as bytecode instead
+            "sqlalchemy", "pandas", "numpy", "scipy", "PIL", "matplotlib", "certifi"
         ]
         
         compatibility_mode = self.config.get("compatibility_mode", False)
