@@ -2,13 +2,10 @@
 
 <div align="center">
 
-![CodeVault Banner](https://via.placeholder.com/1200x300?text=CodeVault+Software+Monetization+Platform)
-
 ### **The Infrastructure for Selling Desktop Software.**
 Secure, license, and distribute your Python & Node.js applications with a single command.
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/ParthSalunkhe7052/code-vault/main.yml?branch=main&style=flat-square)](https://github.com/ParthSalunkhe7052/code-vault/actions)
-[![PyPI version](https://img.shields.io/pypi/v/codevault-cli?style=flat-square&color=blue)](https://pypi.org/project/codevault-cli/)
 [![License](https://img.shields.io/badge/license-MIT-gray.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-win%20|%20mac%20|%20linux-lightgrey?style=flat-square)]()
 
