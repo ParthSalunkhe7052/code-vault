@@ -8,15 +8,13 @@ import hashlib
 import json
 import logging
 import secrets
-import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 
 from database import get_db, release_db
-from utils import generate_license_key, utc_now
+from utils import generate_license_key
 from email_service import notify_license_created
-from config import ENVIRONMENT
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +100,10 @@ async def whop_webhook(request: Request, background_tasks: BackgroundTasks):
         if existing:
             return {"status": "success", "message": "Already processed"}
 
-        # Generate License
-        license_id = secrets.token_hex(16)
+        # Create license logic
         license_key = generate_license_key()
         max_machines = 1 
-        expires_at = None 
+        # expires_at = None  # Unused
 
         await conn.execute("""
             INSERT INTO licenses (

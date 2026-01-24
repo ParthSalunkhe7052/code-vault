@@ -4,111 +4,128 @@
 
 ![CodeVault Banner](https://via.placeholder.com/1200x300?text=CodeVault+Software+Monetization+Platform)
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ParthSalunkhe7052/code-vault/actions)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
-[![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org/)
+### **The Infrastructure for Selling Desktop Software.**
+Secure, license, and distribute your Python & Node.js applications with a single command.
 
-**Secure, Monetize, and Distribute your Python & Node.js Applications.**
+[![Build Status](https://img.shields.io/github/actions/workflow/status/ParthSalunkhe7052/code-vault/main.yml?branch=main&style=flat-square)](https://github.com/ParthSalunkhe7052/code-vault/actions)
+[![PyPI version](https://img.shields.io/pypi/v/codevault-cli?style=flat-square&color=blue)](https://pypi.org/project/codevault-cli/)
+[![License](https://img.shields.io/badge/license-MIT-gray.svg?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-win%20|%20mac%20|%20linux-lightgrey?style=flat-square)]()
 
-[Documentation](docs/README.md) • [CLI Reference](cli/README.md) • [Web Dashboard](frontend/README.md)
+[**Documentation**](docs/README.md) • [**Web Dashboard**](frontend/README.md) • [**CLI Reference**](cli/README.md)
 
 </div>
 
 ---
 
-## 🚀 Overview
+## ⚡ The Problem
+You want to sell your Python/Node.js tool, but:
+- **PyInstaller** builds are easily decompiled in seconds.
+- **Licensing** requires setting up complex servers, databases, and payment gateways.
+- **Hardware Locking** is error-prone and frustrates users.
 
-CodeVault is a comprehensive platform for developers to protect and monetize their software. It wraps your scripts with enterprise-grade license validation, hardware locking, and compiles them into native machine code to prevent reverse engineering.
+## 💎 The Solution: CodeVault
+CodeVault is an all-in-one platform that turns your script into a commercial product. We handle the **Compilation**, **Protection**, and **Licensing** so you can focus on the code.
 
-It consists of two main components:
-1.  **The Core Platform**: A web dashboard and API to manage licenses, customers, and cloud builds.
-2.  **The Compiler**: A CLI tool and cloud service that injects protection and compiles your code.
-
-## ✨ Key Features
+### Features at a Glance
 
 | Feature | Description |
-|---------|-------------|
-| **🛡️ License Protection** | Embed remote license validation directly into your compiled executable. |
-| **🔒 HWID Locking** | Bind licenses to specific hardware signatures (CPU, Motherboard, Disk). |
-| **☁️ Cloud Build** | Compile Native Windows/Linux/Mac apps without local environment setup. |
-| **🔨 Nuitka Power** | Uses Nuitka to compile Python to C, then to machine code. Not just a generic wrapper. |
-| **⚡ Fast Mode** | Rapid iteration builds for development and testing cycles. |
-| **📦 Node.js Support** | Full support for protecting and compiling Node.js applications. |
-| **🔌 Offline Lease** | Allow applications to run offline for a configurable grace period (default 24h). |
+| :--- | :--- |
+| **🛡️ Native Compilation** | We don't just bundle. We compile Python to C (via Nuitka) and machine code, making reverse engineering prohibitively expensive. |
+| **🔑 Enterprise Licensing** | Built-in support for **Offline Leases**, Floating Licenses, and Hardware ID (HWID) locking (Motherboard + CPU + Disk). |
+| **⚡ Cloud Builds** | Compile native binaries for Windows, MacOS, and Linux without needing those OSs locally. |
+| **💰 Stripe Integration** | (Beta) Automatically issue licenses upon payment. |
+| **🔌 Offline-First** | Apps validate via a cryptographically signed lease. No constant internet connection required. |
 
-## 🛠️ Quick Start
+---
 
-### 1. Installation
+## 🚀 Quick Start
 
-Install the CLI tool to get started with local management and builds.
+Get your application protected and ready for sale in less than 5 minutes.
 
+### 1. Install the CLI
 ```bash
 pip install codevault-cli
 ```
 
-### 2. Login
-
-Authenticate with your CodeVault account.
-
+### 2. Initialize Project
+Navigate to your project root and generate the configuration.
 ```bash
-codevault login
+codevault init --name "My Trading Bot" --type python
 ```
 
-### 3. Initialize a Project
-
+### 3. Build & Protect
+Compile your app locally or on our cloud runners.
 ```bash
-# Initialize in current directory
-codevault init
+# Local Build (Uses Docker or local toolchain)
+codevault build --release
+
+# Cloud Build (Remote compilation)
+codevault build --cloud --platform win64
 ```
 
-### 4. Build & Protect
+> **Result:** A single, standalone executable `dist/MyTradingBot.exe` that prompts for a license key on startup.
 
-```bash
-# Local compilation
-codevault build
+---
 
-# Cloud compilation (no local dependencies)
-codevault build --cloud
-```
+## 🆚 Comparison
 
-## 📖 Documentation
+Why use CodeVault over other tools?
 
-- **[Cloud Build Architecture](docs/cloud-build.md)**: How our remote compilation system works.
-- **[API Reference](docs/api-reference.md)**: Integrate license checks into custom apps.
-- **[CLI Reference](cli/README.md)**: Full command-line usage guide.
-- **[Performance](docs/PERFORMANCE_OPTIMIZATION.md)**: Frontend optimization details.
+| Feature | **CodeVault** | PyInstaller / Pkg | PyArmor | Keygen.sh |
+| :--- | :---: | :---: | :---: | :---: |
+| **Decompilation Protection** | ⭐⭐⭐⭐⭐ (Native C) | ❌ (Easy) | ⭐⭐⭐⭐ (Obfuscation) | ❌ (API Only) |
+| **License Management** | ✅ Built-in | ❌ | ❌ | ✅ |
+| **Hardware Locking** | ✅ Automatic | ❌ | ✅ (Manual) | ✅ (API) |
+| **Cloud Compilation** | ✅ | ❌ | ❌ | ❌ |
+| **Web Dashboard** | ✅ | ❌ | ❌ | ✅ |
+
+---
 
 ## 🏗️ Architecture
 
+CodeVault bridges your local development environment with a secure cloud infrastructure.
+
 ```mermaid
-graph TD
-    Client[Developer Client] -->|CLI/Web| API[CodeVault API]
-    API --> DB[(PostgreSQL)]
-    API --> Redis[(Redis Queue)]
-    
-    subgraph "Cloud Build System"
-        Redis --> Worker[Build Runner]
-        Worker -->|Docker| Compiler[Nuitka/Pkg Container]
-        Compiler --> R2[(Artifact Storage)]
+flowchart LR
+    subgraph Developer["💻 Developer Environment"]
+        Code[Source Code]
+        CLI[CodeVault CLI]
     end
-    
-    subgraph "License System"
-        EndUser[End User App] -->|Validate| API
+
+    subgraph Cloud["☁️ CodeVault Cloud"]
+        API[API Gateway]
+        Worker[Build Worker]
+        DB[(License DB)]
+        R2[(Artifact Storage)]
     end
+
+    subgraph User["👤 End User"]
+        App[Protected App.exe]
+    end
+
+    Code -->|Init| CLI
+    CLI -->|Upload Source| API
+    API -->|Queue Job| Worker
+    Worker -->|Nuitka Compile| Worker
+    Worker -->|Store Artifact| R2
+    
+    App -->|1. Validate Key| API
+    API -->|2. Check HWID| DB
+    API -.->|3. Signed Lease| App
 ```
 
 ## 💻 Tech Stack
 
-- **Backend**: Python 3.12, FastAPI, SQLAlchemy
-- **Frontend**: React 18, Vite, Tailwind CSS
-- **Infrastructure**: Docker, Redis, Cloudflare R2
-- **Compilation**: Nuitka (Python), Pkg (Node.js)
+- **CLI / Compiler:** Python 3.12, Nuitka, Typer
+- **Backend:** FastAPI, SQLAlchemy, Redis
+- **Frontend:** React 18, TypeScript, Tailwind CSS
+- **Infrastructure:** Docker, Cloudflare R2
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We are open source! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run the stack locally.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT © [CodeVault Team](https://github.com/ParthSalunkhe7052)

@@ -269,7 +269,7 @@ async def start_cloud_build(
     try:
         # 1. Tier Enforcement & Platform Restrictions
         tier = await get_user_tier(user["id"], conn)
-        limits = await get_user_tier_limits(user["id"], conn)
+        # limits = await get_user_tier_limits(user["id"], conn)  # Unused
         
         # Platform restrictions based on tier
         if tier["tier"] == "free":
