@@ -52,6 +52,7 @@ class CloudBuildRequest(BaseModel):
     project_id: str
     license_id: Optional[str] = None
     target_platforms: List[str] = ["windows"]  # windows, macos, linux
+    compatibility_mode: bool = False  # Toggle for Turbo Mode optimizations
 
 
 class CloudBuildResponse(BaseModel):
@@ -375,6 +376,7 @@ async def start_cloud_build(
             "license_key": license_key,
             "api_url": f"{public_api_url}/api/v1/license/validate",
             "plan_tier": tier["tier"],  # Pass tier for dynamic timeout
+            "compatibility_mode": request.compatibility_mode,
         }
         
         # Insert Main Build
