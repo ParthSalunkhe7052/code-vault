@@ -725,7 +725,7 @@ class CloudRunner:
             "--onefile",
             "--remove-output",
             "--assume-yes-for-downloads",
-            "--show-progress",
+            # "--show-progress", # Disabled to reduce CI log spam
         ]
         
         # Add macOS specific flags
