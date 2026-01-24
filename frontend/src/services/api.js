@@ -40,11 +40,11 @@ let cachedToken = null;
 // Detect if running in Tauri desktop app
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
-// In Tauri, we need the full URL since there's no Vite proxy
-// In browser dev mode, use relative path (Vite proxy handles it)
-const API_BASE_URL = isTauri
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1`  // Direct to backend server
-    : '/api/v1';                       // Vite proxy in dev
+// In Tauri or Production Web, we need the full URL
+// In local dev mode, use relative path (Vite proxy handles it)
+const API_BASE_URL = (isTauri || import.meta.env.PROD)
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1`
+    : '/api/v1';
 
 const api = axios.create({
     baseURL: API_BASE_URL,
