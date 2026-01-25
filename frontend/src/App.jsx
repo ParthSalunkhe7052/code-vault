@@ -24,7 +24,6 @@ const Webhooks = lazy(() => import('./pages/Webhooks'));
 const Settings = lazy(() => import('./pages/Settings'));
 const BuildSettings = lazy(() => import('./pages/BuildSettings'));
 const Pricing = lazy(() => import('./pages/Pricing'));
-const Billing = lazy(() => import('./pages/Billing'));
 
 // =============================================================================
 // Loading Components
@@ -211,11 +210,6 @@ function App() {
                                     <Route path="pricing" element={
                                         <LazyPage>
                                             <Pricing />
-                                        </LazyPage>
-                                    } />
-                                    <Route path="billing" element={
-                                        <LazyPage>
-                                            <Billing />
                                         </LazyPage>
                                     } />
                                 </Route>
