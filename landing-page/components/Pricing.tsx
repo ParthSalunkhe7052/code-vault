@@ -8,7 +8,7 @@ const PricingCard: React.FC<{
   recommended?: boolean;
   ctaLink: string;
 }> = ({ tier, price, features, recommended = false, ctaLink }) => (
-  <div className={`relative p-8 rounded-2xl border ${recommended ? 'border-blue-500/50 bg-blue-500/[0.03]' : 'border-white/10 bg-white/[0.02]'} flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02]`}>
+  <div className={`relative p-8 rounded-2xl border mt-4 ${recommended ? 'border-blue-500/50 bg-blue-500/[0.03]' : 'border-white/10 bg-white/[0.02]'} flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02]`}>
     {recommended && (
       <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-500 text-white text-xs font-bold rounded-full uppercase tracking-wider shadow-lg shadow-blue-500/20">
         Most Popular

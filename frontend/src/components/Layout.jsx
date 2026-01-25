@@ -16,7 +16,6 @@ const Layout = () => {
     const { settings } = useSettings();
     const isDarkMatter = settings.theme === 'dark-matter';
 
-    // Reactive user state that updates on 'user-updated' events
     const [user, setUser] = useState(null);
 
     useEffect(() => {
@@ -26,20 +25,16 @@ const Layout = () => {
                 setUser(userData);
             } catch (error) {
                 console.error('Failed to load user:', error);
-                // Could show error message or redirect
             }
         };
         loadUser();
 
-        // Listen for user updates from Billing page or other sources
         const handleUserUpdate = () => loadUser();
         window.addEventListener('user-updated', handleUserUpdate);
         return () => window.removeEventListener('user-updated', handleUserUpdate);
     }, []);
 
     const isAdmin = user?.role === 'admin';
-
-    // Determine plan badge
     const userPlan = user?.plan || 'free';
     const PlanIcon = userPlan === 'enterprise' ? Crown : userPlan === 'pro' ? Zap : Sparkles;
     const planColor = userPlan === 'enterprise' ? 'text-amber-400' : userPlan === 'pro' ? 'text-violet-400' : 'text-slate-400';
@@ -50,28 +45,28 @@ const Layout = () => {
         navigate('/login');
     };
 
+    // Modified Nav Items: Pricing moved above Settings
     const navItems = [
         { path: '/', icon: iconDashboard, label: 'Dashboard', isImage: true },
         { path: '/projects', icon: iconProjects, label: 'Projects', isImage: true },
         { path: '/licenses', icon: iconKeys, label: 'Access Keys', isImage: true },
         { path: '/webhooks', icon: iconWebhooks, label: 'Webhooks', isImage: true },
+        // Pricing manually added with an icon since we don't have an image asset for it
+        { path: '/pricing', icon: Crown, label: 'Pricing', isImage: false },
         { path: '/settings', icon: iconSettings, label: 'Settings', isImage: true },
     ];
 
-    // Theme-aware primary color classes
     const primaryActiveClass = isDarkMatter
         ? 'bg-[var(--cv-primary)]/10 text-[var(--cv-text)] border-[var(--cv-primary)]/20 shadow-[0_0_15px_-5px_var(--cv-primary-glow)]'
         : 'bg-primary/10 text-white border-primary/20 shadow-[0_0_15px_-5px_rgba(99,102,241,0.3)]';
 
     return (
         <div className="flex h-screen w-full text-slate-200 overflow-hidden font-sans selection:bg-primary/30 selection:text-primary-light" style={{ backgroundColor: 'var(--cv-bg)' }}>
-            {/* Background Effects */}
             <div className="fixed inset-0 bg-black pointer-events-none z-0" />
             <img src={backgroundMain} alt="Background" className={`fixed inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen z-0 ${isDarkMatter ? 'opacity-20' : 'opacity-40'}`} />
             <div className="fixed inset-0 bg-grid-pattern opacity-10 pointer-events-none z-0" />
             <div className="fixed inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(to bottom, transparent, var(--cv-bg) 80%, var(--cv-bg))` }} />
 
-            {/* Sidebar */}
             <aside className="w-72 flex flex-col border-r backdrop-blur-xl relative z-20" style={{ borderColor: 'var(--cv-border)', backgroundColor: 'var(--cv-card)' }}>
                 <div className="p-6 border-b" style={{ borderColor: 'var(--cv-border)' }}>
                     <div className="flex items-center gap-3">
@@ -89,7 +84,9 @@ const Layout = () => {
                     <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--cv-text-muted)' }}>
                         Mission Control
                     </div>
-                    {navItems.map((item) => (
+                    {navItems.map((item) => {
+                        const IconComponent = item.isImage ? null : item.icon;
+                        return (
                         <NavLink
                             key={item.path}
                             to={item.path}
@@ -105,22 +102,27 @@ const Layout = () => {
                                 transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
                             })}
                         >
-                            <img
-                                src={item.icon}
-                                alt={item.label}
-                                className={`w-8 h-8 object-contain mix-blend-screen transition-opacity duration-150 ${location.pathname === item.path || (item.path === '/' && location.pathname === '/')
-                                    ? ''
-                                    : 'opacity-70 hover:opacity-100'
-                                    }`}
-                            />
+                            {item.isImage ? (
+                                <img
+                                    src={item.icon}
+                                    alt={item.label}
+                                    className={`w-8 h-8 object-contain mix-blend-screen transition-opacity duration-150 ${location.pathname === item.path || (item.path === '/' && location.pathname === '/')
+                                        ? ''
+                                        : 'opacity-70 hover:opacity-100'
+                                        }`}
+                                />
+                            ) : (
+                                <div className="w-8 h-8 flex items-center justify-center">
+                                     <IconComponent size={20} />
+                                </div>
+                            )}
                             <span className="font-medium tracking-wide">{item.label}</span>
                             {(location.pathname === item.path || (item.path === '/' && location.pathname === '/')) && (
                                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full" style={{ backgroundColor: 'var(--cv-primary)', boxShadow: '0 0 6px var(--cv-primary-glow)' }} />
                             )}
                         </NavLink>
-                    ))}
+                    )})}
 
-                    {/* Admin Section - Only visible to admins */}
                     {isAdmin && (
                         <>
                             <div className="mt-6 px-4 py-2 text-[10px] font-bold text-amber-500/70 uppercase tracking-widest">
@@ -134,9 +136,6 @@ const Layout = () => {
                                         : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
                                     }`
                                 }
-                                style={({ isActive }) => ({
-                                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
-                                })}
                             >
                                 <div className="w-8 h-8 flex items-center justify-center">
                                     <Shield size={24} className="text-amber-400" />
@@ -149,7 +148,6 @@ const Layout = () => {
                         </>
                     )}
 
-                    {/* Build Tools Section */}
                     <div className="mt-6 px-4 py-2 text-[10px] font-bold text-purple-500/70 uppercase tracking-widest">
                         Build Tools
                     </div>
@@ -161,9 +159,6 @@ const Layout = () => {
                                 : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
                             }`
                         }
-                        style={({ isActive }) => ({
-                            transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
-                        })}
                     >
                         <div className="w-8 h-8 flex items-center justify-center">
                             <Activity size={24} className="text-purple-400" />
@@ -171,56 +166,6 @@ const Layout = () => {
                         <span className="font-medium tracking-wide">Build Settings</span>
                         {location.pathname === '/build-settings' && (
                             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-purple-500 rounded-l-full shadow-[0_0_6px_rgba(168,85,247,0.6)]" />
-                        )}
-                    </NavLink>
-
-                    {/* Subscription Section */}
-                    <div className="mt-6 px-4 py-2 text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest">
-                        Subscription
-                    </div>
-                    <NavLink
-                        to="/pricing"
-                        className={({ isActive }) =>
-                            `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_-3px_rgba(16,185,129,0.3)]'
-                                : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
-                            }`
-                        }
-                        style={({ isActive }) => ({
-                            transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
-                        })}
-                    >
-                        <div className="w-8 h-8 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                            </svg>
-                        </div>
-                        <span className="font-medium tracking-wide">Pricing</span>
-                        {location.pathname === '/pricing' && (
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-emerald-500 rounded-l-full shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
-                        )}
-                    </NavLink>
-                    <NavLink
-                        to="/billing"
-                        className={({ isActive }) =>
-                            `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_-3px_rgba(16,185,129,0.3)]'
-                                : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
-                            }`
-                        }
-                        style={({ isActive }) => ({
-                            transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
-                        })}
-                    >
-                        <div className="w-8 h-8 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                                <rect width="20" height="14" x="2" y="5" rx="2" />
-                                <line x1="2" x2="22" y1="10" y2="10" />
-                            </svg>
-                        </div>
-                        <span className="font-medium tracking-wide">Billing</span>
-                        {location.pathname === '/billing' && (
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-emerald-500 rounded-l-full shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
                         )}
                     </NavLink>
 
@@ -239,7 +184,6 @@ const Layout = () => {
                 </nav>
 
                 <div className="p-4 border-t" style={{ borderColor: 'var(--cv-border)', backgroundColor: 'var(--cv-bg-secondary)' }}>
-                    {/* User Info with Plan Badge */}
                     <div className="mb-4 flex items-center gap-3 px-2">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${planBg}`}>
                             <PlanIcon size={20} className={planColor} />
@@ -263,7 +207,6 @@ const Layout = () => {
                 </div>
             </aside>
 
-            {/* Main Content */}
             <main className="flex-1 overflow-hidden relative z-10">
                 <div className="h-full overflow-y-auto p-8 scroll-smooth">
                     <Outlet />
@@ -274,4 +217,3 @@ const Layout = () => {
 };
 
 export default Layout;
-

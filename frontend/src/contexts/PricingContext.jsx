@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { auth } from '../services/api';
 
 const PricingContext = createContext();
 
@@ -33,17 +34,46 @@ const LIMITS = {
 };
 
 export const PricingProvider = ({ children }) => {
-  // Mock User State - In production this would come from the backend/user profile
   const [tier, setTier] = useState(TIERS.FREE);
   const [buildCredits, setBuildCredits] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  // Initialize credits when tier changes
+  // Load User Data & Enforce Logic
   useEffect(() => {
-    setBuildCredits(LIMITS[tier].buildCredits);
-  }, [tier]);
+    const initPricing = async () => {
+      try {
+        const user = await auth.getUser();
+        
+        if (user) {
+           // ADMIN OVERRIDE: If admin, FORCE ENTERPRISE
+           if (user.role === 'admin') {
+               console.log('[Pricing] Admin detected. Forcing Enterprise tier.');
+               setTier(TIERS.ENTERPRISE);
+               setBuildCredits(Infinity);
+           } else {
+               // Normal user: Use plan from DB or default to free
+               const userPlan = user.plan || TIERS.FREE;
+               setTier(userPlan);
+               setBuildCredits(user.build_credits || LIMITS[userPlan]?.buildCredits || 0);
+           }
+        }
+      } catch (err) {
+        console.error('[Pricing] Failed to load user pricing data', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initPricing();
+    
+    // Listen for updates (optional, if other components update user)
+    window.addEventListener('user-updated', initPricing);
+    return () => window.removeEventListener('user-updated', initPricing);
+  }, []);
 
   const upgradeToPro = () => {
-    console.log('Pickle Rick: Upgrading to Pro... *Belch*');
+    // This is just for optimistic UI in the mock flow.
+    // In reality, this should trigger a backend sync.
     setTier(TIERS.PRO);
   };
 
@@ -60,7 +90,7 @@ export const PricingProvider = ({ children }) => {
   };
 
   const hasBuildCredits = () => {
-    if (tier === TIERS.FREE) return false; // Free users can't build
+    if (tier === TIERS.FREE) return false; 
     return buildCredits > 0 || LIMITS[tier].buildCredits === Infinity;
   };
 
@@ -80,6 +110,7 @@ export const PricingProvider = ({ children }) => {
       tier,
       buildCredits,
       limits: LIMITS[tier],
+      loading,
       upgradeToPro,
       downgradeToFree,
       canCreateProject,
