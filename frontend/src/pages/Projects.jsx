@@ -3,12 +3,14 @@ import { Plus, Folder } from 'lucide-react';
 import { projects as projectApi, compile as compileApi, licenses as licensesApi } from '../services/api';
 import { ProjectCard, CreateProjectModal, ProjectWizard } from '../components/projects';
 import { useToast } from '../components/Toast';
+import { usePricing } from '../contexts/PricingContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import Spinner from '../components/Spinner';
 
 const Projects = () => {
     const toast = useToast();
+    const { canCreateProject } = usePricing();
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -22,9 +24,8 @@ const Projects = () => {
         exclude_modules: [],
         nuitka_options: {},
         files: [],
-        // Build options defaults
-        skip_obfuscation: true,  // Default: skip obfuscation for faster builds
-        enable_lease: false,      // Default: lease disabled
+        skip_obfuscation: true,
+        enable_lease: false,
         compiler_options: {}
     });
     const [configLoading, setConfigLoading] = useState(false);
@@ -57,7 +58,6 @@ const Projects = () => {
         fetchProjects();
     }, []);
 
-    // Close dropdown when clicking outside
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -70,7 +70,6 @@ const Projects = () => {
         };
     }, []);
 
-    // Poll compile status - with proper cleanup to prevent memory leaks
     useEffect(() => {
         let interval;
         let isMounted = true;
@@ -88,7 +87,7 @@ const Projects = () => {
                         console.error('Failed to fetch compile status:', error);
                     }
                 }
-            }, 5000); // Increased from 2s to 5s to reduce GPU usage
+            }, 5000);
         }
 
         return () => {
@@ -118,7 +117,6 @@ const Projects = () => {
         setCompileStatus(null);
         setProjectLicenses([]);
 
-        // Fetch licenses for this project
         try {
             const licenses = await licensesApi.list(project.id);
             setProjectLicenses(licenses || []);
@@ -136,7 +134,6 @@ const Projects = () => {
                 nuitka_options: config.nuitka_options || {},
                 files: config.files || [],
                 file_tree: config.settings?.file_tree || null,
-                // Build options - load from server with defensive defaults
                 skip_obfuscation: config.skip_obfuscation ?? true,
                 enable_lease: config.enable_lease ?? false,
                 compiler_options: config.compiler_options || {}
@@ -161,14 +158,6 @@ const Projects = () => {
 
     const handleConfigSave = async () => {
         try {
-            if (import.meta.env.DEV) {
-                console.log('[CONFIG SAVE] Saving config:', {
-                    skip_obfuscation: configData.skip_obfuscation,
-                    enable_lease: configData.enable_lease,
-                    compiler_options: configData.compiler_options
-                });
-            }
-
             await projectApi.updateConfig(selectedProject.id, {
                 entry_file: configData.entry_file,
                 output_name: configData.output_name,
@@ -176,7 +165,6 @@ const Projects = () => {
                 exclude_modules: configData.exclude_modules,
                 nuitka_options: configData.nuitka_options,
                 compiler_options: configData.compiler_options,
-                // Build options
                 skip_obfuscation: configData.skip_obfuscation,
                 enable_lease: configData.enable_lease
             });
@@ -191,12 +179,10 @@ const Projects = () => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
-        // Validation constants
-        const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
-        const MAX_TOTAL_SIZE = 500 * 1024 * 1024; // 500MB total
+        const MAX_FILE_SIZE = 100 * 1024 * 1024;
+        const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
         const ALLOWED_EXTENSIONS = ['.py', '.js', '.ts', '.json', '.txt', '.yml', '.yaml', '.md', '.html', '.css', '.jsx', '.tsx', '.mjs', '.cjs'];
 
-        // Validate file sizes
         let totalSize = 0;
         for (let i = 0; i < files.length; i++) {
             if (files[i].size > MAX_FILE_SIZE) {
@@ -211,7 +197,6 @@ const Projects = () => {
             return;
         }
 
-        // Warn on potentially unsupported file extensions
         for (let i = 0; i < files.length; i++) {
             const ext = '.' + files[i].name.split('.').pop().toLowerCase();
             if (!ALLOWED_EXTENSIONS.includes(ext)) {
@@ -222,9 +207,6 @@ const Projects = () => {
         setUploadProgress(true);
         try {
             const uploaded = await projectApi.uploadFiles(selectedProject.id, files);
-            if (import.meta.env.DEV) {
-                console.log('Upload response:', uploaded);
-            }
             if (uploaded && Array.isArray(uploaded)) {
                 setConfigData(prev => ({
                     ...prev,
@@ -252,8 +234,7 @@ const Projects = () => {
             return;
         }
 
-        // Validate ZIP file size
-        const MAX_ZIP_SIZE = 500 * 1024 * 1024; // 500MB
+        const MAX_ZIP_SIZE = 500 * 1024 * 1024;
         if (file.size > MAX_ZIP_SIZE) {
             toast.error('ZIP file exceeds 500MB limit');
             return;
@@ -266,8 +247,8 @@ const Projects = () => {
             setConfigData(prev => ({
                 ...prev,
                 file_tree: result.structure,
-                entry_file: result.structure.entry_point || '', // Auto-set entry file
-                files: [] // Clear individual files when ZIP is uploaded
+                entry_file: result.structure.entry_point || '',
+                files: []
             }));
 
             toast.success(`✅ Uploaded ${result.file_count} files from ZIP!`);
@@ -276,7 +257,7 @@ const Projects = () => {
             toast.error('Failed to upload ZIP: ' + (error.response?.data?.detail || error.message));
         } finally {
             setUploadProgress(false);
-            e.target.value = ''; // Reset file input
+            e.target.value = '';
         }
     };
 
@@ -301,8 +282,6 @@ const Projects = () => {
             }
         });
     };
-
-
 
     const handleDeleteProject = async (projectId) => {
         setConfirmDialog({
@@ -379,6 +358,7 @@ const Projects = () => {
                 newProject={newProject}
                 setNewProject={setNewProject}
                 onSubmit={handleCreate}
+                projectCount={projects.length}
             />
 
             <ProjectWizard
@@ -399,7 +379,6 @@ const Projects = () => {
                 licenses={projectLicenses}
             />
 
-            {/* Confirm Dialog */}
             <ConfirmDialog
                 isOpen={confirmDialog.isOpen}
                 onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}

@@ -5,6 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { BuildProvider } from './contexts/BuildContext';
+import { PricingProvider } from './contexts/PricingContext';
 import { auth, initializeAuth } from './services/api';
 
 // =============================================================================
@@ -147,9 +148,10 @@ function App() {
         <ErrorBoundary>
             <BuildProvider>
                 <SettingsProvider>
-                    <ToastProvider>
-                        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                            <Routes>
+                    <PricingProvider>
+                        <ToastProvider>
+                            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                                <Routes>
                                 {/* Public Routes */}
                                 <Route
                                     path="/login"
@@ -223,9 +225,10 @@ function App() {
                             </Routes>
                         </BrowserRouter>
                     </ToastProvider>
-                </SettingsProvider>
-            </BuildProvider>
-        </ErrorBoundary>
+                </PricingProvider>
+            </SettingsProvider>
+        </BuildProvider>
+    </ErrorBoundary>
     );
 }
 

@@ -7,7 +7,7 @@
  * so users can navigate away and return to see their ongoing build.
  */
 
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
 const BuildContext = createContext(null);
 
@@ -26,10 +26,15 @@ export function BuildProvider({ children }) {
     // Map of projectId -> BuildState
     const [builds, setBuilds] = useState({});
 
+    // Ref to track the currently active project ID for event listeners
+    // We assume only one build runs at a time in the desktop app for now
+    const activeProjectIdRef = useRef(null);
+
     /**
      * Start a new build for a project
      */
     const startBuild = useCallback((projectId, jobId = null) => {
+        activeProjectIdRef.current = projectId; // Set active project for global listeners
         setBuilds(prev => ({
             ...prev,
             [projectId]: {
@@ -70,6 +75,86 @@ export function BuildProvider({ children }) {
                 }
             };
         });
+    }, []);
+
+    /**
+     * Global Event Listener for Tauri Compilation Events
+     * This ensures updates continue even if the Wizard is closed.
+     */
+    useEffect(() => {
+        // Only running in Tauri environment
+        if (typeof window === 'undefined' || window.__TAURI__ === undefined) return;
+
+        let unlistenProgress = null;
+        let unlistenResult = null;
+
+        const setupListeners = async () => {
+            try {
+                const { listen } = await import('@tauri-apps/api/event');
+
+                // Listen for progress
+                unlistenProgress = await listen('compilation-progress', (event) => {
+                    const projectId = activeProjectIdRef.current;
+                    if (!projectId) return;
+
+                    const { progress: prog, message } = event.payload;
+
+                    setBuilds(prev => {
+                        const current = prev[projectId] || { logs: [] };
+                        return {
+                            ...prev,
+                            [projectId]: {
+                                ...current,
+                                progress: prog,
+                                logs: [...(current.logs || []).slice(-99), message]
+                            }
+                        };
+                    });
+                });
+
+                // Listen for result
+                unlistenResult = await listen('compilation-result', (event) => {
+                    const projectId = activeProjectIdRef.current;
+                    if (!projectId) return;
+
+                    const { success, output_path, error_message } = event.payload;
+
+                    setBuilds(prev => {
+                        const current = prev[projectId] || {};
+                        const updates = success ? {
+                            status: 'completed',
+                            progress: 100,
+                            outputPath: output_path,
+                            isBuilding: false,
+                            logs: [...(current.logs || []), `✅ Build complete: ${output_path}`]
+                        } : {
+                            status: 'failed',
+                            isBuilding: false,
+                            logs: [...(current.logs || []), `❌ Build failed: ${error_message}`]
+                        };
+
+                        return {
+                            ...prev,
+                            [projectId]: { ...current, ...updates }
+                        };
+                    });
+
+                    // Clear active project after result so we don't process stray events
+                    // activeProjectIdRef.current = null; 
+                    // Keeping it might be useful if late events come in, but strictly we should be done.
+                });
+
+            } catch (err) {
+                console.error("Failed to setup global build listeners", err);
+            }
+        };
+
+        setupListeners();
+
+        return () => {
+            if (unlistenProgress) unlistenProgress();
+            if (unlistenResult) unlistenResult();
+        };
     }, []);
 
     /**

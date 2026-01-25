@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Check, X, Sparkles, Zap, Crown, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
-import { subscription, auth } from '../services/api';
-import { pricingService } from '../services/pricingService';
+import { usePricing, TIERS } from '../contexts/PricingContext';
+import { auth } from '../services/api';
 
 const PricingTier = ({
     name,
@@ -52,22 +52,12 @@ const PricingTier = ({
         </div>
 
         <div className="flex-1 space-y-3 mb-6">
-            {features.map((feature, i) => {
-                const isComingSoon = feature.toLowerCase().includes('cloud compilation');
-                return (
-                    <div key={i} className="flex items-start gap-2">
-                        <Check size={18} className="text-emerald-400 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm text-slate-300">
-                            {feature}
-                            {isComingSoon && (
-                                <span className="ml-2 px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded">
-                                    Coming Soon
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                );
-            })}
+            {features.map((feature, i) => (
+                <div key={i} className="flex items-start gap-2">
+                    <Check size={18} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm text-slate-300">{feature}</span>
+                </div>
+            ))}
 
             {limitations?.map((limitation, i) => (
                 <div key={i} className="flex items-start gap-2">
@@ -101,164 +91,111 @@ const PricingTier = ({
 
 const Pricing = () => {
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
-    const [currentPlan, setCurrentPlan] = useState('free');
+    const { tier: currentPlan, upgradeToPro, downgradeToFree } = usePricing();
     const [loading, setLoading] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
-    const [errorMessage, setErrorMessage] = useState('');
-    const [pricingConfig, setPricingConfig] = useState(null);
-
+    
     const isAuthenticated = auth.isAuthenticated();
 
-    useEffect(() => {
-        const loadData = async () => {
-            try {
-                // Load pricing config
-                const config = await pricingService.getConfig();
-                setPricingConfig(config);
-
-                // Fetch current subscription status if logged in
-                if (isAuthenticated) {
-                    const status = await subscription.getStatus();
-                    setCurrentPlan(status.plan_tier || 'free');
-                }
-            } catch (error) {
-                console.error('Failed to load data:', error);
-            }
-        };
-
-        // Check for success/canceled query params
-        if (searchParams.get('success') === 'true') {
-            setSuccessMessage('🎉 Payment successful! Welcome to your new plan.');
-        } else if (searchParams.get('canceled') === 'true') {
-            setErrorMessage('Payment was canceled. You can try again when ready.');
-        }
-
-        loadData();
-    }, [searchParams, isAuthenticated]);
-
-
-    const handleSubscribe = async (tier) => {
+    const handleSubscribe = async (targetTier) => {
         if (!isAuthenticated) {
             navigate('/login?redirect=/pricing');
             return;
         }
 
-        if (tier === 'free') return;
-
-        setLoading(tier);
-        setErrorMessage('');
-
-        try {
-            const priceId = pricingConfig?.[tier]?.price_id;
-            if (!priceId) {
-                throw new Error('Price not configured');
+        setLoading(targetTier);
+        
+        // Mock API call
+        setTimeout(() => {
+            if (targetTier === TIERS.PRO) {
+                upgradeToPro();
+                setSuccessMessage('🎉 Successfully upgraded to Pro!');
+            } else if (targetTier === TIERS.FREE) {
+                downgradeToFree();
+                setSuccessMessage('Downgraded to Free plan.');
             }
-
-            const { checkout_url } = await subscription.createCheckoutSession(
-                priceId,
-                `${window.location.origin}/billing?success=true`,
-                `${window.location.origin}/pricing?canceled=true`
-            );
-
-            // Redirect to Stripe Checkout
-            window.location.href = checkout_url;
-        } catch (error) {
-            console.error('Checkout error:', error);
-            const msg = error.response?.data?.detail || 'Connection failed.';
-            setErrorMessage(`${msg} Please check your connection and try again.`);
             setLoading('');
-        }
+        }, 1000);
     };
 
     const tiers = [
         {
-            name: pricingConfig?.free?.name || 'Free',
-            price: pricingConfig?.free?.price ?? 0,
+            name: 'Hobbyist',
+            price: 0,
             period: 'forever',
-            description: 'Get started with basics',
+            description: 'For testing and small tools',
             icon: Sparkles,
             iconColor: 'from-slate-500 to-slate-600',
-            features: pricingConfig?.free?.features || [
-                '1 project',
-                '5 licenses per project',
-                'Local compilation only',
-                'Python support',
+            features: [
+                '1 Project',
+                '50 Active Licenses',
+                'Local Builds Only',
+                'Community Support',
             ],
             limitations: [
-                'Cannot sell licenses',
-                'No cloud compilation',
-                'No analytics',
+                'No Cloud Builds',
+                'Watermarked Splash Screen',
+                'No Offline Leases'
             ],
-            tier: 'free',
+            tier: TIERS.FREE,
         },
         {
-            name: pricingConfig?.pro?.name || 'Pro',
-            price: pricingConfig?.pro?.price ?? 20,
+            name: 'Pro',
+            price: 29,
             period: 'month',
-            description: 'For indie developers',
+            description: 'For indie developers shipping apps',
             icon: Zap,
             iconColor: 'from-violet-500 to-indigo-500',
             popular: true,
-            features: pricingConfig?.pro?.features || [
-                '10 projects',
-                '100 licenses per project',
-                'Cloud compilation',
-                'Python + Node.js support',
-                'Sell licenses to customers',
-                'Analytics dashboard',
+            features: [
+                'Unlimited Projects',
+                '200 Active Licenses',
+                '10 Cloud Builds / mo',
+                'Offline Leases',
+                'No Splash Screen',
+                'Early Access Program'
             ],
-            tier: 'pro',
+            tier: TIERS.PRO,
         },
         {
-            name: pricingConfig?.enterprise?.name || 'Enterprise',
-            price: pricingConfig?.enterprise?.price ?? 50,
+            name: 'Enterprise',
+            price: 99,
             period: 'month',
-            description: 'For teams & agencies',
+            description: 'For studios and scale',
             icon: Crown,
             iconColor: 'from-amber-500 to-orange-500',
-            features: pricingConfig?.enterprise?.features || [
-                'Unlimited projects',
-                'Unlimited licenses',
-                'Cloud compilation',
-                'Python + Node.js support',
-                'Sell licenses to customers',
-                'Team collaboration (5 seats)',
-                'Priority support',
+            features: [
+                'Unlimited Projects',
+                'Unlimited Licenses',
+                'Priority Cloud Builds',
+                'Team Access (RBAC)',
+                'Dedicated Support',
             ],
-            tier: 'enterprise',
+            limitations: [
+                '$0.05 per user overage'
+            ],
+            tier: TIERS.ENTERPRISE,
         },
     ];
 
     return (
         <div className="min-h-screen py-12">
             <div className="max-w-6xl mx-auto px-6">
-                {/* Header */}
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-bold text-white mb-4">
                         Simple, Transparent Pricing
                     </h1>
                     <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-                        Choose the plan that fits your needs. Upgrade or downgrade anytime.
-                        All plans include our core license protection features.
+                        Start for free, scale when you ship.
                     </p>
                 </div>
 
-                {/* Messages */}
                 {successMessage && (
                     <div className="mb-8 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-center">
                         <p className="text-emerald-400">{successMessage}</p>
                     </div>
                 )}
 
-                {errorMessage && (
-                    <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-4 duration-300">
-                        <AlertCircle className="text-red-400" size={20} />
-                        <p className="text-red-400 font-medium">{errorMessage}</p>
-                    </div>
-                )}
-
-                {/* Pricing Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
                     {tiers.map((tier) => (
                         <PricingTier
@@ -270,78 +207,29 @@ const Pricing = () => {
                             buttonText={
                                 currentPlan === tier.tier
                                     ? 'Current Plan'
-                                    : tier.tier === 'free'
-                                        ? 'Free Forever'
-                                        : 'Subscribe'
+                                    : tier.tier === TIERS.FREE
+                                        ? 'Downgrade'
+                                        : 'Upgrade'
                             }
                         />
                     ))}
                 </div>
 
-                {/* FAQ */}
                 <div className="glass-card p-8">
                     <h2 className="text-2xl font-bold text-white mb-6 text-center">
                         Frequently Asked Questions
                     </h2>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">
-                                Can I upgrade or downgrade anytime?
-                            </h3>
-                            <p className="text-slate-400 text-sm">
-                                Yes! You can change your plan at any time. When upgrading, you'll be
-                                charged the prorated amount. When downgrading, the change takes effect
-                                at the end of your billing period.
-                            </p>
+                            <h3 className="text-lg font-semibold text-white mb-2">How does the Free tier work?</h3>
+                            <p className="text-slate-400 text-sm">You get 1 project and 50 licenses forever. Perfect for testing CodeVault.</p>
                         </div>
-
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">
-                                What payment methods do you accept?
-                            </h3>
-                            <p className="text-slate-400 text-sm">
-                                We accept all major credit cards (Visa, Mastercard, American Express),
-                                as well as Apple Pay and Google Pay for convenient mobile payments.
-                            </p>
-                        </div>
-
-                        <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">
-                                What happens to my projects if I downgrade?
-                            </h3>
-                            <p className="text-slate-400 text-sm">
-                                Your projects and licenses remain intact. However, you won't be able
-                                to create new projects beyond your plan's limit until you upgrade again.
-                            </p>
-                        </div>
-
-                        <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">
-                                Is there a money-back guarantee?
-                            </h3>
-                            <p className="text-slate-400 text-sm">
-                                Yes! If you're not satisfied within the first 7 days, contact us and
-                                we'll provide a full refund, no questions asked.
-                            </p>
+                            <h3 className="text-lg font-semibold text-white mb-2">What happens if I need more builds?</h3>
+                            <p className="text-slate-400 text-sm">Pro users get 10 builds/month. You can purchase add-on packs or upgrade to Enterprise for priority queue.</p>
                         </div>
                     </div>
                 </div>
-
-                {/* CTA */}
-                {!isAuthenticated && (
-                    <div className="text-center mt-12">
-                        <p className="text-slate-400 mb-4">
-                            Ready to get started? Create a free account first.
-                        </p>
-                        <button
-                            onClick={() => navigate('/login')}
-                            className="btn-primary px-8 py-3"
-                        >
-                            Create Free Account
-                        </button>
-                    </div>
-                )}
             </div>
         </div>
     );

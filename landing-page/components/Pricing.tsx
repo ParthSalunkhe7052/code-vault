@@ -6,10 +6,11 @@ const PricingCard: React.FC<{
   price: string;
   features: string[];
   recommended?: boolean;
-}> = ({ tier, price, features, recommended = false }) => (
-  <div className={`relative p-8 rounded-2xl border ${recommended ? 'border-blue-500/50 bg-blue-500/[0.03]' : 'border-white/10 bg-white/[0.02]'} flex flex-col h-full`}>
+  ctaLink: string;
+}> = ({ tier, price, features, recommended = false, ctaLink }) => (
+  <div className={`relative p-8 rounded-2xl border ${recommended ? 'border-blue-500/50 bg-blue-500/[0.03]' : 'border-white/10 bg-white/[0.02]'} flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02]`}>
     {recommended && (
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-500 text-white text-xs font-bold rounded-full uppercase tracking-wider">
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-500 text-white text-xs font-bold rounded-full uppercase tracking-wider shadow-lg shadow-blue-500/20">
         Most Popular
       </div>
     )}
@@ -30,9 +31,9 @@ const PricingCard: React.FC<{
       ))}
     </ul>
 
-    <a href="http://localhost:5173/login" className={`w-full py-3 rounded-lg font-medium transition-all text-center inline-block ${
+    <a href={ctaLink} className={`w-full py-3 rounded-lg font-medium transition-all text-center inline-block ${
       recommended 
-        ? 'bg-blue-600 hover:bg-blue-500 text-white' 
+        ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/25' 
         : 'bg-white/10 hover:bg-white/20 text-white'
     }`}>
       {price === '0' ? 'Get Started' : 'Subscribe'}
@@ -41,11 +42,16 @@ const PricingCard: React.FC<{
 );
 
 const Pricing: React.FC = () => {
+  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
+
   return (
-    <section id="pricing" className="py-32 relative">
-      <div className="max-w-7xl mx-auto px-6">
+    <section id="pricing" className="py-32 relative bg-[#0B0C10]">
+      {/* Background decoration */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-900/10 rounded-full blur-[100px] pointer-events-none mix-blend-screen" />
+
+      <div className="relative z-10 max-w-7xl mx-auto px-6">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-5xl font-bold mb-6">Simple pricing.</h2>
+          <h2 className="text-3xl md:text-5xl font-bold mb-6 tracking-tight">Simple pricing.</h2>
           <p className="text-slate-400 text-lg">
             Start for free, scale as you grow.
           </p>
@@ -55,6 +61,7 @@ const Pricing: React.FC = () => {
           <PricingCard 
             tier="Hobby"
             price="0"
+            ctaLink={`${APP_URL}/signup`}
             features={[
               "1 Project",
               "Local Builds Only",
@@ -67,6 +74,7 @@ const Pricing: React.FC = () => {
             tier="Pro"
             price="20"
             recommended={true}
+            ctaLink={`${APP_URL}/signup`}
             features={[
               "Unlimited Projects",
               "Cloud Builds (Win/Mac/Linux)",
@@ -79,6 +87,7 @@ const Pricing: React.FC = () => {
           <PricingCard 
             tier="Enterprise"
             price="50"
+            ctaLink={`${APP_URL}/signup`}
             features={[
               "Everything in Pro",
               "White-labeling (Custom Splash)",

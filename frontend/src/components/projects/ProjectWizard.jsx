@@ -284,55 +284,14 @@ const ProjectWizard = ({
         scanProject();
     }, [projectPath]);
 
-    // Listen to Tauri compilation events
+    // Listen to Tauri compilation events - REMOVED (Handled globally in BuildContext now)
+    // This allows the build to continue updating even if the wizard is closed.
+    /* 
     useEffect(() => {
         if (!isTauri || !isOpen || buildStatus !== 'running') return;
-
-        let unlistenProgress = null;
-        let unlistenResult = null;
-        let isMounted = true;
-
-        const setupListeners = async () => {
-            try {
-                const { listen } = await import('@tauri-apps/api/event');
-
-                // Only set up listeners if component is still mounted
-                if (!isMounted) return;
-
-                unlistenProgress = await listen('compilation-progress', (event) => {
-                    const { progress: prog, message } = event.payload;
-                    projectBuild.updateBuild({ progress: prog });
-                    projectBuild.addLog(message);
-                });
-
-                unlistenResult = await listen('compilation-result', (event) => {
-                    const { success, output_path, error_message } = event.payload;
-                    if (success) {
-                        projectBuild.complete(output_path);
-                    } else {
-                        projectBuild.fail(error_message);
-                    }
-                });
-            } catch (error) {
-                if (import.meta.env.DEV) {
-                    console.error('Failed to setup Tauri event listeners:', error);
-                }
-            }
-        };
-
-        setupListeners();
-
-        return () => {
-            isMounted = false;
-            // Clean up listeners if they were successfully set up
-            if (unlistenProgress) {
-                unlistenProgress();
-            }
-            if (unlistenResult) {
-                unlistenResult();
-            }
-        };
+        // ... (Listeners moved to BuildContext.jsx)
     }, [isOpen, buildStatus, projectBuild]);
+    */
 
     const canProceed = () => {
         switch (currentStep) {
