@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowRight, Terminal } from 'lucide-react';
 
 const Hero: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
+  const APP_URL = "https://codevault.parth7.me";
 
   return (
     <div className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-[#0B0C10]">

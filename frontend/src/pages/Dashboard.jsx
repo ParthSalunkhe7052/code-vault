@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
-import { stats, auth } from '../services/api';
+import { stats, auth, projects } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
 import UsageStats from '../components/dashboard/UsageStats';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
@@ -10,17 +10,20 @@ import ThemeToggle from '../components/ThemeToggle';
 const Dashboard = () => {
     const [dashboardStats, setDashboardStats] = useState(null);
     const [userProfile, setUserProfile] = useState(null);
+    const [projectList, setProjectList] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [statsData, userData] = await Promise.all([
+            const [statsData, userData, projectsData] = await Promise.all([
                 stats.getDashboard(),
-                auth.getProfile()
+                auth.getProfile(),
+                projects.list()
             ]);
             setDashboardStats(statsData);
             setUserProfile(userData);
+            setProjectList(projectsData || []);
         } catch (error) {
             console.error('Failed to fetch dashboard data:', error);
         } finally {
@@ -96,7 +99,7 @@ const Dashboard = () => {
                 <Link to="/projects">
                     <StatCard
                         title="Projects"
-                        value={dashboardStats?.projects || 0}
+                        value={projectList.length}
                         icon={Database}
                         color="text-blue-400"
                         subtitle="Click to manage"
@@ -133,7 +136,7 @@ const Dashboard = () => {
 
             {/* Usage Stats */}
             <UsageStats 
-                projectCount={dashboardStats?.projects || 0} 
+                projectCount={projectList.length} 
                 licenseCount={dashboardStats?.licenses?.total || 0} 
             />
 
