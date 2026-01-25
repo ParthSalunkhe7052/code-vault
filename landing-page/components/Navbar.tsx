@@ -3,6 +3,7 @@ import { Shield, Menu, X } from 'lucide-react';
 
 const Navbar: React.FC = () => {
   const [isOpen, setIsOpen] = React.useState(false);
+  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0B0C10]/80 backdrop-blur-md">
@@ -20,8 +21,8 @@ const Navbar: React.FC = () => {
           <a href="#how-it-works" className="text-sm text-gray-400 hover:text-white transition-colors">How it works</a>
           <a href="#pricing" className="text-sm text-gray-400 hover:text-white transition-colors">Pricing</a>
           <div className="flex items-center gap-4 ml-4">
-            <a href="http://localhost:5173/login" className="text-sm font-medium text-white hover:text-gray-200">Log in</a>
-            <a href="http://localhost:5173/login" className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-gray-200 transition-colors">
+            <a href={`${APP_URL}/login`} className="text-sm font-medium text-white hover:text-gray-200">Log in</a>
+            <a href={`${APP_URL}/signup`} className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-gray-200 transition-colors">
               Sign up
             </a>
           </div>
@@ -40,8 +41,8 @@ const Navbar: React.FC = () => {
           <a href="#how-it-works" className="text-gray-400 hover:text-white">How it works</a>
           <a href="#pricing" className="text-gray-400 hover:text-white">Pricing</a>
           <hr className="border-white/10" />
-          <a href="http://localhost:5173/login" className="text-white">Log in</a>
-          <a href="http://localhost:5173/login" className="bg-white text-black text-center py-2 rounded-full">Sign up</a>
+          <a href={`${APP_URL}/login`} className="text-white">Log in</a>
+          <a href={`${APP_URL}/signup`} className="bg-white text-black text-center py-2 rounded-full">Sign up</a>
         </div>
       )}
     </nav>

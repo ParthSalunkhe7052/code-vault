@@ -7,6 +7,8 @@ import Pricing from './components/Pricing';
 import Footer from './components/Footer';
 
 const App: React.FC = () => {
+  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
+
   return (
     <div className="bg-[#0B0C10] min-h-screen text-white selection:bg-purple-500/30">
       <Navbar />
@@ -25,7 +27,7 @@ const App: React.FC = () => {
              <p className="text-gray-400 mb-10 text-lg">
                Join thousands of developers who trust CodeVault to protect their revenue streams.
              </p>
-             <a href="https://app.codevault.parth7.me/login" className="bg-white text-black px-8 py-3 rounded-full font-medium hover:bg-gray-200 transition-all hover:scale-105 inline-block">
+             <a href={`${APP_URL}/signup`} className="bg-white text-black px-8 py-3 rounded-full font-medium hover:bg-gray-200 transition-all hover:scale-105 inline-block">
                Start Building Free
              </a>
            </div>

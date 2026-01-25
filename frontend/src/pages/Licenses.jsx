@@ -3,10 +3,12 @@ import { Plus, Search, Filter, Download, Ban, Trash2, CheckCircle, XCircle, Aler
 import { licenses as licenseApi, projects as projectApi } from '../services/api';
 import { CreateLicenseModal, BindingsModal } from '../components/licenses';
 import { useToast } from '../components/Toast';
+import { usePricing } from '../contexts/PricingContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const Licenses = () => {
     const toast = useToast();
+    const { canCreateLicense } = usePricing();
     const [licenses, setLicenses] = useState([]);
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -85,7 +87,7 @@ const Licenses = () => {
         // Search filter
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
-            const matchesSearch =
+            const matchesSearch = 
                 license.license_key.toLowerCase().includes(query) ||
                 (license.client_name && license.client_name.toLowerCase().includes(query)) ||
                 (license.client_email && license.client_email.toLowerCase().includes(query));
@@ -718,6 +720,7 @@ const Licenses = () => {
                 onSubmit={handleCreate}
                 onAddFeature={handleAddFeature}
                 onRemoveFeature={handleRemoveFeature}
+                licenseCount={licenses.length}
             />
 
             {/* Bindings Modal */}

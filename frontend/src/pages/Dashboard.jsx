@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
 import { stats, auth } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
+import UsageStats from '../components/dashboard/UsageStats';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -129,6 +130,12 @@ const Dashboard = () => {
                     subtitle={`${validationSuccessRate}% success rate`}
                 />
             </div>
+
+            {/* Usage Stats */}
+            <UsageStats 
+                projectCount={dashboardStats?.projects || 0} 
+                licenseCount={dashboardStats?.licenses?.total || 0} 
+            />
 
             {/* Mission Control Live Map */}
             <LiveMap />

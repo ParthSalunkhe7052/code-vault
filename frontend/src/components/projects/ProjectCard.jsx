@@ -68,6 +68,19 @@ const ProjectCard = ({
                 </div>
             </div>
 
+            {/* Building Overlay */}
+            {buildStatus === 'running' && (
+                <div className="absolute inset-0 z-10 bg-gray-950/40 backdrop-blur-[1px] rounded-xl flex items-center justify-center animate-in fade-in duration-300">
+                    <div className="bg-gray-900/90 p-3 px-5 rounded-xl border border-emerald-500/30 shadow-2xl shadow-emerald-500/10 flex items-center gap-3">
+                        <Loader size={18} className="text-emerald-400 animate-spin" />
+                        <div className="flex flex-col">
+                            <span className="text-emerald-400 font-bold text-xs tracking-wider">BUILDING</span>
+                            <span className="text-slate-400 text-[10px]">Click to view progress</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex items-start justify-between mb-6">
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_15px_-5px_rgba(99,102,241,0.3)]">
                     <Folder size={24} />

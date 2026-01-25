@@ -428,6 +428,27 @@ const Step5Build = ({
                     </div>
                 </div>
 
+                {/* Build in Progress Notification */}
+                {buildStatus === 'running' && (
+                    <div className="mx-4 mt-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-indigo-500/20 rounded-lg shrink-0">
+                                <Loader size={20} className="text-indigo-400 animate-spin" />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-white mb-1">Build in Progress</h4>
+                                <p className="text-sm text-slate-300 mb-3 leading-relaxed">
+                                    You can safely <span className="text-white font-semibold">close this wizard</span>. The build will continue in the background.
+                                </p>
+                                <div className="flex items-center gap-2 text-xs text-indigo-300 bg-indigo-500/10 p-2.5 rounded-lg border border-indigo-500/10">
+                                     <Key size={14} className="shrink-0" />
+                                     <span>Tip: Switch to the <strong>Licenses</strong> tab to create keys while you wait.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Logs Area */}
                 <div className="flex-1 overflow-y-auto p-4 font-mono text-xs space-y-1 custom-scrollbar bg-black/50">
                     {buildLogs.length > 0 ? (
