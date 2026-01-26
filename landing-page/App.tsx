@@ -7,7 +7,7 @@ import Pricing from './components/Pricing';
 import Footer from './components/Footer';
 
 const App: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
+  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
 
   return (
     <div className="bg-[#0B0C10] min-h-screen text-white selection:bg-purple-500/30">

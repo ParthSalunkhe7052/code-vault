@@ -42,7 +42,7 @@ const PricingCard: React.FC<{
 );
 
 const Pricing: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:5173";
+  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
 
   return (
     <section id="pricing" className="py-32 relative bg-[#0B0C10]">
