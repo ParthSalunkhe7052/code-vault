@@ -167,8 +167,11 @@ jobs:
         id: prepare
         run: |
           $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
-          echo "entry_file=$($config.entry_file)" >> $env:GITHUB_OUTPUT
-          echo "output_name=$($config.output_name)" >> $env:GITHUB_OUTPUT
+          $entry = if ($config.entry_file) { $config.entry_file } else { "main.py" }
+          $out = if ($config.output_name) { $config.output_name } else { "app" }
+          
+          echo "entry_file=$entry" >> $env:GITHUB_OUTPUT
+          echo "output_name=$out" >> $env:GITHUB_OUTPUT
         shell: pwsh
       
       # === PYTHON BUILD (Unified Cloud Runner) ===
@@ -369,8 +372,13 @@ jobs:
       - name: Parse config
         id: prepare
         run: |
-          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['entry_file'])")
-          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['output_name'])")
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('entry_file') or '')")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('output_name') or '')")
+          
+          # Defaults
+          [ -z "$config" ] && config="main.py"
+          [ -z "$output" ] && output="app"
+          
           echo "entry_file=$config" >> $GITHUB_OUTPUT
           echo "output_name=$output" >> $GITHUB_OUTPUT
 
@@ -590,8 +598,13 @@ jobs:
       - name: Parse config
         id: prepare
         run: |
-          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['entry_file'])")
-          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; print(json.load(sys.stdin)['output_name'])")
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('entry_file') or '')")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('output_name') or '')")
+          
+          # Defaults
+          [ -z "$config" ] && config="main.py"
+          [ -z "$output" ] && output="app"
+          
           echo "entry_file=$config" >> $GITHUB_OUTPUT
           echo "output_name=$output" >> $GITHUB_OUTPUT
 

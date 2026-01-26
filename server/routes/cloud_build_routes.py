@@ -357,8 +357,20 @@ async def start_cloud_build(
         # 4. Create Build Records
         build_id = f"bld_{secrets.token_hex(8)}"
         language = project.get("language", "python") if hasattr(project, "get") else project["language"]
-        entry_file = project_settings.get("entry_file", "main.py" if language == "python" else "index.js")
-        output_name = project_settings.get("output_name", (project.get("name", "app") if hasattr(project, "get") else project["name"]).replace(" ", "_"))
+        
+        # Helper to get setting or default
+        def get_setting(key, default):
+            val = project_settings.get(key)
+            return val if val else default
+
+        entry_file = get_setting("entry_file", "main.py" if language == "python" else "index.js")
+        
+        # Fix: Ensure output_name is never empty
+        project_name_safe = (project.get("name", "app") if hasattr(project, "get") else project["name"]).replace(" ", "_")
+        output_name = get_setting("output_name", project_name_safe)
+        
+        if not output_name:
+            output_name = "app"  # Fallback of last resort
         
         license_key = "GENERIC_BUILD"
         if request.license_id:
