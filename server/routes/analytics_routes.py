@@ -16,8 +16,6 @@ router = APIRouter(prefix="/api/v1", tags=["Analytics"])
 
 @router.get("/stats/dashboard")
 async def get_dashboard_stats(user: dict = Depends(get_current_user)):
-    import asyncio
-
     # Pre-calculate timestamps once
     now = utc_now()
     yesterday = now - timedelta(days=1)
@@ -25,150 +23,108 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     seven_days_from_now = now + timedelta(days=7)
     user_id = user["id"]
 
-    # Each query gets its own connection to avoid asyncpg concurrent operation error
-    async def get_projects():
-        conn = await get_db()
-        try:
-            return await conn.fetchval(
-                "SELECT COUNT(*) FROM projects WHERE user_id = $1", user_id
-            )
-        finally:
-            await release_db(conn)
+    # Use a single connection for all queries to avoid pool exhaustion
+    conn = await get_db()
+    try:
+        # 1. Projects Count
+        total_projects = await conn.fetchval(
+            "SELECT COUNT(*) FROM projects WHERE user_id = $1", user_id
+        )
 
-    async def get_license_stats():
-        conn = await get_db()
-        try:
-            return await conn.fetchrow(
-                """
-                SELECT COUNT(*) as total,
-                       SUM(CASE WHEN l.status = 'active' THEN 1 ELSE 0 END) as active,
-                       SUM(CASE WHEN l.status = 'revoked' THEN 1 ELSE 0 END) as revoked
-                FROM licenses l JOIN projects p ON l.project_id = p.id WHERE p.user_id = $1
-            """,
-                user_id,
-            )
-        finally:
-            await release_db(conn)
+        # 2. License Stats
+        license_stats = await conn.fetchrow(
+            """
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN l.status = 'active' THEN 1 ELSE 0 END) as active,
+                   SUM(CASE WHEN l.status = 'revoked' THEN 1 ELSE 0 END) as revoked
+            FROM licenses l JOIN projects p ON l.project_id = p.id WHERE p.user_id = $1
+        """,
+            user_id,
+        )
 
-    async def get_val_24h():
-        conn = await get_db()
-        try:
-            return await conn.fetchrow(
-                """
-                SELECT COUNT(*) as total, SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as successful
-                FROM validation_logs vl JOIN licenses l ON vl.license_id = l.id
-                JOIN projects p ON l.project_id = p.id WHERE p.user_id = $1 AND vl.created_at > $2
-            """,
-                user_id,
-                yesterday,
-            )
-        finally:
-            await release_db(conn)
+        # 3. Validations (Last 24h)
+        val_24h = await conn.fetchrow(
+            """
+            SELECT COUNT(*) as total, SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as successful
+            FROM validation_logs vl JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id WHERE p.user_id = $1 AND vl.created_at > $2
+        """,
+            user_id,
+            yesterday,
+        )
 
-    async def get_recent_activity():
-        conn = await get_db()
-        try:
-            return await conn.fetch(
-                """
-                SELECT vl.result, vl.ip_address, vl.created_at, 
-                       l.license_key, l.client_name
-                FROM validation_logs vl 
-                JOIN licenses l ON vl.license_id = l.id
-                JOIN projects p ON l.project_id = p.id 
-                WHERE p.user_id = $1
-                ORDER BY vl.created_at DESC 
-                LIMIT 10
-            """,
-                user_id,
-            )
-        finally:
-            await release_db(conn)
+        # 4. Recent Activity
+        recent_activity_rows = await conn.fetch(
+            """
+            SELECT vl.result, vl.ip_address, vl.created_at, 
+                   l.license_key, l.client_name
+            FROM validation_logs vl 
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id 
+            WHERE p.user_id = $1
+            ORDER BY vl.created_at DESC 
+            LIMIT 10
+        """,
+            user_id,
+        )
 
-    async def get_expiring_soon():
-        conn = await get_db()
-        try:
-            return await conn.fetch(
-                """
-                SELECT l.id, l.license_key, l.client_name, l.expires_at, p.name as project_name
-                FROM licenses l
-                JOIN projects p ON l.project_id = p.id 
-                WHERE p.user_id = $1 
-                  AND l.status = 'active'
-                  AND l.expires_at IS NOT NULL
-                  AND l.expires_at < $2
-                  AND l.expires_at > $3
-                ORDER BY l.expires_at ASC
-                LIMIT 5
-            """,
-                user_id,
-                seven_days_from_now,
-                now,
-            )
-        finally:
-            await release_db(conn)
+        # 5. Expiring Soon
+        expiring_soon_rows = await conn.fetch(
+            """
+            SELECT l.id, l.license_key, l.client_name, l.expires_at, p.name as project_name
+            FROM licenses l
+            JOIN projects p ON l.project_id = p.id 
+            WHERE p.user_id = $1 
+              AND l.status = 'active'
+              AND l.expires_at IS NOT NULL
+              AND l.expires_at < $2
+              AND l.expires_at > $3
+            ORDER BY l.expires_at ASC
+            LIMIT 5
+        """,
+            user_id,
+            seven_days_from_now,
+            now,
+        )
 
-    async def get_active_machines():
-        conn = await get_db()
-        try:
-            return await conn.fetch(
-                """
-                SELECT DISTINCT ON (hb.hwid)
-                    hb.hwid, hb.machine_name, hb.last_seen_at,
-                    l.license_key, l.client_name,
-                    (SELECT vl.ip_address FROM validation_logs vl 
-                     WHERE vl.license_id = l.id ORDER BY vl.created_at DESC LIMIT 1) as ip_address
-                FROM hardware_bindings hb
-                JOIN licenses l ON hb.license_id = l.id 
-                JOIN projects p ON l.project_id = p.id
-                WHERE p.user_id = $1 AND hb.is_active = TRUE
-                ORDER BY hb.hwid, hb.last_seen_at DESC
-                LIMIT 10
-            """,
-                user_id,
-            )
-        finally:
-            await release_db(conn)
+        # 6. Active Machines
+        active_machines_rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (hb.hwid)
+                hb.hwid, hb.machine_name, hb.last_seen_at,
+                l.license_key, l.client_name,
+                (SELECT vl.ip_address FROM validation_logs vl 
+                 WHERE vl.license_id = l.id ORDER BY vl.created_at DESC LIMIT 1) as ip_address
+            FROM hardware_bindings hb
+            JOIN licenses l ON hb.license_id = l.id 
+            JOIN projects p ON l.project_id = p.id
+            WHERE p.user_id = $1 AND hb.is_active = TRUE
+            ORDER BY hb.hwid, hb.last_seen_at DESC
+            LIMIT 10
+        """,
+            user_id,
+        )
 
-    async def get_history():
-        conn = await get_db()
-        try:
-            return await conn.fetch(
-                """
-                SELECT DATE(vl.created_at) as date,
-                       COUNT(*) as total,
-                       SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as successful,
-                       SUM(CASE WHEN vl.result != 'valid' THEN 1 ELSE 0 END) as failed
-                FROM validation_logs vl 
-                JOIN licenses l ON vl.license_id = l.id
-                JOIN projects p ON l.project_id = p.id 
-                WHERE p.user_id = $1 AND vl.created_at > $2
-                GROUP BY DATE(vl.created_at)
-                ORDER BY date ASC
-            """,
-                user_id,
-                seven_days_ago,
-            )
-        finally:
-            await release_db(conn)
+        # 7. Validation History
+        history_rows = await conn.fetch(
+            """
+            SELECT DATE(vl.created_at) as date,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as successful,
+                   SUM(CASE WHEN vl.result != 'valid' THEN 1 ELSE 0 END) as failed
+            FROM validation_logs vl 
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id 
+            WHERE p.user_id = $1 AND vl.created_at > $2
+            GROUP BY DATE(vl.created_at)
+            ORDER BY date ASC
+        """,
+            user_id,
+            seven_days_ago,
+        )
 
-    # Run all queries in parallel - each with its own connection
-    (
-        total_projects,
-        license_stats,
-        val_24h,
-        recent_activity_rows,
-        expiring_soon_rows,
-        active_machines_rows,
-        history_rows,
-    ) = await asyncio.gather(
-        get_projects(),
-        get_license_stats(),
-        get_val_24h(),
-        get_recent_activity(),
-        get_expiring_soon(),
-        get_active_machines(),
-        get_history(),
-    )
+    finally:
+        await release_db(conn)
 
     # Format results
     recent_activity = [

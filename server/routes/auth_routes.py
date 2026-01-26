@@ -132,6 +132,8 @@ async def login(
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
     """Get current user with latest subscription tier from database."""
+    from utils import get_user_tier_limits
+
     conn = await get_db()
     try:
         # Fetch latest plan_tier from subscriptions table (authoritative source)
@@ -147,6 +149,19 @@ async def get_me(user: dict = Depends(get_current_user)):
 
         # Use subscription tier if exists, otherwise fall back to users.plan
         plan = sub_row["plan_tier"] if sub_row else user.get("plan", "free")
+
+        # FIX: Sync credits if 0 and user is entitled to them (e.g. fresh upgrade or monthly reset missed)
+        tier_limits = await get_user_tier_limits(user["id"], conn)
+        monthly_allowance = tier_limits.get("cloud_builds_per_month", 0)
+        
+        if build_credits == 0 and monthly_allowance > 0:
+            await conn.execute(
+                "UPDATE users SET build_credits = $1 WHERE id = $2",
+                monthly_allowance,
+                user["id"]
+            )
+            build_credits = monthly_allowance
+            logger.info(f"Synced build credits for user {user['id']} to {monthly_allowance}")
 
         return {
             "id": user["id"],
