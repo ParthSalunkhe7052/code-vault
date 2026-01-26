@@ -176,10 +176,10 @@ TIER_LIMITS = {
         "max_projects": 1,
         "max_licenses_per_project": 50,
         "can_sell_licenses": False,
-        "cloud_compilation": False,  # No cloud builds for free tier
-        "cloud_builds_per_month": 0,
+        "cloud_compilation": True,
+        "cloud_builds_per_month": 5,
         "cloud_platforms": ["windows"],
-        "analytics": False,
+        "analytics": True,
         "webhooks": False,
         "team_seats": 1,
         "node_support": False,
