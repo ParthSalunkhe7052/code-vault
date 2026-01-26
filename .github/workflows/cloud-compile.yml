@@ -1,5 +1,6 @@
 name: Cloud Compile
 
+# Updated workflow for better error handling
 on:
   workflow_dispatch:
     inputs:
