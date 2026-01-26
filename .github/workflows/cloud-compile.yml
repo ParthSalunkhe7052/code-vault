@@ -230,7 +230,9 @@ jobs:
             if ($env:TALIB_SKIPPED -eq "true") {
               $errorMsg = "Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
             } elseif (-not (Test-Path "project/source/${{ steps.prepare.outputs.entry_file }}")) {
-              $errorMsg = "Build failed: Entry file not found"
+              $files = Get-ChildItem -Path "project/source" -Recurse -File | Select-Object -ExpandProperty Name | Select-Object -First 5
+              $fileStr = $files -join ", "
+              $errorMsg = "Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $fileStr..."
             } else {
               $errorMsg = "Compilation failed. Check GitHub Actions logs."
             }
@@ -448,7 +450,8 @@ jobs:
             if [ "$TALIB_SKIPPED" = "true" ]; then
               error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
             elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
-              error_msg="Build failed: Entry file not found"
+              files=$(find project/source -maxdepth 3 -not -path '*/.*' | head -n 5 | sed 's|project/source/||' | tr '\n' ', ')
+              error_msg="Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $files..."
             else
               error_msg="Compilation failed. Check GitHub Actions logs."
             fi
@@ -669,7 +672,8 @@ jobs:
             if [ "$TALIB_SKIPPED" = "true" ]; then
               error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
             elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
-              error_msg="Build failed: Entry file not found"
+              files=$(find project/source -maxdepth 3 -not -path '*/.*' | head -n 5 | sed 's|project/source/||' | tr '\n' ', ')
+              error_msg="Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $files..."
             else
               error_msg="Compilation failed. Check GitHub Actions logs."
             fi
