@@ -652,6 +652,14 @@ class CloudRunner:
         
         # 2. Inject Wrapper
         entry_file = self.config.get("entry_file", "main.py")
+
+        # Fix: Detect flattened structure (e.g., if "app/main.py" became "main.py")
+        if not (self.source_dir / entry_file).exists():
+            flat_entry = Path(entry_file).name
+            if (self.source_dir / flat_entry).exists():
+                logger.warning(f"Entry file '{entry_file}' not found, but found '{flat_entry}' in root. Assuming flattened structure.")
+                entry_file = flat_entry
+        
         self._inject_license_wrapper(entry_file)
         
         # 3. Compile
