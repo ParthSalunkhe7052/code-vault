@@ -176,10 +176,10 @@ TIER_LIMITS = {
         "max_projects": 1,
         "max_licenses_per_project": 50,
         "can_sell_licenses": False,
-        "cloud_compilation": True,
-        "cloud_builds_per_month": 5,
+        "cloud_compilation": False,
+        "cloud_builds_per_month": 0,
         "cloud_platforms": ["windows"],
-        "analytics": True,
+        "analytics": False,
         "webhooks": False,
         "team_seats": 1,
         "node_support": False,
@@ -187,10 +187,10 @@ TIER_LIMITS = {
     "pro": {
         "_tier_name": "Pro",
         "max_projects": -1,  # unlimited
-        "max_licenses_per_project": 500,
+        "max_licenses_per_project": 200,
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 15,  # 15 credits
+        "cloud_builds_per_month": 10,
         "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,

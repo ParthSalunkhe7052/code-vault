@@ -334,7 +334,8 @@ async def get_user_tier_limits(user_id: str, conn) -> dict:
     """Get subscription tier limits for a user.
 
     Returns the TIER_LIMITS dict for the user's current subscription tier.
-    Defaults to 'free' tier if no subscription found.
+    Checks subscriptions table first, then falls back to users table plan.
+    Defaults to 'free' tier if no subscription found and no user plan set.
 
     Args:
         user_id: The user's ID
@@ -345,13 +346,25 @@ async def get_user_tier_limits(user_id: str, conn) -> dict:
     """
     from config import TIER_LIMITS
 
+    # Check for active subscription first
     sub = await conn.fetchrow(
         """
-        SELECT plan_tier FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1
+        SELECT plan_tier FROM subscriptions 
+        WHERE user_id = $1 AND status = 'active'
+        ORDER BY created_at DESC LIMIT 1
     """,
         user_id,
     )
-    tier = sub["plan_tier"] if sub else "free"
+    
+    if sub:
+        tier = sub["plan_tier"]
+    else:
+        # Fallback to user's plan column (for manually assigned plans/admins)
+        user = await conn.fetchrow("SELECT plan FROM users WHERE id = $1", user_id)
+        tier = user["plan"] if user else "free"
+
+    # Normalize tier name to lowercase and handle unknown tiers
+    tier = tier.lower() if tier else "free"
     return TIER_LIMITS.get(tier, TIER_LIMITS["free"])
 
 

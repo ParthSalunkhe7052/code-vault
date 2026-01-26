@@ -15,7 +15,6 @@ router = APIRouter(prefix="/api/v1", tags=["Analytics"])
 
 
 @router.get("/stats/dashboard")
-@requires_feature("analytics")
 async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     import asyncio
 
