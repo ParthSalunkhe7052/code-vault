@@ -674,9 +674,12 @@ class CloudRunner:
         ])
         
         # Parallel jobs
-        cpu_count = multiprocessing.cpu_count()
-        cmd.append(f"--jobs={cpu_count}")
-        logger.info(f"Using {cpu_count} CPU cores")
+        # Cap at 2 to prevent OOM on standard GitHub Runners (7GB RAM)
+        # Nuitka C compilation is very memory intensive per job
+        available_cpus = multiprocessing.cpu_count()
+        job_count = min(available_cpus, 2)
+        cmd.append(f"--jobs={job_count}")
+        logger.info(f"Using {job_count} CPU cores (capped for stability)")
         
         # Turbo Mode Blacklist
         # Standard blacklist + aggressive optimizations
@@ -693,14 +696,19 @@ class CloudRunner:
         
         if not compatibility_mode:
             logger.info("⚡ TURBO MODE ENABLED")
+            # Enable anti-bloat to reduce compilation size and time
+            cmd.append("--enable-plugin=anti-bloat")
+            
+            # Aggressive exclusions
             turbo_exclusions = [
                 "encodings.cp1006", "encodings.cp1026", "encodings.cp1125", "encodings.cp1140",
                 "lzma", "bz2", "calendar", "sched"
             ]
             blacklist.extend(turbo_exclusions)
-            cmd.append("--disable-plugins=anti-bloat")
         else:
             logger.info("Using Compatibility Mode (Standard optimizations)")
+            # In compat mode, we might disable anti-bloat if it causes issues, 
+            # or keep it enabled but less aggressive. For now, let's enable it as standard.
             cmd.append("--enable-plugin=anti-bloat")
             
         for module in blacklist:
