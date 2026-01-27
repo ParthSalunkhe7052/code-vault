@@ -494,12 +494,37 @@ class CloudRunner:
         # 2. Find and validate entry file
         entry_file = self._find_entry_file(self.config.get("entry_file", "main.py"))
         
+        # 2.5 Syntax Check
+        self._check_syntax(entry_file)
+        
         # 3. Inject Wrapper
         self._inject_license_wrapper(entry_file)
         
         # 4. Compile
         return self._compile_nuitka(entry_file)
-    
+
+    def _check_syntax(self, entry_file: str):
+        """Check Python syntax of the entry file."""
+        entry_path = self.source_dir / entry_file
+        try:
+            with open(entry_path, 'r', encoding='utf-8') as f:
+                source = f.read()
+            compile(source, str(entry_path), 'exec')
+        except SyntaxError as e:
+            error_msg = f"Syntax Error in {entry_file} line {e.lineno}: {e.msg}"
+            logger.error(error_msg)
+            
+            # Write to error file for the workflow to pick up
+            err_file = self.output_dir / "error_message.txt"
+            # Ensure output dir exists
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            with open(err_file, "w") as f:
+                f.write(error_msg)
+            
+            sys.exit(1)
+        except Exception as e:
+            logger.warning(f"Could not verify syntax: {e}")
+
     def _find_entry_file(self, entry_file: str) -> str:
         """Find entry file with smart fallback for various directory structures."""
         # Try exact path first
