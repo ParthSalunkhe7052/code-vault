@@ -47,6 +47,11 @@ on:
         required: false
         type: boolean
         default: false
+      fast_build:
+        description: 'Skip compression for faster build (outputs zip of directory)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-windows:
@@ -198,6 +203,36 @@ jobs:
           pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
         shell: pwsh
       
+      - name: Package Output (Windows)
+        run: |
+          cd project/source
+          
+          # Check for build_output first
+          if (Test-Path "build_output") {
+             Get-ChildItem "build_output" | Copy-Item -Destination . -Recurse -Force
+          }
+          
+          $outputName = "${{ steps.prepare.outputs.output_name }}"
+          $exe = Get-ChildItem -Filter "$outputName.exe" | Select-Object -First 1
+          
+          if ($null -eq $exe) {
+             # Try generic search
+             $exe = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
+          }
+
+          if ($null -ne $exe) {
+             Compress-Archive -Path $exe.Name -DestinationPath "$outputName.zip" -Force
+             echo "ARTIFACT_NAME=$outputName.zip" >> $env:GITHUB_ENV
+          } elseif (Test-Path "build") {
+             # Directory output (Fast Build)
+             Compress-Archive -Path "build" -DestinationPath "$outputName.zip" -Force
+             echo "ARTIFACT_NAME=$outputName.zip" >> $env:GITHUB_ENV
+          } else {
+             Write-Error "No output executable or directory found!"
+             exit 1
+          }
+        shell: pwsh
+
       - name: Upload to R2
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -205,25 +240,17 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          $exe = Get-ChildItem -Path "./project/source" -Filter "*.exe" -Recurse | Select-Object -First 1
-          
-          if ($null -eq $exe) {
-             $exe = Get-ChildItem -Path "./project/source/build_output" -Filter "*.exe" | Select-Object -First 1
-          }
-
-          if ($null -eq $exe) {
-             Write-Error "No executable found!"
-             exit 1
-          }
+          cd project/source
+          $artifact = $env:ARTIFACT_NAME
 
           aws configure set aws_access_key_id $env:R2_ACCESS_KEY
           aws configure set aws_secret_access_key $env:R2_SECRET_KEY
           
-          $key = "builds/${{ github.event.inputs.build_id }}/windows/$($exe.Name)"
-          aws s3 cp $exe.FullName "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
+          $key = "builds/${{ github.event.inputs.build_id }}/windows/$artifact"
+          aws s3 cp $artifact "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
           
           echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
-          echo "UPLOAD_FILENAME=$($exe.Name)" >> $env:GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $env:GITHUB_ENV
         shell: pwsh
       
       - name: Notify completion
@@ -356,7 +383,7 @@ jobs:
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y patchelf python3-tk
+          sudo apt-get install -y patchelf python3-tk ccache
           # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
           pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
 
@@ -418,23 +445,37 @@ jobs:
           npm install --production
           pkg . --targets node18-linux-x64 --output "${{ steps.prepare.outputs.output_name }}"
 
-      - name: Package Output
+      - name: Package Output (Linux)
         run: |
-          # Find output exe (could be in build_output if using Runner)
           cd project/source
           
           # Check for build_output first
           if [ -d "build_output" ]; then
-             find build_output -maxdepth 1 -type f -executable -exec cp {} . \;
+             cp -r build_output/* .
           fi
           
-          exe_name="${{ steps.prepare.outputs.output_name }}"
-          if [ ! -f "$exe_name" ]; then
+          output_name="${{ steps.prepare.outputs.output_name }}"
+          
+          if [ -f "$output_name" ]; then
+             chmod +x "$output_name"
+             tar -czvf "${output_name}.tar.gz" "$output_name"
+             echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+          elif [ -d "build" ]; then
+             # Fast Build output
+             tar -czvf "${output_name}.tar.gz" build
+             echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+          else
+             # Try generic search
              exe_name=$(find . -maxdepth 1 -type f -executable | head -1)
+             if [ -n "$exe_name" ]; then
+                chmod +x "$exe_name"
+                tar -czvf "${output_name}.tar.gz" "$exe_name"
+                echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+             else
+                echo "Error: No output found"
+                exit 1
+             fi
           fi
-          
-          chmod +x "$exe_name"
-          tar -czvf "${{ steps.prepare.outputs.output_name }}.tar.gz" "$exe_name"
 
       - name: Update progress - Starting upload
         run: |
@@ -454,7 +495,7 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           cd project/source
-          artifact=$(ls *.tar.gz | head -1)
+          artifact=$ARTIFACT_NAME
           
           pip install awscli
           aws configure set aws_access_key_id $R2_ACCESS_KEY

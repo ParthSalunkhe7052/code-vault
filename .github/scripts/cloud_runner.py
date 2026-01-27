@@ -653,21 +653,27 @@ class CloudRunner:
         cmd = [
             sys.executable, "-m", "nuitka",
             "--standalone",
-            "--onefile",
+            # "--onefile", # Moved to logic below
             "--remove-output",
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--disable-ccache",  # Avoid ccache issues in CI
+            # "--disable-ccache",  # ENABLED CACHING FOR OPTIMIZATION
             # "--show-progress", # Disabled to reduce CI log spam
         ]
         
         # Add macOS specific flags
         if sys.platform == "darwin":
             cmd.append("--macos-create-app-bundle")
-            # For app bundle, --onefile might not be compatible or needed in the same way, 
-            # but Nuitka supports both. If using bundle, output is a directory.
-            # However, previous workflow used both.
-        
+
+        # Fast Build Logic (Skip compression)
+        fast_build = self.config.get("fast_build", False)
+        if fast_build:
+             logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
+             # In fast build, we output to a directory
+             # The packaging step in CI will zip this directory
+        else:
+             cmd.append("--onefile")
+
         cmd.extend([
             f"--output-filename={output_exe}",
             f"--output-dir={self.output_dir}"
