@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X } from 'lucide-react';
 import api from '../services/api';
+import { useProjectBuild } from '../contexts/BuildContext';
 
 /**
  * Platform configuration for display
@@ -27,6 +28,10 @@ export function CloudBuildButton({
   onComplete, 
   className = "" 
 }) {
+  // Global Build Context
+  const projectBuild = useProjectBuild(projectId);
+
+  // Local state (synced with global where possible, but kept for granular UI control)
   const [status, setStatus] = useState('idle'); // idle, starting, building, completed, failed, cancelled
   const [buildId, setBuildId] = useState(null);
   const [progress, setProgress] = useState(0);
@@ -42,6 +47,27 @@ export function CloudBuildButton({
   
   // Polling interval ref for cleanup
   const pollIntervalRef = useRef(null);
+
+  // Sync with Global Context on Mount/Update
+  useEffect(() => {
+    if (projectBuild && projectBuild.status) {
+       // If context says running, and we are idle, sync up
+       if (['pending', 'queued', 'running'].includes(projectBuild.status) && status === 'idle') {
+           setStatus('building');
+           setBuildId(projectBuild.jobId);
+           pollStatus(projectBuild.jobId); // Resume polling
+       }
+       // If context says completed, and we are running
+       if (projectBuild.status === 'completed' && status === 'building') {
+           // Let the poller handle the final artifact retrieval, or force a check
+           if (pollIntervalRef.current) {
+               // Poller is running, let it finish
+           } else if (projectBuild.jobId) {
+               pollStatus(projectBuild.jobId);
+           }
+       }
+    }
+  }, [projectBuild.status, projectBuild.jobId]);
 
   // Animated progress effect - smoothly animate to target progress
   useEffect(() => {
@@ -86,9 +112,15 @@ export function CloudBuildButton({
       };
       
       const response = await api.post(endpoint, payload);
+      const newBuildId = response.data.build_id;
       
-      setBuildId(response.data.build_id);
+      setBuildId(newBuildId);
       setStatus('building');
+      
+      // Sync with Global Context
+      if (projectBuild && projectBuild.start) {
+          projectBuild.start(newBuildId);
+      }
       
       // Initialize platform artifacts for multi-platform
       if (isMultiPlatform) {
@@ -100,7 +132,7 @@ export function CloudBuildButton({
       }
       
       // Start polling for status
-      pollStatus(response.data.build_id);
+      pollStatus(newBuildId);
     } catch (err) {
       setStatus('failed');
       setError(err.response?.data?.detail || 'Failed to start build');

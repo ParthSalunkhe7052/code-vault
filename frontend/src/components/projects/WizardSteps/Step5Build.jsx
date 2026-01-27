@@ -2,6 +2,7 @@ import React, { useState, memo } from 'react';
 import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key, Play } from 'lucide-react';
 import { CloudBuildButton } from '../../CloudBuildButton';
 import PlatformSelector from '../PlatformSelector';
+import BuildHistory from '../BuildHistory';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -104,6 +105,21 @@ const Step5Build = ({
                         licenseId={licenseId} 
                         targetPlatforms={selectedPlatforms}
                         className="w-full"
+                    />
+                </div>
+
+                {/* Build History */}
+                <div className="max-w-md mx-auto mt-6">
+                    <BuildHistory 
+                        projectId={projectId}
+                        onRebuild={(build) => {
+                            // Update selected platforms from build history
+                            if (build.target_platforms) {
+                                setSelectedPlatforms(build.target_platforms);
+                            }
+                            // Trigger the cloud build button (user will need to click it)
+                            // For future enhancement: could auto-trigger build here
+                        }}
                     />
                 </div>
             </div>

@@ -165,7 +165,7 @@ const ProjectWizard = ({
     useEffect(() => {
         const isConfigured = configData.entry_file && (configData.files?.length > 0 || configData.file_tree);
         setShowQuickBuild(isConfigured && !isBuilding && currentStep < 5);
-    }, [configData, isBuilding, currentStep]);
+    }, [configData.entry_file, configData.files?.length, configData.file_tree, isBuilding, currentStep]);
 
     // Track if we've initialized from configData to prevent circular updates
     const hasInitializedRef = useRef(false);
@@ -205,6 +205,7 @@ const ProjectWizard = ({
     useEffect(() => {
         if (!isOpen) {
             hasInitializedRef.current = false;
+            setIsDirty(false); // Reset dirty flag when wizard closes
         }
     }, [isOpen]);
 
