@@ -395,15 +395,12 @@ async def get_user_tier(user_id: str, conn) -> dict:
         user_id,
     )
 
+    # If no active subscription, fallback to users.plan column
     if not sub:
-        return {
-            "tier": "free",
-            "is_pro": False,
-            "can_remove_branding": False,
-            "can_custom_branding": False,
-        }
-
-    tier = sub["plan_tier"].lower() if sub["plan_tier"] else "free"
+        user = await conn.fetchrow("SELECT plan FROM users WHERE id = $1", user_id)
+        tier = user["plan"].lower() if user and user["plan"] else "free"
+    else:
+        tier = sub["plan_tier"].lower() if sub["plan_tier"] else "free"
 
     return {
         "tier": tier,

@@ -50,6 +50,8 @@ const ProjectWizard = ({
 
     const [currentStep, setCurrentStep] = useState(1);
     const [completedSteps, setCompletedSteps] = useState([]);
+    const [isDirty, setIsDirty] = useState(false); // Track if config has unsaved changes
+    const [showQuickBuild, setShowQuickBuild] = useState(false); // Show quick build banner
     const [protectionMode, setProtectionMode] = useState('generic'); // 'generic' | 'demo' | 'none'
     const [showConsole, setShowConsole] = useState(true); // Will be set from settings in useEffect
     const [projectPath, setProjectPath] = useState('');
@@ -132,26 +134,38 @@ const ProjectWizard = ({
         }
     }, [isOpen, configData.files, configData.file_tree, buildStatus]);
 
-    // Save wizard state to localStorage when step changes
+    // Save wizard state to localStorage when step changes (debounced)
     useEffect(() => {
         if (isOpen && project?.id && currentStep > 1) {
             const STORAGE_KEY = `codevault_wizard_${project.id}`;
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                    projectId: project.id,
-                    currentStep,
-                    completedSteps,
-                    protectionMode,
-                    projectPath,
-                    timestamp: Date.now()
-                }));
-            } catch (e) {
-                if (import.meta.env.DEV) {
-                    console.warn('[Wizard] Failed to save state:', e);
+            
+            // Debounce localStorage writes by 1 second
+            const timeoutId = setTimeout(() => {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                        projectId: project.id,
+                        currentStep,
+                        completedSteps,
+                        protectionMode,
+                        projectPath,
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    if (import.meta.env.DEV) {
+                        console.warn('[Wizard] Failed to save state:', e);
+                    }
                 }
-            }
+            }, 1000);
+
+            return () => clearTimeout(timeoutId);
         }
     }, [isOpen, project?.id, currentStep, completedSteps, protectionMode, projectPath]);
+
+    // Quick Build Banner - Show when project is configured and ready
+    useEffect(() => {
+        const isConfigured = configData.entry_file && (configData.files?.length > 0 || configData.file_tree);
+        setShowQuickBuild(isConfigured && !isBuilding && currentStep < 5);
+    }, [configData, isBuilding, currentStep]);
 
     // Track if we've initialized from configData to prevent circular updates
     const hasInitializedRef = useRef(false);
@@ -219,6 +233,9 @@ const ProjectWizard = ({
         if (import.meta.env.DEV) {
             console.log('[WIZARD SYNC] Syncing to configData');
         }
+
+        // Mark as dirty when config changes
+        setIsDirty(true);
 
         isUpdatingConfigRef.current = true;
 
@@ -312,27 +329,10 @@ const ProjectWizard = ({
 
     const handleNext = useCallback(async () => {
         if (currentStep < 5 && canProceed()) {
-            // Auto-save config when leaving Step 3 (Configure) to persist settings
-            if (currentStep === 3) {
-                try {
-                    await onConfigSave();
-                } catch (error) {
-                    // Show user feedback for save failure
-                    if (window.showToast) {
-                        window.showToast('Failed to save configuration', 'error');
-                    } else {
-                        const confirmLeave = confirm('Save failed. Leave configuration anyway?');
-                        if (!confirmLeave) {
-                            return; // Don't navigate
-                        }
-                    }
-                }
-            }
-
             setCompletedSteps(prev => [...new Set([...prev, currentStep])]);
             setCurrentStep(currentStep + 1);
         }
-    }, [currentStep, canProceed, onConfigSave]);
+    }, [currentStep, canProceed]);
 
     const handleBack = useCallback(() => {
         if (currentStep > 1) {
@@ -373,9 +373,7 @@ const ProjectWizard = ({
         projectBuild.updateBuild({ progress: 0 });
 
         try {
-            // First save the config
-            await onConfigSave();
-            projectBuild.addLog('✅ Configuration saved');
+            projectBuild.addLog('✅ Starting build...');
 
             if (isTauri) {
                 const { invoke } = await import('@tauri-apps/api/core');
@@ -485,10 +483,11 @@ const ProjectWizard = ({
 
     // Auto-save config before closing wizard
     const handleClose = useCallback(async () => {
-        // Save config if we're on or past Step 3 (where settings are configured)
-        if (currentStep >= 3 && configData.entry_file) {
+        // Save config only if dirty and we're on or past Step 3 (where settings are configured)
+        if (isDirty && currentStep >= 3 && configData.entry_file) {
             try {
                 await onConfigSave();
+                setIsDirty(false); // Clear dirty flag after successful save
             } catch (error) {
                 if (window.showToast) {
                     window.showToast('Failed to save configuration', 'error');
@@ -496,7 +495,7 @@ const ProjectWizard = ({
             }
         }
         onClose();
-    }, [currentStep, configData.entry_file, onConfigSave, onClose]);
+    }, [isDirty, currentStep, configData.entry_file, onConfigSave, onClose]);
 
     const handleViewLicenses = useCallback(async () => {
         await handleClose(); // Close with auto-save
@@ -686,11 +685,21 @@ const ProjectWizard = ({
 
                             {/* Header */}
                             <header className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-gray-950/95 shrink-0 z-10">
-                                <div>
+                                <div className="flex items-center gap-3">
                                     <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                                         <span className="text-indigo-400">/</span>
                                         {project?.name || 'Untitled Project'}
                                     </h2>
+                                    {configData.tier === 'enterprise' && (
+                                        <span className="px-2 py-0.5 text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-full uppercase tracking-wider">
+                                            Enterprise
+                                        </span>
+                                    )}
+                                    {configData.tier === 'pro' && (
+                                        <span className="px-2 py-0.5 text-xs font-bold bg-purple-500 text-white rounded-full uppercase tracking-wider">
+                                            Pro
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <button
@@ -714,6 +723,24 @@ const ProjectWizard = ({
                                         </div>
                                     ) : (
                                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                            {/* Quick Build Banner */}
+                                            {showQuickBuild && (
+                                                <div className="mb-6 bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between animate-in fade-in">
+                                                    <div>
+                                                        <h3 className="font-bold text-white">Ready to Build</h3>
+                                                        <p className="text-sm text-slate-400">Your project is configured. Skip ahead?</p>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => { 
+                                                            setCompletedSteps([1, 2, 3, 4]); 
+                                                            setCurrentStep(5); 
+                                                        }}
+                                                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-all"
+                                                    >
+                                                        ⚡ Jump to Build
+                                                    </button>
+                                                </div>
+                                            )}
                                             <WizardErrorBoundary>
                                                 {renderStep()}
                                             </WizardErrorBoundary>

@@ -9,6 +9,7 @@ import iconProjects from '../assets/icon_projects.png';
 import iconKeys from '../assets/icon_keys.png';
 import iconWebhooks from '../assets/icon_webhooks.png';
 import iconSettings from '../assets/icon_settings.png';
+import GlobalBuildStatus from './GlobalBuildStatus';
 
 const Layout = () => {
     const navigate = useNavigate();
@@ -212,6 +213,8 @@ const Layout = () => {
                     <Outlet />
                 </div>
             </main>
+
+            <GlobalBuildStatus />
         </div >
     );
 };

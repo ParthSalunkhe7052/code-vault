@@ -238,7 +238,7 @@ async def update_project_config(
             project_id,
         )
 
-        return await get_project_config(project_id, user)
+        return {"status": "ok", "message": "Configuration saved successfully"}
     finally:
         await release_db(conn)
 

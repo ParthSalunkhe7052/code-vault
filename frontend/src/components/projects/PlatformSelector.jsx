@@ -30,7 +30,7 @@ const PLATFORMS = [
     emoji: null,
     description: 'Ubuntu, Debian, Fedora (x64)',
     extension: '.bin',
-    free: false,
+    free: true,
   },
 ];
 

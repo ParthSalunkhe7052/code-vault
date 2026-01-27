@@ -156,7 +156,7 @@ const Projects = () => {
         }
     };
 
-    const handleConfigSave = async () => {
+    const handleConfigSave = async (showNotification = false) => {
         try {
             await projectApi.updateConfig(selectedProject.id, {
                 entry_file: configData.entry_file,
@@ -168,7 +168,9 @@ const Projects = () => {
                 skip_obfuscation: configData.skip_obfuscation,
                 enable_lease: configData.enable_lease
             });
-            toast.success('Configuration saved!');
+            if (showNotification) {
+                toast.success('Configuration saved!');
+            }
         } catch (error) {
             console.error('Failed to save config:', error);
             toast.error('Failed to save configuration');
