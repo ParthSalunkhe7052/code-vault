@@ -103,18 +103,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          key: windows-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: windows-pip-py3.11-v1
           restore-keys: |
-            windows-pip-nuitka-
+            windows-pip-py3.11-
+            windows-pip-
       
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
         with:
           path: ~\AppData\Roaming\npm-cache
-          key: windows-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: windows-npm-node18-v1
           restore-keys: |
-            windows-npm-pkg-
+            windows-npm-node18-
+            windows-npm-
       
       - name: Cache Nuitka (Windows)
         if: ${{ github.event.inputs.language == 'python' }}
@@ -122,15 +124,17 @@ jobs:
         with:
           path: |
             ~\AppData\Local\Nuitka\Nuitka
-          key: windows-nuitka-v2-${{ hashFiles('project/source/requirements.txt', 'project/source/*.txt') }}
+            ~\.cache\Nuitka
+          key: windows-nuitka-py3.11-v3
           restore-keys: |
-            windows-nuitka-v2-
+            windows-nuitka-py3.11-
+            windows-nuitka-
       
       - name: Install Build Tools
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          # Install dependencies for Cloud Runner AND Nuitka
-          pip install nuitka ordered-set zstandard requests cryptography
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
       
       - name: Install pkg (Node.js)
         if: ${{ github.event.inputs.language == 'nodejs' }}
@@ -319,26 +323,40 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: linux-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: linux-pip-py3.11-v1
           restore-keys: |
-            linux-pip-nuitka-
+            linux-pip-py3.11-
+            linux-pip-
       
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: linux-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: linux-npm-node18-v1
           restore-keys: |
-            linux-npm-pkg-
+            linux-npm-node18-
+            linux-npm-
+
+      - name: Cache Nuitka (Linux)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/.local/share/Nuitka
+          key: linux-nuitka-py3.11-v3
+          restore-keys: |
+            linux-nuitka-py3.11-
+            linux-nuitka-
 
       - name: Install dependencies
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y patchelf python3-tk
-          # Install dependencies for Cloud Runner AND Nuitka
-          pip install nuitka ordered-set zstandard requests cryptography
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
 
       - name: Install pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}
@@ -547,24 +565,38 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/pip
-          key: macos-pip-nuitka-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: macos-pip-py3.11-v1
           restore-keys: |
-            macos-pip-nuitka-
+            macos-pip-py3.11-
+            macos-pip-
       
       - name: Cache npm packages
         if: ${{ github.event.inputs.language == 'nodejs' }}
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: macos-npm-pkg-${{ hashFiles('.github/workflows/cloud-compile.yml') }}
+          key: macos-npm-node18-v1
           restore-keys: |
-            macos-npm-pkg-
+            macos-npm-node18-
+            macos-npm-
+
+      - name: Cache Nuitka (macOS)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Nuitka
+            ~/.cache/Nuitka
+          key: macos-nuitka-py3.11-v3
+          restore-keys: |
+            macos-nuitka-py3.11-
+            macos-nuitka-
 
       - name: Install dependencies
         if: ${{ github.event.inputs.language == 'python' }}
         run: |
-          # Install dependencies for Cloud Runner AND Nuitka
-          pip install nuitka ordered-set zstandard requests cryptography
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
 
       - name: Install pkg
         if: ${{ github.event.inputs.language == 'nodejs' }}

@@ -650,20 +650,49 @@ class CloudRunner:
         # 1. Prepare Environment
         self._prepare_dependencies()
         
-        # 2. Inject Wrapper
-        entry_file = self.config.get("entry_file", "main.py")
-
-        # Fix: Detect flattened structure (e.g., if "app/main.py" became "main.py")
-        if not (self.source_dir / entry_file).exists():
-            flat_entry = Path(entry_file).name
-            if (self.source_dir / flat_entry).exists():
-                logger.warning(f"Entry file '{entry_file}' not found, but found '{flat_entry}' in root. Assuming flattened structure.")
-                entry_file = flat_entry
+        # 2. Find and validate entry file
+        entry_file = self._find_entry_file(self.config.get("entry_file", "main.py"))
         
+        # 3. Inject Wrapper
         self._inject_license_wrapper(entry_file)
         
-        # 3. Compile
+        # 4. Compile
         return self._compile_nuitka(entry_file)
+    
+    def _find_entry_file(self, entry_file: str) -> str:
+        """Find entry file with smart fallback for various directory structures."""
+        # Try exact path first
+        if (self.source_dir / entry_file).exists():
+            logger.info(f"Found entry file: {entry_file}")
+            return entry_file
+        
+        # Try flattened structure (e.g., "app/main.py" -> "main.py")
+        flat_entry = Path(entry_file).name
+        if (self.source_dir / flat_entry).exists():
+            logger.warning(f"Entry file '{entry_file}' not found, using flattened: '{flat_entry}'")
+            return flat_entry
+        
+        # Try common Python entry point names
+        common_entries = ["main.py", "app.py", "__main__.py", "run.py", "start.py", "index.py"]
+        for alt in common_entries:
+            if (self.source_dir / alt).exists():
+                logger.warning(f"Entry file '{entry_file}' not found, using alternative: '{alt}'")
+                return alt
+        
+        # List available Python files for better error message
+        py_files = list(self.source_dir.glob("*.py"))
+        if py_files:
+            # Use the first Python file as a last resort
+            fallback = py_files[0].name
+            logger.warning(f"No standard entry file found, using first Python file: '{fallback}'")
+            return fallback
+        
+        # No Python files at all - this will fail
+        all_files = [f.name for f in self.source_dir.iterdir() if f.is_file()][:10]
+        raise FileNotFoundError(
+            f"Entry file '{entry_file}' not found. No Python files in source root. "
+            f"Files found: {all_files}"
+        )
 
     def _prepare_dependencies(self):
         """Install dependencies with smart filtering."""
@@ -692,7 +721,8 @@ class CloudRunner:
             filtered_req.write_text("\n".join(filtered_lines), encoding="utf-8")
             
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-r", str(filtered_req)],
+                [sys.executable, "-m", "pip", "install", "-r", str(filtered_req),
+                 "--quiet", "--disable-pip-version-check", "--no-warn-script-location"],
                 stdout=sys.stdout, stderr=sys.stderr
             )
 
@@ -717,7 +747,19 @@ class CloudRunner:
 
     def _compile_nuitka(self, entry_file: str) -> Path:
         """Run Nuitka with Turbo Mode optimizations."""
-        output_name = self.config.get("output_name", "app")
+        output_name = self.config.get("output_name") or "app"
+        
+        # CRITICAL FIX: Ensure output_name is never empty
+        if not output_name or output_name.strip() == "":
+            output_name = "app"
+            logger.warning("output_name was empty, defaulting to 'app'")
+        
+        # Sanitize output name (remove invalid characters)
+        output_name = "".join(c for c in output_name if c.isalnum() or c in "-_")
+        if not output_name:
+            output_name = "app"
+        
+        logger.info(f"Output name: {output_name}")
         
         # Platform specific output naming
         if sys.platform == "win32":
@@ -788,6 +830,13 @@ class CloudRunner:
         cmd.append(str(self.source_dir / entry_file))
         
         logger.info("Starting Nuitka compilation...")
+        logger.info(f"Entry file: {entry_file}")
+        logger.info(f"Output file: {output_exe}")
+        logger.info(f"Output dir: {self.output_dir}")
+        
+        # Log the full command for debugging
+        logger.info(f"Nuitka command (first 500 chars): {' '.join(cmd)[:500]}...")
+        
         subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
         
         final_path = self.output_dir / output_exe

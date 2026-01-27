@@ -366,11 +366,18 @@ async def start_cloud_build(
         entry_file = get_setting("entry_file", "main.py" if language == "python" else "index.js")
         
         # Fix: Ensure output_name is never empty
-        project_name_safe = (project.get("name", "app") if hasattr(project, "get") else project["name"]).replace(" ", "_")
+        project_name = project.get("name", "app") if hasattr(project, "get") else project["name"]
+        # Sanitize project name for use as filename
+        project_name_safe = "".join(c for c in project_name.replace(" ", "_") if c.isalnum() or c in "-_")
+        if not project_name_safe:
+            project_name_safe = "app"
+        
         output_name = get_setting("output_name", project_name_safe)
         
-        if not output_name:
-            output_name = "app"  # Fallback of last resort
+        # CRITICAL: Triple-check output_name is never empty
+        if not output_name or not output_name.strip():
+            output_name = project_name_safe or "app"
+            logger.warning(f"[CloudBuild] output_name was empty, using fallback: {output_name}")
         
         license_key = "GENERIC_BUILD"
         if request.license_id:
