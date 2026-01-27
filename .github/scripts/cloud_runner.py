@@ -726,6 +726,21 @@ class CloudRunner:
                 stdout=sys.stdout, stderr=sys.stderr
             )
 
+    def _uses_tkinter(self) -> bool:
+        """Check if project uses tkinter by scanning source files."""
+        try:
+            for py_file in self.source_dir.rglob("*.py"):
+                try:
+                    content = py_file.read_text(encoding="utf-8", errors="ignore")
+                    # Check for tkinter imports
+                    if re.search(r'^(?:import\s+tkinter|from\s+tkinter\s+import)', content, re.MULTILINE):
+                        return True
+                except Exception:
+                    continue
+            return False
+        except Exception:
+            return False
+
     def _inject_license_wrapper(self, entry_file: str):
         """Inject license wrapper into entry file."""
         entry_path = self.source_dir / entry_file
@@ -775,6 +790,8 @@ class CloudRunner:
             "--onefile",
             "--remove-output",
             "--assume-yes-for-downloads",
+            "--lto=no",  # Disable Link-Time Optimization (much faster builds)
+            "--disable-ccache",  # Avoid ccache issues in CI
             # "--show-progress", # Disabled to reduce CI log spam
         ]
         
@@ -823,8 +840,14 @@ class CloudRunner:
         for module in blacklist:
             cmd.append(f"--nofollow-import-to={module}")
             
-        # Add plugins
-        cmd.append("--enable-plugin=tk-inter")
+        # NOTE: Removed --enable-plugin=tk-inter as it significantly slows builds
+        # The wrapper code has fallback for when tkinter is not available
+        # Only add it if the project actually imports tkinter
+        if self._uses_tkinter():
+            logger.info("Project uses tkinter, enabling tk-inter plugin")
+            cmd.append("--enable-plugin=tk-inter")
+        else:
+            logger.info("Skipping tk-inter plugin (not used by project)")
         
         # Add entry file
         cmd.append(str(self.source_dir / entry_file))
