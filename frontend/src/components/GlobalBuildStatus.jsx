@@ -1,8 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBuild } from '../contexts/BuildContext';
 import { Loader2, CheckCircle, XCircle, X } from 'lucide-react';
 
 const GlobalBuildStatus = () => {
+    const navigate = useNavigate();
     const { builds, updateBuild } = useBuild();
 
     // Find the most recent active or recently finished build
@@ -23,9 +25,17 @@ const GlobalBuildStatus = () => {
         return 'Initializing...';
     };
 
+    const handleClick = () => {
+        // Navigate to projects page with query param to open wizard
+        navigate(`/projects?project_id=${projectId}`);
+    };
+
     return (
-        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
-            <div className="bg-[var(--cv-card)] border border-[var(--cv-border)] rounded-xl shadow-2xl p-4 w-80 backdrop-blur-xl">
+        <div 
+            onClick={handleClick}
+            className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300 cursor-pointer group"
+        >
+            <div className="bg-[var(--cv-card)] border border-[var(--cv-border)] rounded-xl shadow-2xl p-4 w-80 backdrop-blur-xl group-hover:border-cyan-500/50 transition-colors">
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />

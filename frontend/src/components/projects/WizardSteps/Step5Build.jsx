@@ -89,14 +89,16 @@ const Step5Build = ({
                 </div>
 
                 {/* Platform Selection */}
-                <div className="mb-6">
-                    <PlatformSelector
-                        selectedPlatforms={selectedPlatforms}
-                        onChange={setSelectedPlatforms}
-                        isPro={isPro}
-                        disabled={false}
-                    />
-                </div>
+                {!isBuilding && (
+                    <div className="mb-6">
+                        <PlatformSelector
+                            selectedPlatforms={selectedPlatforms}
+                            onChange={setSelectedPlatforms}
+                            isPro={isPro}
+                            disabled={false}
+                        />
+                    </div>
+                )}
 
                 {/* Build Button */}
                 <div className="max-w-md mx-auto">

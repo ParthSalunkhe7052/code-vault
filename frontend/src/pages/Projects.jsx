@@ -43,6 +43,21 @@ const Projects = () => {
     const dropdownRef = useRef(null);
     const fileInputRef = useRef(null);
 
+    // Auto-open wizard from URL query param (e.g. from GlobalBuildStatus)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const projectIdFromUrl = params.get('project_id');
+        
+        if (projectIdFromUrl && projects.length > 0 && !isConfigModalOpen) {
+            const targetProject = projects.find(p => p.id === projectIdFromUrl);
+            if (targetProject) {
+                handleProjectClick(targetProject);
+                // Clean URL
+                window.history.replaceState({}, '', '/projects');
+            }
+        }
+    }, [projects, isConfigModalOpen]);
+
     const fetchProjects = async () => {
         try {
             const data = await projectApi.list();
