@@ -180,13 +180,22 @@ export function CloudBuildButton({
           // Check if all platforms are done
           const allDone = completedCount + failedCount === targetPlatforms.length;
           if (allDone) {
-            if (failedCount === targetPlatforms.length) {
-              setStatus('failed');
-              setError('All platform builds failed');
-            } else {
-              setStatus('completed');
-              if (onComplete) onComplete({ artifacts: updatedArtifacts });
+            const finalStatus = failedCount === targetPlatforms.length ? 'failed' : 'completed';
+            setStatus(finalStatus);
+            if (finalStatus === 'failed') {
+                setError('All platform builds failed');
             }
+            
+            // Sync Global Context (Mocking a single status object for the parent)
+            if (projectBuild && projectBuild.updateStatus) {
+                projectBuild.updateStatus({
+                    status: finalStatus,
+                    progress: 100,
+                    artifacts: Object.values(updatedArtifacts) // simplified
+                });
+            }
+
+            if (onComplete) onComplete({ artifacts: updatedArtifacts });
             return; // Stop polling
           }
         } else {
@@ -220,11 +229,19 @@ export function CloudBuildButton({
           if (buildStatus === 'completed') {
             setStatus('completed');
             setDownloadUrl(finalDownloadUrl);
+            // Sync Global Context
+            if (projectBuild && projectBuild.updateStatus) {
+                projectBuild.updateStatus(response.data);
+            }
             if (onComplete) onComplete(response.data);
             return; // Stop polling
           } else if (buildStatus === 'failed') {
             setStatus('failed');
             setError(finalError || "Build failed - check GitHub Actions logs for details");
+            // Sync Global Context
+            if (projectBuild && projectBuild.updateStatus) {
+                projectBuild.updateStatus(response.data);
+            }
             return; // Stop polling
           }
         }

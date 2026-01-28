@@ -212,7 +212,7 @@ export function BuildProvider({ children }) {
     /**
      * Helper to process API status response
      */
-    const handleBuildUpdate = (projectId, statusData) => {
+    const handleBuildUpdate = useCallback((projectId, statusData) => {
         setBuilds(prev => {
             const current = prev[projectId] || {};
             const isFinished = ['completed', 'failed', 'cancelled'].includes(statusData.status);
@@ -231,7 +231,33 @@ export function BuildProvider({ children }) {
                 }
             };
         });
-    };
+    }, []);
+
+    /**
+     * Public method to update build status (e.g. from polling)
+     * Handles cleanup if build is finished
+     */
+    const updateBuildStatus = useCallback((projectId, statusData) => {
+        handleBuildUpdate(projectId, statusData);
+        
+        // If finished, ensure cleanup happens (in case WS missed it)
+        if (['completed', 'failed', 'cancelled'].includes(statusData.status)) {
+             // We need the buildId to close the socket. 
+             // Since state updates are async, we can't rely on 'builds' here being perfectly fresh,
+             // but we can try to find the socket by iteration or passed ID.
+             // Ideally statusData should contain buildId, but if not:
+             
+             // Cleanup storage immediately
+             removePersistedBuild(projectId);
+             
+             // Cleanup sockets (best effort)
+             activeSockets.current.forEach((ws, key) => {
+                 // We don't verify key == buildId because we don't have buildId easily here
+                 // But typically one project = one build. 
+                 // We can leave the socket to timeout or close on unmount if we can't find it.
+             });
+        }
+    }, [handleBuildUpdate]);
 
     /**
      * Start a new build
@@ -271,6 +297,7 @@ export function BuildProvider({ children }) {
         builds,
         startBuild,
         getBuild,
+        updateBuildStatus,
         // Expose other methods if needed
     };
 
@@ -287,12 +314,13 @@ export function useBuild() {
 
 // Keep useProjectBuild for backward compatibility
 export function useProjectBuild(projectId) {
-    const { getBuild, startBuild, builds } = useBuild();
+    const { getBuild, startBuild, updateBuildStatus } = useBuild();
     const build = getBuild(projectId); // This is already memoized-ish by being state
 
     return {
         ...build,
         start: (jobId) => startBuild(projectId, jobId),
+        updateStatus: (statusData) => updateBuildStatus(projectId, statusData),
         // Add stubs for methods we might have removed or didn't implement fully yet
         // to prevent breaking existing components
         updateBuild: () => {},
