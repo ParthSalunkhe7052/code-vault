@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/CodeVaultV1/server"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "npm"
+    directory: "/CodeVaultV1/frontend"
+    schedule:
+      interval: "daily"

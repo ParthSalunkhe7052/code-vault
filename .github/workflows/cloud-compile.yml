@@ -1,0 +1,815 @@
+name: Cloud Compile
+
+# Updated workflow for better error handling
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Build job ID'
+        required: true
+        type: string
+      project_id:
+        description: 'Project ID'
+        required: true
+        type: string
+      language:
+        description: 'Language (python or nodejs)'
+        required: true
+        type: string
+      target_platforms:
+        description: 'List of platforms to build for (e.g. windows,macos,linux)'
+        required: true
+        type: string
+        default: 'windows'
+      source_url:
+        description: 'R2 presigned URL for source download'
+        required: true
+        type: string
+      config_json:
+        description: 'Build configuration JSON'
+        required: true
+        type: string
+      callback_url:
+        description: 'Webhook URL for completion'
+        required: true
+        type: string
+      callback_secret:
+        description: 'HMAC secret for webhook'
+        required: true
+        type: string
+      plan_tier:
+        description: 'User plan tier (free/pro/enterprise)'
+        required: false
+        type: string
+        default: 'free'
+      compatibility_mode:
+        description: 'Disable aggressive anti-bloat for problematic dependencies'
+        required: false
+        type: boolean
+        default: false
+      fast_build:
+        description: 'Skip compression for faster build (outputs zip of directory)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-windows:
+    if: contains(github.event.inputs.target_platforms, 'windows')
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
+    
+    steps:
+      - name: Checkout Repo (for scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+      
+      - name: Update progress - Starting
+        run: |
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            platform = "windows"
+            progress = 5
+            stage = "Starting build"
+            github_run_id = "${{ github.run_id }}"
+          } | ConvertTo-Json -Compress
+          
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          
+          try {
+            Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}/progress" `
+              -Method POST `
+              -ContentType "application/json" `
+              -Headers @{ "X-Signature" = $signature } `
+              -Body $body
+          } catch { Write-Host "Progress update failed (non-critical)" }
+        shell: pwsh
+        continue-on-error: true
+
+      - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: windows-pip-py3.11-v1
+          restore-keys: |
+            windows-pip-py3.11-
+            windows-pip-
+      
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\npm-cache
+          key: windows-npm-node18-v1
+          restore-keys: |
+            windows-npm-node18-
+            windows-npm-
+      
+      - name: Cache Nuitka (Windows)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\Nuitka\Nuitka
+            ~\.cache\Nuitka
+          key: windows-nuitka-py3.11-v3
+          restore-keys: |
+            windows-nuitka-py3.11-
+            windows-nuitka-
+      
+      - name: Install Build Tools
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
+      
+      - name: Install pkg (Node.js)
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: npm install -g pkg
+      
+      - name: Download source code
+        run: |
+          curl -o source.zip "${{ github.event.inputs.source_url }}"
+          Expand-Archive -Path source.zip -DestinationPath ./project
+        shell: pwsh
+
+      - name: Normalize source directory structure
+        run: |
+          if (Test-Path "./project/source") {
+            Write-Host "Source directory found at ./project/source"
+          } elseif ((Get-ChildItem ./project -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
+            Write-Host "Source files in ./project root, moving to source subfolder"
+            New-Item -ItemType Directory -Force -Path "./project/source" | Out-Null
+            Get-ChildItem ./project -Exclude source | Move-Item -Destination "./project/source" -Force
+          } else {
+            $subfolders = Get-ChildItem ./project -Directory -ErrorAction SilentlyContinue
+            if ($subfolders.Count -eq 1) {
+              Move-Item -Path $subfolders[0].FullName -Destination "./project/source" -Force
+            } else {
+              Write-Host "ERROR: Could not determine source structure"
+              Write-Host "Contents of ./project:"
+              Get-ChildItem ./project -Force | Format-Table Name, Mode
+              exit 1
+            }
+          }
+        shell: pwsh
+
+      - name: Parse config
+        id: prepare
+        run: |
+          $config = '${{ github.event.inputs.config_json }}' | ConvertFrom-Json
+          $entry = if ($config.entry_file) { $config.entry_file } else { "main.py" }
+          $out = if ($config.output_name) { $config.output_name } else { "app" }
+          
+          echo "entry_file=$entry" >> $env:GITHUB_OUTPUT
+          echo "output_name=$out" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        env:
+          NUITKA_CACHE_DIR: ~\AppData\Local\Nuitka\Nuitka
+        run: |
+          python .github/scripts/cloud_runner.py `
+            --config '${{ github.event.inputs.config_json }}' `
+            --source ./project/source
+        shell: pwsh
+
+      # === NODE.JS BUILD (Legacy) ===
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-win-x64 --output "${{ steps.prepare.outputs.output_name }}.exe"
+        shell: pwsh
+      
+      - name: Package Output (Windows)
+        run: |
+          cd project/source
+          
+          # Check for build_output first
+          if (Test-Path "build_output") {
+             Get-ChildItem "build_output" | Copy-Item -Destination . -Recurse -Force
+          }
+          
+          $outputName = "${{ steps.prepare.outputs.output_name }}"
+          $exe = Get-ChildItem -Filter "$outputName.exe" | Select-Object -First 1
+          
+          if ($null -eq $exe) {
+             # Try generic search
+             $exe = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
+          }
+
+          if ($null -ne $exe) {
+             Compress-Archive -Path $exe.Name -DestinationPath "$outputName.zip" -Force
+             echo "ARTIFACT_NAME=$outputName.zip" >> $env:GITHUB_ENV
+          } elseif (Test-Path "build") {
+             # Directory output (Fast Build)
+             Compress-Archive -Path "build" -DestinationPath "$outputName.zip" -Force
+             echo "ARTIFACT_NAME=$outputName.zip" >> $env:GITHUB_ENV
+          } else {
+             Write-Error "No output executable or directory found!"
+             exit 1
+          }
+        shell: pwsh
+
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          cd project/source
+          $artifact = $env:ARTIFACT_NAME
+
+          aws configure set aws_access_key_id $env:R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $env:R2_SECRET_KEY
+          
+          $key = "builds/${{ github.event.inputs.build_id }}/windows/$artifact"
+          aws s3 cp $artifact "s3://$env:R2_BUCKET/$key" --endpoint-url $env:R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $env:GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $env:GITHUB_ENV
+        shell: pwsh
+      
+      - name: Notify completion
+        if: always()
+        continue-on-error: true
+        run: |
+          $status = if ($env:UPLOAD_KEY) { "completed" } else { "failed" }
+          
+          # Capture detailed error message based on job outcome
+          $errorMsg = $null
+          if ($status -eq "failed") {
+            if (Test-Path "project/source/build_output/error_message.txt") {
+              $errorMsg = Get-Content "project/source/build_output/error_message.txt" -Raw
+            } elseif ($env:TALIB_SKIPPED -eq "true") {
+              $errorMsg = "Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            } elseif (-not (Test-Path "project/source/${{ steps.prepare.outputs.entry_file }}")) {
+              $files = Get-ChildItem -Path "project/source" -Recurse -File | Select-Object -ExpandProperty Name | Select-Object -First 5
+              $fileStr = $files -join ", "
+              $errorMsg = "Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $fileStr..."
+            } else {
+              $errorMsg = "Compilation failed. Check GitHub Actions logs."
+            }
+          }
+          
+          $body = @{
+            build_id = "${{ github.event.inputs.build_id }}"
+            platform = "windows"
+            status = $status
+            download_key = $env:UPLOAD_KEY
+            filename = $env:UPLOAD_FILENAME
+            error = $errorMsg
+            github_run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } | ConvertTo-Json -Compress
+          
+          $secret = "${{ github.event.inputs.callback_secret }}"
+          $hmac = New-Object System.Security.Cryptography.HMACSHA256
+          $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($secret)
+          $signature = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))).Replace("-", "").ToLower()
+          
+          # Retry webhook delivery
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+          
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              Invoke-RestMethod -Uri "${{ github.event.inputs.callback_url }}" `
+                -Method POST `
+                -ContentType "application/json" `
+                -Headers @{ "X-Signature" = $signature } `
+                -Body $body `
+                -TimeoutSec 10
+              $success = $true
+              Write-Host "Webhook delivered successfully"
+            } catch {
+              $retryCount++
+              Write-Host "Webhook failed (attempt $retryCount/$maxRetries): $($_.Exception.Message)"
+              Start-Sleep -Seconds 2
+            }
+          }
+        shell: pwsh
+
+  build-linux:
+    if: contains(github.event.inputs.target_platforms, 'linux')
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
+    
+    steps:
+      - name: Checkout Repo (for scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+
+      - name: Update progress - Starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+      
+      - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: linux-pip-py3.11-v1
+          restore-keys: |
+            linux-pip-py3.11-
+            linux-pip-
+      
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: linux-npm-node18-v1
+          restore-keys: |
+            linux-npm-node18-
+            linux-npm-
+
+      - name: Cache Nuitka (Linux)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/.local/share/Nuitka
+          key: linux-nuitka-py3.11-v3
+          restore-keys: |
+            linux-nuitka-py3.11-
+            linux-nuitka-
+
+      - name: Install dependencies
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf python3-tk ccache
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
+
+      - name: Install pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: npm install -g pkg
+
+      - name: Download source code
+        run: |
+          curl -L -o source.zip "${{ github.event.inputs.source_url }}"
+          unzip source.zip -d ./project
+
+      - name: Normalize source directory structure
+        run: |
+          if [ -d "./project/source" ]; then
+            echo "Source directory found at ./project/source"
+          elif [ "$(find ./project -maxdepth 1 -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "Source files in ./project root, moving to source subfolder"
+            mkdir -p ./project/source
+            find ./project -maxdepth 1 -type f -exec mv {} ./project/source/ \;
+          else
+            subfolders=$(find ./project -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+            if [ "$subfolders" -eq 1 ]; then
+              subfolder=$(find ./project -maxdepth 1 -mindepth 1 -type d | head -1)
+              mv "$subfolder" ./project/source
+            else
+              echo "ERROR: Could not determine source structure"
+              ls -la ./project
+              exit 1
+            fi
+          fi
+
+      - name: Parse config
+        id: prepare
+        run: |
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('entry_file') or '')")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('output_name') or '')")
+          
+          # Defaults
+          [ -z "$config" ] && config="main.py"
+          [ -z "$output" ] && output="app"
+          
+          echo "entry_file=$config" >> $GITHUB_OUTPUT
+          echo "output_name=$output" >> $GITHUB_OUTPUT
+
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          python3 .github/scripts/cloud_runner.py \
+            --config '${{ github.event.inputs.config_json }}' \
+            --source ./project/source
+
+      # === NODE.JS BUILD (Legacy) ===
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-linux-x64 --output "${{ steps.prepare.outputs.output_name }}"
+
+      - name: Package Output (Linux)
+        run: |
+          cd project/source
+          
+          # Check for build_output first
+          if [ -d "build_output" ]; then
+             cp -r build_output/* .
+          fi
+          
+          output_name="${{ steps.prepare.outputs.output_name }}"
+          
+          if [ -f "$output_name" ]; then
+             chmod +x "$output_name"
+             tar -czvf "${output_name}.tar.gz" "$output_name"
+             echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+          elif [ -d "build" ]; then
+             # Fast Build output
+             tar -czvf "${output_name}.tar.gz" build
+             echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+          else
+             # Try generic search
+             exe_name=$(find . -maxdepth 1 -type f -executable | head -1)
+             if [ -n "$exe_name" ]; then
+                chmod +x "$exe_name"
+                tar -czvf "${output_name}.tar.gz" "$exe_name"
+                echo "ARTIFACT_NAME=${output_name}.tar.gz" >> $GITHUB_ENV
+             else
+                echo "Error: No output found"
+                exit 1
+             fi
+          fi
+
+      - name: Update progress - Starting upload
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"linux","progress":85,"stage":"Uploading artifact"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          cd project/source
+          artifact=$ARTIFACT_NAME
+          
+          pip install awscli
+          aws configure set aws_access_key_id $R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $R2_SECRET_KEY
+          
+          key="builds/${{ github.event.inputs.build_id }}/linux/$artifact"
+          aws s3 cp "$artifact" "s3://$R2_BUCKET/$key" --endpoint-url $R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $GITHUB_ENV
+
+      - name: Notify completion
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "$UPLOAD_KEY" ]; then 
+            status="completed"
+            error_msg=""
+          else 
+            status="failed"
+            # Capture detailed error message
+            if [ -f "project/source/build_output/error_message.txt" ]; then
+              error_msg=$(cat "project/source/build_output/error_message.txt")
+            elif [ "$TALIB_SKIPPED" = "true" ]; then
+              error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
+              files=$(find project/source -maxdepth 3 -not -path '*/.*' | head -n 5 | sed 's|project/source/||' | tr '\n' ', ')
+              error_msg="Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $files..."
+            else
+              error_msg="Compilation failed. Check GitHub Actions logs."
+            fi
+          fi
+          
+          # Build JSON payload properly
+          if [ -n "$error_msg" ]; then
+            error_json="\"$error_msg\""
+          else
+            error_json="null"
+          fi
+          
+          payload=$(cat << EOF
+          {
+            "build_id": "${{ github.event.inputs.build_id }}",
+            "platform": "linux",
+            "status": "$status",
+            "download_key": "$UPLOAD_KEY",
+            "filename": "$UPLOAD_FILENAME",
+            "error": $error_json,
+            "github_run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          )
+          
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          
+          # Retry webhook delivery
+          max_retries=3
+          retry_count=0
+          success=false
+          
+          while [ "$success" = "false" ] && [ $retry_count -lt $max_retries ]; do
+            if curl -sf -X POST "${{ github.event.inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: $signature" \
+              --connect-timeout 10 \
+              -d "$payload"; then
+              success=true
+              echo "Webhook delivered successfully"
+            else
+              retry_count=$((retry_count + 1))
+              echo "Webhook failed (attempt $retry_count/$max_retries)"
+              sleep 2
+            fi
+          done
+
+  build-macos:
+    if: contains(github.event.inputs.target_platforms, 'macos')
+    runs-on: macos-latest
+    timeout-minutes: ${{ github.event.inputs.plan_tier == 'enterprise' && 120 || 60 }}
+    
+    steps:
+      - name: Checkout Repo (for scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+
+      - name: Update progress - Starting
+        run: |
+          payload='{"build_id":"${{ github.event.inputs.build_id }}","platform":"macos","progress":5,"stage":"Starting build","github_run_id":"${{ github.run_id }}"}'
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          curl -s -X POST "${{ github.event.inputs.callback_url }}/progress" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $signature" \
+            -d "$payload" || true
+        continue-on-error: true
+      
+      - name: Setup Python
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Node.js
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Cache pip packages
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: macos-pip-py3.11-v1
+          restore-keys: |
+            macos-pip-py3.11-
+            macos-pip-
+      
+      - name: Cache npm packages
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: macos-npm-node18-v1
+          restore-keys: |
+            macos-npm-node18-
+            macos-npm-
+
+      - name: Cache Nuitka (macOS)
+        if: ${{ github.event.inputs.language == 'python' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Nuitka
+            ~/.cache/Nuitka
+          key: macos-nuitka-py3.11-v3
+          restore-keys: |
+            macos-nuitka-py3.11-
+            macos-nuitka-
+
+      - name: Install dependencies
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          # Install dependencies for Cloud Runner AND Nuitka (with quiet mode)
+          pip install nuitka ordered-set zstandard requests cryptography --quiet --disable-pip-version-check
+
+      - name: Install pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: npm install -g pkg
+
+      - name: Download source code
+        run: |
+          curl -L -o source.zip "${{ github.event.inputs.source_url }}"
+          unzip source.zip -d ./project
+
+      - name: Normalize source directory structure
+        run: |
+          if [ -d "./project/source" ]; then
+            echo "Source directory found at ./project/source"
+          elif [ "$(find ./project -maxdepth 1 -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "Source files in ./project root, moving to source subfolder"
+            mkdir -p ./project/source
+            find ./project -maxdepth 1 -type f -exec mv {} ./project/source/ \;
+          else
+            subfolders=$(find ./project -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+            if [ "$subfolders" -eq 1 ]; then
+              subfolder=$(find ./project -maxdepth 1 -mindepth 1 -type d | head -1)
+              mv "$subfolder" ./project/source
+            else
+              echo "ERROR: Could not determine source structure"
+              ls -la ./project
+              exit 1
+            fi
+          fi
+
+      - name: Parse config
+        id: prepare
+        run: |
+          config=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('entry_file') or '')")
+          output=$(echo '${{ github.event.inputs.config_json }}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('output_name') or '')")
+          
+          # Defaults
+          [ -z "$config" ] && config="main.py"
+          [ -z "$output" ] && output="app"
+          
+          echo "entry_file=$config" >> $GITHUB_OUTPUT
+          echo "output_name=$output" >> $GITHUB_OUTPUT
+
+      # === PYTHON BUILD (Unified Cloud Runner) ===
+      - name: Execute Cloud Runner (Python)
+        if: ${{ github.event.inputs.language == 'python' }}
+        run: |
+          python3 .github/scripts/cloud_runner.py \
+            --config '${{ github.event.inputs.config_json }}' \
+            --source ./project/source
+
+      # === NODE.JS BUILD (Legacy) ===
+      - name: Compile with pkg
+        if: ${{ github.event.inputs.language == 'nodejs' }}
+        run: |
+          cd project/source
+          npm install --production
+          pkg . --targets node18-macos-x64 --output "${{ steps.prepare.outputs.output_name }}"
+
+      - name: Package Output (Zip App)
+        run: |
+          # Find output exe (could be in build_output if using Runner)
+          cd project/source
+          
+          # Check for build_output first
+          if [ -d "build_output" ]; then
+             find build_output -maxdepth 1 -type f -executable -exec cp {} . \;
+          fi
+          
+          exe_name="${{ steps.prepare.outputs.output_name }}"
+          if [ ! -f "$exe_name" ]; then
+             # Try to find app bundle for Nuitka
+             if [ -d "${{ steps.prepare.outputs.output_name }}.app" ]; then
+                 exe_name="${{ steps.prepare.outputs.output_name }}.app"
+             else
+                 exe_name=$(find . -maxdepth 1 -type f -executable | head -1)
+             fi
+          fi
+
+          if [ -d "$exe_name" ] && [[ "$exe_name" == *.app ]]; then
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "$exe_name"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          else
+             chmod +x "$exe_name"
+             zip -r "${{ steps.prepare.outputs.output_name }}_macos.zip" "$exe_name"
+             echo "ARTIFACT_NAME=${{ steps.prepare.outputs.output_name }}_macos.zip" >> $GITHUB_ENV
+          fi
+
+      - name: Upload to R2
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          cd project/source
+          artifact=$ARTIFACT_NAME
+          
+          pip install awscli
+          aws configure set aws_access_key_id $R2_ACCESS_KEY
+          aws configure set aws_secret_access_key $R2_SECRET_KEY
+          
+          key="builds/${{ github.event.inputs.build_id }}/macos/$artifact"
+          aws s3 cp "$artifact" "s3://$R2_BUCKET/$key" --endpoint-url $R2_ENDPOINT
+          
+          echo "UPLOAD_KEY=$key" >> $GITHUB_ENV
+          echo "UPLOAD_FILENAME=$artifact" >> $GITHUB_ENV
+
+      - name: Notify completion
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "$UPLOAD_KEY" ]; then 
+            status="completed"
+            error_msg=""
+          else 
+            status="failed"
+            # Capture detailed error message
+            if [ -f "project/source/build_output/error_message.txt" ]; then
+              error_msg=$(cat "project/source/build_output/error_message.txt")
+            elif [ "$TALIB_SKIPPED" = "true" ]; then
+              error_msg="Build failed: Project requires ta-lib which needs system libraries. Please remove ta-lib dependency or use Docker builds."
+            elif [ ! -f "project/source/${{ steps.prepare.outputs.entry_file }}" ]; then
+              files=$(find project/source -maxdepth 3 -not -path '*/.*' | head -n 5 | sed 's|project/source/||' | tr '\n' ', ')
+              error_msg="Entry file '${{ steps.prepare.outputs.entry_file }}' not found. Checked in 'project/source'. Found: $files..."
+            else
+              error_msg="Compilation failed. Check GitHub Actions logs."
+            fi
+          fi
+          
+          # Build JSON payload properly
+          if [ -n "$error_msg" ]; then
+            error_json="\"$error_msg\""
+          else
+            error_json="null"
+          fi
+          
+          payload=$(cat << EOF
+          {
+            "build_id": "${{ github.event.inputs.build_id }}",
+            "platform": "macos",
+            "status": "$status",
+            "download_key": "$UPLOAD_KEY",
+            "filename": "$UPLOAD_FILENAME",
+            "error": $error_json,
+            "github_run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          )
+          
+          signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "${{ github.event.inputs.callback_secret }}" | awk '{print $2}')
+          
+          # Retry webhook delivery
+          max_retries=3
+          retry_count=0
+          success=false
+          
+          while [ "$success" = "false" ] && [ $retry_count -lt $max_retries ]; do
+            if curl -sf -X POST "${{ github.event.inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: $signature" \
+              --connect-timeout 10 \
+              -d "$payload"; then
+              success=true
+              echo "Webhook delivered successfully"
+            else
+              retry_count=$((retry_count + 1))
+              echo "Webhook failed (attempt $retry_count/$max_retries)"
+              sleep 2
+            fi
+          done
