@@ -1,0 +1,950 @@
+/* Import Google Fonts - must be first */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   Theme Variables - Default Dark Theme
+   ============================================================================= */
+:root {
+    /* Core colors - Default Theme (Indigo/Cyan) */
+    --cv-bg: #0a0f1a;
+    --cv-bg-secondary: #111827;
+    --cv-bg-elevated: #1f2937;
+    --cv-card: rgba(17, 24, 39, 0.92);
+    --cv-card-solid: #111827;
+
+    /* Text colors */
+    --cv-text: #e5e7eb;
+    --cv-text-muted: #9ca3af;
+    --cv-text-dim: #6b7280;
+
+    /* Primary accent - Indigo */
+    --cv-primary: #6366f1;
+    --cv-primary-hover: #818cf8;
+    --cv-primary-glow: rgba(99, 102, 241, 0.4);
+    --cv-primary-foreground: #ffffff;
+
+    /* Secondary accent - Emerald */
+    --cv-secondary: #10b981;
+    --cv-secondary-glow: rgba(16, 185, 129, 0.3);
+
+    /* Tertiary accent - Cyan */
+    --cv-accent: #06b6d4;
+    --cv-accent-glow: rgba(6, 182, 212, 0.3);
+
+    /* Borders and dividers */
+    --cv-border: rgba(255, 255, 255, 0.15);
+    --cv-border-muted: rgba(255, 255, 255, 0.10);
+    --cv-border-subtle: rgba(255, 255, 255, 0.05);
+
+    /* UI elements */
+    --cv-muted: #374151;
+    --cv-input-bg: #1f2937;
+    --cv-scrollbar: #374151;
+    --cv-scrollbar-hover: #4b5563;
+
+    /* Design tokens */
+    --cv-radius: 0.5rem;
+    --cv-radius-lg: 0.75rem;
+    --cv-radius-xl: 1rem;
+
+    /* Chart colors */
+    --cv-chart-1: #6366f1;
+    --cv-chart-2: #10b981;
+    --cv-chart-3: #06b6d4;
+    --cv-chart-4: #8b5cf6;
+    --cv-chart-5: #f59e0b;
+
+    /* Legacy variables for backwards compatibility */
+    --background: var(--cv-bg);
+    --background-secondary: var(--cv-bg-secondary);
+    --primary: var(--cv-primary);
+    --primary-glow: var(--cv-primary-glow);
+    --secondary: var(--cv-secondary);
+    --secondary-glow: var(--cv-secondary-glow);
+    --accent: var(--cv-accent);
+    --accent-glow: var(--cv-accent-glow);
+
+    /* Card variables */
+    --card-opacity: 0.92;
+    --border-opacity: 0.15;
+
+    /* Transitions */
+    --transition-fast: 150ms;
+    --transition-normal: 300ms;
+    --transition-slow: 500ms;
+}
+
+/* =============================================================================
+   Dark Matter Theme - Warm Coral/Orange Accents
+   ============================================================================= */
+.dark-matter {
+    /* Core colors - Dark Matter (Purple-tinted black) */
+    --cv-bg: hsl(270, 5.56%, 7.06%);           /* #121012 */
+    --cv-bg-secondary: hsl(0, 0%, 7.06%);      /* #121212 */
+    --cv-bg-elevated: hsl(0, 0%, 13.33%);      /* #222222 */
+    --cv-card: hsl(0, 0%, 7.06%);              /* #121212 */
+    --cv-card-solid: hsl(0, 0%, 10%);          /* #1a1a1a */
+
+    /* Text colors - slightly muted */
+    --cv-text: hsl(0, 0%, 75.69%);             /* #c1c1c1 */
+    --cv-text-muted: hsl(0, 0%, 53.33%);       /* #888888 */
+    --cv-text-dim: hsl(0, 0%, 40%);            /* #666666 */
+
+    /* Primary accent - Warm Coral/Orange */
+    --cv-primary: hsl(22.3, 75.51%, 61.57%);   /* #e88a4c */
+    --cv-primary-hover: hsl(22.3, 80%, 70%);   /* lighter coral */
+    --cv-primary-glow: rgba(232, 138, 76, 0.4);
+    --cv-primary-foreground: hsl(270, 5.56%, 7.06%);  /* dark text on primary */
+
+    /* Secondary accent - Teal */
+    --cv-secondary: hsl(180, 17.39%, 45.1%);   /* #5f8a8a */
+    --cv-secondary-glow: rgba(95, 138, 138, 0.3);
+
+    /* Tertiary accent - Muted */
+    --cv-accent: hsl(0, 0%, 20%);              /* #333333 */
+    --cv-accent-glow: rgba(51, 51, 51, 0.3);
+
+    /* Borders and dividers - darker, more subtle */
+    --cv-border: hsl(0, 0%, 13.33%);           /* #222222 */
+    --cv-border-muted: hsl(0, 0%, 10%);        /* #1a1a1a */
+    --cv-border-subtle: hsl(0, 0%, 8%);        /* #141414 */
+
+    /* UI elements */
+    --cv-muted: hsl(0, 0%, 13.33%);            /* #222222 */
+    --cv-input-bg: hsl(0, 0%, 10%);            /* #1a1a1a */
+    --cv-scrollbar: hsl(0, 0%, 20%);           /* #333333 */
+    --cv-scrollbar-hover: hsl(0, 0%, 30%);     /* #4d4d4d */
+
+    /* Design tokens - more rounded */
+    --cv-radius: 0.75rem;
+    --cv-radius-lg: 1rem;
+    --cv-radius-xl: 1.25rem;
+
+    /* Chart colors - Dark Matter palette */
+    --cv-chart-1: hsl(180, 17.39%, 45.1%);     /* Teal */
+    --cv-chart-2: hsl(22.3, 75.51%, 61.57%);   /* Coral */
+    --cv-chart-3: hsl(31.2, 92.59%, 78.82%);   /* Light orange */
+    --cv-chart-4: hsl(0, 0%, 53.33%);          /* Gray */
+    --cv-chart-5: hsl(0, 0%, 60%);             /* Light gray */
+
+    /* Legacy variable overrides */
+    --background: var(--cv-bg);
+    --background-secondary: var(--cv-bg-secondary);
+    --primary: var(--cv-primary);
+    --primary-glow: var(--cv-primary-glow);
+    --secondary: var(--cv-secondary);
+    --secondary-glow: var(--cv-secondary-glow);
+    --accent: var(--cv-accent);
+    --accent-glow: var(--cv-accent-glow);
+}
+
+/* NO GLOBAL TRANSITIONS - causes the "weird glow" issue on hover
+ * Theme switching transitions are handled selectively via the html element only
+ * Interactive element transitions are defined per-component for better control
+ */
+
+/* Smooth theme transitions only for color properties, not interactive states */
+html {
+    transition: background-color 300ms ease, color 300ms ease;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: 'Outfit', 'Inter', sans-serif;
+    background-color: var(--cv-bg);
+    color: var(--cv-text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark Matter - Monospace for code blocks, keep sans-serif for UI to prevent layout issues
+ * This maintains the "hacker" aesthetic without breaking text wrapping
+ */
+.dark-matter {
+    /* Keep UI elements readable and properly wrapped */
+}
+
+.dark-matter code,
+.dark-matter pre,
+.dark-matter .font-mono,
+.dark-matter .mono {
+    font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Optional: Apply subtle letter-spacing to headings in Dark Matter for the hacker feel */
+.dark-matter h1, .dark-matter h2, .dark-matter h3, .dark-matter h4 {
+    letter-spacing: 0.02em;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--cv-bg-secondary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--cv-scrollbar);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--cv-scrollbar-hover);
+}
+
+/* Selection */
+::selection {
+    background: var(--primary);
+    color: white;
+}
+
+/* Focus styles */
+*:focus {
+    outline: none;
+}
+
+*:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* Custom Component Styles */
+@layer components {
+    /* Card with glass effect - theme aware */
+    .card {
+        background: var(--cv-card);
+        border: 1px solid var(--cv-border);
+        border-radius: var(--cv-radius-lg);
+        box-shadow:
+            0 4px 6px -1px rgba(0, 0, 0, 0.3),
+            0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        contain: layout style paint;
+    }
+
+    /* Glass card with enhanced visibility - theme aware */
+    .glass-card {
+        background: var(--cv-card);
+        border: 1px solid var(--cv-border);
+        border-radius: var(--cv-radius-xl);
+        box-shadow:
+            0 4px 6px -1px rgba(0, 0, 0, 0.3),
+            0 2px 4px -1px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+        contain: layout style paint;
+    }
+
+    /* Glass card hover - clean, no weird glow */
+    .glass-card:hover {
+        border-color: var(--cv-primary);
+        background: color-mix(in srgb, var(--cv-card) 90%, var(--cv-primary) 10%);
+        box-shadow:
+            0 8px 16px -4px rgba(0, 0, 0, 0.3),
+            0 0 12px -2px var(--cv-primary-glow);
+        transform: translateY(-2px);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: transform;
+    }
+
+    /* Desktop-only hover enhancements (no touch devices) */
+    @media (hover: hover) and (pointer: fine) {
+        .glass-card:hover {
+            /* Enhanced hover for desktop only */
+        }
+    }
+
+    /* Mobile/Touch - no hover effects, just touch feedback */
+    @media (hover: none) {
+        .glass-card:active {
+            transform: scale(0.98);
+        }
+    }
+
+    /* Primary button - theme aware, refined for desktop */
+    .btn-primary {
+        background: var(--cv-primary);
+        color: var(--cv-primary-foreground);
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        border-radius: var(--cv-radius);
+        box-shadow: 0 4px 10px -2px var(--cv-primary-glow);
+        border: 1px solid color-mix(in srgb, var(--cv-primary) 70%, black 30%);
+        position: relative;
+        overflow: hidden;
+        contain: layout style paint;
+    }
+
+    /* Desktop hover - subtle glow without the weird pulsing */
+    @media (hover: hover) and (pointer: fine) {
+        .btn-primary:hover {
+            background: var(--cv-primary-hover);
+            box-shadow: 0 6px 16px -2px var(--cv-primary-glow);
+            transform: translateY(-1px);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
+        }
+
+        .btn-primary:active {
+            transform: translateY(1px) scale(0.98);
+            transition: all 0.05s ease;
+        }
+    }
+
+    /* Touch devices - no hover, just press */
+    @media (hover: none) {
+        .btn-primary:active {
+            transform: scale(0.95);
+            opacity: 0.9;
+        }
+    }
+
+    /* Secondary button - refined for desktop */
+    .btn-secondary {
+        background: var(--cv-bg-elevated);
+        color: var(--cv-text);
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        border-radius: var(--cv-radius);
+        border: 1px solid var(--cv-border);
+        position: relative;
+        overflow: hidden;
+        contain: layout style paint;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+        .btn-secondary:hover {
+            background: var(--cv-bg-secondary);
+            border-color: var(--cv-border-muted);
+            transform: translateY(-1px);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
+        }
+
+        .btn-secondary:active {
+            transform: translateY(1px) scale(0.98);
+            transition: all 0.05s ease;
+        }
+    }
+
+    @media (hover: none) {
+        .btn-secondary:active {
+            transform: scale(0.95);
+        }
+    }
+
+    /* Danger button - keep functional but refined */
+    .btn-danger {
+        background: #dc2626;
+        color: white;
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        border-radius: var(--cv-radius);
+        border: 1px solid #991b1b;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+        .btn-danger:hover {
+            background: #ef4444;
+            box-shadow: 0 4px 12px -2px rgba(220, 38, 38, 0.4);
+            transform: translateY(-1px);
+            transition: all 0.15s ease;
+        }
+
+        .btn-danger:active {
+            transform: translateY(1px) scale(0.98);
+        }
+    }
+
+    @media (hover: none) {
+        .btn-danger:active {
+            transform: scale(0.95);
+        }
+    }
+
+    /* Input field - theme aware */
+    .input {
+        background: var(--cv-input-bg);
+        border: 1px solid var(--cv-border);
+        border-radius: var(--cv-radius);
+        padding: 0.5rem 1rem;
+        color: var(--cv-text);
+        transition: all 0.2s ease;
+    }
+
+    .input::placeholder {
+        color: var(--cv-text-muted);
+    }
+
+    .input:focus {
+        border-color: var(--cv-primary);
+        outline: none;
+        box-shadow: 0 0 0 2px var(--cv-primary-glow);
+    }
+
+    /* Select field - theme aware */
+    .select {
+        background: var(--cv-input-bg);
+        border: 1px solid var(--cv-border);
+        border-radius: var(--cv-radius);
+        padding: 0.5rem 1rem;
+        color: var(--cv-text);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .select:focus {
+        border-color: var(--cv-primary);
+        outline: none;
+        box-shadow: 0 0 0 2px var(--cv-primary-glow);
+    }
+
+    /* Badge styles - semantic colors maintained */
+    .badge {
+        @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+    }
+
+    .badge-success {
+        @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+    }
+
+    .badge-danger {
+        @apply bg-red-500/20 text-red-400 border border-red-500/30;
+    }
+
+    .badge-warning {
+        @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30;
+    }
+
+    .badge-info {
+        @apply bg-cyan-500/20 text-cyan-400 border border-cyan-500/30;
+    }
+
+    /* Theme-specific badge for primary color */
+    .badge-primary {
+        background: var(--cv-primary-glow);
+        color: var(--cv-primary);
+        border: 1px solid var(--cv-primary);
+    }
+
+    /* Glow effects - refined to be subtle, not overwhelming */
+    .glow-primary {
+        box-shadow: 0 0 12px -2px var(--cv-primary-glow);
+    }
+
+    .glow-secondary {
+        box-shadow: 0 0 12px -2px var(--cv-secondary-glow);
+    }
+
+    .glow-accent {
+        box-shadow: 0 0 12px -2px var(--cv-accent-glow);
+    }
+
+    /* Strong glow for special elements (used sparingly) */
+    .glow-strong {
+        box-shadow: 0 0 24px -4px var(--cv-primary-glow), 0 0 48px -8px var(--cv-primary-glow);
+    }
+
+    /* Shadow utilities */
+    .shadow-card {
+        box-shadow:
+            0 4px 6px -1px rgba(0, 0, 0, 0.2),
+            0 2px 4px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    .shadow-card-hover {
+        box-shadow:
+            0 10px 15px -3px rgba(0, 0, 0, 0.3),
+            0 4px 6px -2px rgba(0, 0, 0, 0.2);
+    }
+
+    .shadow-glow-primary {
+        box-shadow: 0 0 20px -5px var(--cv-primary-glow);
+    }
+
+    /* ============================================================
+       DARK MATTER SPECIFIC STYLES
+       These apply a unique visual signature to Dark Matter mode
+       without breaking layout or causing hover issues
+       ============================================================ */
+
+    /* Dark Matter - Brand badge styling */
+    .dark-matter .dm-brand-accent {
+        background: linear-gradient(135deg, var(--cv-primary), var(--cv-secondary));
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+    }
+
+    /* Dark Matter - Subtle scanline effect (optional, used sparingly) */
+    .dark-matter .dm-scanline-bg {
+        background-image: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(232, 138, 76, 0.03) 2px,
+            rgba(232, 138, 76, 0.03) 4px
+        );
+    }
+
+    /* Dark Matter - Enhanced border that isn't overwhelming */
+    .dark-matter .dm-border-accent {
+        border: 1px solid rgba(232, 138, 76, 0.25);
+    }
+
+    .dark-matter .dm-border-accent:hover {
+        border-color: rgba(232, 138, 76, 0.5);
+        background: rgba(232, 138, 76, 0.05);
+    }
+
+    /* Code blocks in Dark Matter have a subtle terminal aesthetic */
+    .dark-matter code, .dark-matter pre {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(232, 138, 76, 0.15);
+        border-radius: 4px;
+        padding: 0.2em 0.4em;
+    }
+
+    .shadow-glow-success {
+        box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.4);
+    }
+
+    /* Icon button utility */
+    .btn-icon {
+        padding: 0.5rem;
+        border-radius: var(--cv-radius);
+        color: var(--cv-text-muted);
+        transition: all 0.2s ease;
+    }
+
+    .btn-icon:hover {
+        background: var(--cv-border);
+        color: var(--cv-text);
+    }
+}
+
+/* Utility Classes */
+@layer utilities {
+    /* Text gradient */
+    .text-gradient {
+        @apply bg-gradient-to-r from-indigo-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent;
+    }
+
+    /* Gradient border */
+    .border-gradient {
+        border-image: linear-gradient(135deg, #6366f1, #06b6d4) 1;
+    }
+
+    /* Optimized animations - reduced GPU impact */
+    .animate-fade-in {
+        animation: fadeIn 0.2s ease-out both;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    /* Slide up animation - optimized */
+    .animate-slide-up {
+        animation: slideUp 0.2s ease-out both;
+    }
+
+    @keyframes slideUp {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Scale in animation - optimized */
+    .animate-scale-in {
+        animation: scaleIn 0.15s ease-out both;
+    }
+    
+    @keyframes scaleIn {
+        from {
+            opacity: 0;
+            transform: scale(0.98);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+    /* Pulse glow - disabled for performance (was causing GPU issues) */
+    .animate-pulse-glow {
+        /* Animation removed to reduce GPU usage */
+    }
+    
+    /* Button interactions */
+    .btn-hover-scale:hover {
+        @apply transform scale-[1.02];
+    }
+    
+    .btn-hover-scale:active {
+        @apply transform scale-[0.98];
+    }
+}
+
+/* Table styles - theme aware */
+table {
+    @apply w-full;
+}
+
+th {
+    text-align: left;
+    color: var(--cv-text-muted);
+    font-weight: 500;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--cv-border);
+}
+
+td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--cv-border-muted);
+}
+
+tr:hover td {
+    background: var(--cv-border-subtle);
+}
+
+/* Alternating row colors */
+tbody tr:nth-child(even) {
+    background: var(--cv-border-subtle);
+}
+
+/* Modal backdrop */
+.modal-backdrop {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center;
+}
+
+/* Tooltip styles - theme aware */
+[data-tooltip] {
+    position: relative;
+}
+
+[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--cv-bg-elevated);
+    color: var(--cv-text);
+    font-size: 0.75rem;
+    border-radius: var(--cv-radius);
+    white-space: nowrap;
+    z-index: 50;
+    border: 1px solid var(--cv-border);
+}
+
+/* Custom scrollbar for modals and overflow areas */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Additional animations for Login page - optimized */
+@keyframes scan {
+    0% {
+        transform: translateY(0);
+        opacity: 0;
+    }
+    50% {
+        opacity: 0.3;
+    }
+    100% {
+        transform: translateY(100vh);
+        opacity: 0;
+    }
+}
+
+@keyframes spinSlow {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes spinReverseSlow {
+    from {
+        transform: rotate(360deg);
+    }
+    to {
+        transform: rotate(0deg);
+    }
+}
+
+.animate-scan {
+    animation: scan 4s linear infinite;
+}
+
+.animate-spin-slow {
+    animation: spinSlow 20s linear infinite;
+}
+
+.animate-spin-reverse-slower {
+    animation: spinReverseSlow 30s linear infinite;
+}
+
+/* Grid pattern background */
+.bg-grid-pattern {
+    background-image: 
+        linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+}
+
+/* =============================================================================
+   Mission Control Live Map Styles - Theme Aware
+   ============================================================================= */
+
+/* Leaflet map container */
+.live-map {
+    background: var(--cv-bg);
+    border-radius: 0;
+}
+
+/* Remove Leaflet default borders and make it blend */
+.live-map .leaflet-container {
+    background: var(--cv-bg);
+}
+
+/* Glowing marker effect - uses theme primary in Dark Matter */
+.map-marker-glow {
+    filter: drop-shadow(0 0 6px var(--cv-accent-glow)) drop-shadow(0 0 12px var(--cv-accent-glow));
+}
+
+/* Pulsing animation for markers - disabled for performance */
+.live-map .leaflet-interactive {
+    /* Animation removed to reduce GPU usage */
+}
+
+/* Dark themed popup - theme aware */
+.live-map .leaflet-popup-content-wrapper {
+    background: var(--cv-card);
+    border: 1px solid var(--cv-border);
+    border-radius: var(--cv-radius);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.live-map .leaflet-popup-content {
+    color: var(--cv-text);
+    margin: 10px 14px;
+}
+
+.live-map .leaflet-popup-tip {
+    background: var(--cv-card);
+    border: 1px solid var(--cv-border);
+}
+
+.live-map .leaflet-popup-close-button {
+    color: var(--cv-text-muted);
+}
+
+.live-map .leaflet-popup-close-button:hover {
+    color: var(--cv-text);
+}
+
+/* Zoom controls styling - theme aware */
+.live-map .leaflet-control-zoom {
+    border: 1px solid var(--cv-border) !important;
+    border-radius: var(--cv-radius) !important;
+    overflow: hidden;
+}
+
+.live-map .leaflet-control-zoom a {
+    background: var(--cv-card) !important;
+    color: var(--cv-text) !important;
+    border-color: var(--cv-border) !important;
+}
+
+.live-map .leaflet-control-zoom a:hover {
+    background: var(--cv-bg-elevated) !important;
+    color: var(--cv-text) !important;
+}
+
+/* Attribution styling - theme aware */
+.live-map .leaflet-control-attribution {
+    background: var(--cv-card) !important;
+    color: var(--cv-text-dim) !important;
+    font-size: 9px;
+}
+
+.live-map .leaflet-control-attribution a {
+    color: var(--cv-primary);
+}
+
+/* =============================================================================
+   React DatePicker Theme Styles - Theme Aware
+   ============================================================================= */
+
+/* Popper container */
+.cv-datepicker-popper {
+    z-index: 60 !important;
+}
+
+/* Main calendar container */
+.react-datepicker {
+    font-family: inherit !important;
+    background-color: var(--cv-bg-elevated) !important;
+    border: 1px solid var(--cv-border) !important;
+    border-radius: var(--cv-radius-lg) !important;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+    overflow: hidden;
+}
+
+/* Header */
+.react-datepicker__header {
+    background-color: var(--cv-bg-secondary) !important;
+    border-bottom: 1px solid var(--cv-border) !important;
+    padding-top: 12px !important;
+}
+
+.react-datepicker__current-month,
+.react-datepicker-time__header {
+    color: var(--cv-text) !important;
+    font-weight: 600 !important;
+}
+
+/* Day names */
+.react-datepicker__day-name {
+    color: var(--cv-text-muted) !important;
+    font-weight: 500 !important;
+}
+
+/* Days */
+.react-datepicker__day {
+    color: var(--cv-text) !important;
+    border-radius: var(--cv-radius) !important;
+}
+
+.react-datepicker__day:hover {
+    background-color: var(--cv-primary-glow) !important;
+    color: var(--cv-text) !important;
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+    background-color: var(--cv-primary) !important;
+    color: var(--cv-primary-foreground) !important;
+}
+
+.react-datepicker__day--today {
+    border: 1px solid var(--cv-primary) !important;
+    font-weight: 600 !important;
+}
+
+.react-datepicker__day--disabled {
+    color: var(--cv-text-dim) !important;
+}
+
+.react-datepicker__day--disabled:hover {
+    background-color: transparent !important;
+}
+
+.react-datepicker__day--outside-month {
+    color: var(--cv-text-dim) !important;
+}
+
+/* Time select */
+.react-datepicker__time-container {
+    border-left: 1px solid var(--cv-border) !important;
+}
+
+.react-datepicker__time-container .react-datepicker__time {
+    background-color: var(--cv-bg-elevated) !important;
+}
+
+.react-datepicker__time-container .react-datepicker__time-list-item {
+    color: var(--cv-text) !important;
+}
+
+.react-datepicker__time-container .react-datepicker__time-list-item:hover {
+    background-color: var(--cv-primary-glow) !important;
+}
+
+.react-datepicker__time-container .react-datepicker__time-list-item--selected {
+    background-color: var(--cv-primary) !important;
+    color: var(--cv-primary-foreground) !important;
+}
+
+/* Navigation arrows */
+.react-datepicker__navigation-icon::before {
+    border-color: var(--cv-text-muted) !important;
+}
+
+.react-datepicker__navigation:hover .react-datepicker__navigation-icon::before {
+    border-color: var(--cv-text) !important;
+}
+
+/* Month/Year dropdowns */
+.react-datepicker__month-dropdown,
+.react-datepicker__year-dropdown {
+    background-color: var(--cv-bg-elevated) !important;
+    border: 1px solid var(--cv-border) !important;
+}
+
+.react-datepicker__month-option,
+.react-datepicker__year-option {
+    color: var(--cv-text) !important;
+}
+
+.react-datepicker__month-option:hover,
+.react-datepicker__year-option:hover {
+    background-color: var(--cv-primary-glow) !important;
+}
+
+/* Triangle arrow */
+.react-datepicker__triangle {
+    display: none;
+}
+
+

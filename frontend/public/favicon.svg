@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:rgb(99,102,241);stop-opacity:1" />
+      <stop offset="100%" style="stop-color:rgb(139,92,246);stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="64" height="64" rx="12" fill="url(#grad)"/>
+
+  <!-- Activity icon (waveform/heartbeat line) -->
+  <g transform="translate(12, 32)" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <polyline points="0,0 8,0 12,-12 20,12 24,0 40,0"/>
+  </g>
+</svg>

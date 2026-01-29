@@ -1,0 +1,90 @@
+# =====================================
+# License Wrapper - Git Ignore
+# =====================================
+
+# ----- Environment & Secrets -----
+.env
+.env.*
+!.env.example
+*.env
+data/
+*Keys.txt
+*keys.txt
+*secrets*
+cli/config.json
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+*.egg-info/
+build/
+
+# ----- Node.js -----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# ----- Tauri/Rust -----
+target/
+Cargo.lock
+*.pdb
+
+# ----- Build Outputs -----
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+output/
+
+# ----- IDE & Editors -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ----- Uploads & User Data -----
+server/uploads/
+uploads/
+test_projects/
+
+# ----- Database -----
+*.db
+*.sqlite
+*.sqlite3
+
+# ----- Logs -----
+*.log
+logs/
+
+# ----- Testing -----
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ----- Misc -----
+*.bak
+*.tmp
+*.temp
+Thumbs.db
+
+# ----- Backup folders (temporary) -----
+_backup*/
+
+# ----- TypeScript Build Artifacts -----
+*.tsbuildinfo
+*.d.ts
+!frontend/src/**/*.d.ts
+
+.vercel

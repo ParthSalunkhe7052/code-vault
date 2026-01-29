@@ -1,0 +1,470 @@
+import { useEffect, useState, useRef } from 'react';
+import { Plus, Folder } from 'lucide-react';
+import { projects as projectApi, compile as compileApi, licenses as licensesApi } from '../services/api';
+import { ProjectCard, CreateProjectModal, ProjectWizard } from '../components/projects';
+import { useToast } from '../components/Toast';
+import { useSettings } from '../contexts/SettingsContext';
+import { usePricing } from '../contexts/PricingContext';
+import ConfirmDialog from '../components/ConfirmDialog';
+import EmptyState from '../components/EmptyState';
+import Spinner from '../components/Spinner';
+
+// Helper to play a success beep
+const playSuccessSound = () => {
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(1046.5, ctx.currentTime + 0.1); // C6
+        
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+        
+        osc.start();
+        osc.stop(ctx.currentTime + 0.5);
+    } catch (e) {
+        console.error('Audio playback failed', e);
+    }
+};
+
+const Projects = () => {
+    const toast = useToast();
+    const { settings } = useSettings();
+    const { canCreateProject } = usePricing();
+    const [projects, setProjects] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+    const [selectedProject, setSelectedProject] = useState(null);
+    const [newProject, setNewProject] = useState({ name: '', description: '', language: 'python' });
+    const [configData, setConfigData] = useState({
+        entry_file: '',
+        output_name: '',
+        include_modules: [],
+        exclude_modules: [],
+        nuitka_options: {},
+        files: [],
+        skip_obfuscation: true,
+        enable_lease: false,
+        compiler_options: {}
+    });
+    const [configLoading, setConfigLoading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(false);
+    const [activeDropdown, setActiveDropdown] = useState(null);
+    const [compileStatus, setCompileStatus] = useState(null);
+    const [projectLicenses, setProjectLicenses] = useState([]);
+    const [confirmDialog, setConfirmDialog] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmVariant: 'danger'
+    });
+    const dropdownRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const prevStatusRef = useRef(null);
+
+    // Auto-open wizard from URL query param (e.g. from GlobalBuildStatus)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const projectIdFromUrl = params.get('project_id');
+        
+        if (projectIdFromUrl && projects.length > 0 && !isConfigModalOpen) {
+            const targetProject = projects.find(p => p.id === projectIdFromUrl);
+            if (targetProject) {
+                handleProjectClick(targetProject);
+                // Clean URL
+                window.history.replaceState({}, '', '/projects');
+            }
+        }
+    }, [projects, isConfigModalOpen]);
+
+    const fetchProjects = async () => {
+        try {
+            const data = await projectApi.list();
+            setProjects(data);
+        } catch (error) {
+            console.error('Failed to fetch projects:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchProjects();
+    }, []);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setActiveDropdown(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
+    useEffect(() => {
+        let interval;
+        let isMounted = true;
+
+        if (compileStatus && (compileStatus.status === 'running' || compileStatus.status === 'pending')) {
+            interval = setInterval(async () => {
+                if (!isMounted) return;
+                try {
+                    const status = await compileApi.getStatus(compileStatus.id);
+                    if (isMounted) {
+                        setCompileStatus(status);
+                    }
+                } catch (error) {
+                    if (isMounted) {
+                        console.error('Failed to fetch compile status:', error);
+                    }
+                }
+            }, 5000);
+        }
+
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, [compileStatus]);
+
+    // Handle Build Completion Notifications
+    useEffect(() => {
+        if (!compileStatus) return;
+
+        const isSuccess = compileStatus.status === 'completed' || compileStatus.status === 'success';
+        const wasRunning = prevStatusRef.current === 'running' || prevStatusRef.current === 'pending';
+
+        if (isSuccess && wasRunning) {
+            if (settings.playSoundOnComplete) {
+                playSuccessSound();
+            }
+            if (settings.persistentToasts) {
+                toast.success('Build completed successfully!', { duration: Infinity });
+            }
+        }
+
+        prevStatusRef.current = compileStatus.status;
+    }, [compileStatus, settings, toast]);
+
+    const handleCreate = async (e) => {
+        e.preventDefault();
+        try {
+            await projectApi.create(newProject);
+            setIsModalOpen(false);
+            setNewProject({ name: '', description: '', language: 'python' });
+            toast.success('Project created successfully');
+            fetchProjects();
+        } catch (error) {
+            console.error('Failed to create project:', error);
+            toast.error('Failed to create project');
+        }
+    };
+
+    const handleProjectClick = async (project) => {
+        setSelectedProject(project);
+        setConfigLoading(true);
+        setIsConfigModalOpen(true);
+        setCompileStatus(null);
+        setProjectLicenses([]);
+
+        try {
+            const licenses = await licensesApi.list(project.id);
+            setProjectLicenses(licenses || []);
+        } catch (err) {
+            console.error('Failed to fetch licenses:', err);
+        }
+
+        try {
+            const config = await projectApi.getConfig(project.id);
+            setConfigData({
+                entry_file: config.entry_file || '',
+                output_name: config.output_name || '',
+                include_modules: config.include_modules || [],
+                exclude_modules: config.exclude_modules || [],
+                nuitka_options: config.nuitka_options || {},
+                files: config.files || [],
+                file_tree: config.settings?.file_tree || null,
+                skip_obfuscation: config.skip_obfuscation ?? true,
+                enable_lease: config.enable_lease ?? false,
+                compiler_options: config.compiler_options || {},
+                // Pass tier info to wizard
+                tier: config.tier || 'free',
+                is_pro: config.is_pro || false,
+                can_remove_branding: config.can_remove_branding || false,
+                can_custom_branding: config.can_custom_branding || false
+            });
+        } catch (error) {
+            console.error('Failed to fetch project config:', error);
+            setConfigData({
+                entry_file: '',
+                output_name: '',
+                include_modules: [],
+                exclude_modules: [],
+                nuitka_options: {},
+                files: [],
+                skip_obfuscation: true,
+                enable_lease: false,
+                compiler_options: {},
+                tier: 'free',
+                is_pro: false,
+                can_remove_branding: false,
+                can_custom_branding: false
+            });
+        } finally {
+            setConfigLoading(false);
+        }
+    };
+
+    const handleConfigSave = async (showNotification = false) => {
+        try {
+            await projectApi.updateConfig(selectedProject.id, {
+                entry_file: configData.entry_file,
+                output_name: configData.output_name,
+                include_modules: configData.include_modules,
+                exclude_modules: configData.exclude_modules,
+                nuitka_options: configData.nuitka_options,
+                compiler_options: configData.compiler_options,
+                skip_obfuscation: configData.skip_obfuscation,
+                enable_lease: configData.enable_lease
+            });
+            if (showNotification) {
+                toast.success('Configuration saved!');
+            }
+        } catch (error) {
+            console.error('Failed to save config:', error);
+            toast.error('Failed to save configuration');
+        }
+    };
+
+    const handleFileUpload = async (e) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        const MAX_FILE_SIZE = 100 * 1024 * 1024;
+        const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
+        const ALLOWED_EXTENSIONS = ['.py', '.js', '.ts', '.json', '.txt', '.yml', '.yaml', '.md', '.html', '.css', '.jsx', '.tsx', '.mjs', '.cjs'];
+
+        let totalSize = 0;
+        for (let i = 0; i < files.length; i++) {
+            if (files[i].size > MAX_FILE_SIZE) {
+                toast.error(`File "${files[i].name}" exceeds 100MB limit`);
+                return;
+            }
+            totalSize += files[i].size;
+        }
+
+        if (totalSize > MAX_TOTAL_SIZE) {
+            toast.error('Total upload size exceeds 500MB limit');
+            return;
+        }
+
+        for (let i = 0; i < files.length; i++) {
+            const ext = '.' + files[i].name.split('.').pop().toLowerCase();
+            if (!ALLOWED_EXTENSIONS.includes(ext)) {
+                toast.warning(`File type "${ext}" may not be supported`);
+            }
+        }
+
+        setUploadProgress(true);
+        try {
+            const uploaded = await projectApi.uploadFiles(selectedProject.id, files);
+            if (uploaded && Array.isArray(uploaded)) {
+                setConfigData(prev => ({
+                    ...prev,
+                    files: [...uploaded, ...prev.files]
+                }));
+                toast.success(`${uploaded.length} file(s) uploaded!`);
+            }
+        } catch (error) {
+            console.error('Failed to upload files:', error);
+            toast.error('Failed to upload files: ' + (error.response?.data?.detail || error.message));
+        } finally {
+            setUploadProgress(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleZipUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.name.endsWith('.zip')) {
+            toast.error('Please upload a .zip file');
+            return;
+        }
+
+        const MAX_ZIP_SIZE = 500 * 1024 * 1024;
+        if (file.size > MAX_ZIP_SIZE) {
+            toast.error('ZIP file exceeds 500MB limit');
+            return;
+        }
+
+        setUploadProgress(true);
+        try {
+            const result = await projectApi.uploadZip(selectedProject.id, file);
+
+            setConfigData(prev => ({
+                ...prev,
+                file_tree: result.structure,
+                entry_file: result.structure.entry_point || '',
+                files: []
+            }));
+
+            toast.success(`✅ Uploaded ${result.file_count} files from ZIP!`);
+        } catch (error) {
+            console.error('Failed to upload ZIP:', error);
+            toast.error('Failed to upload ZIP: ' + (error.response?.data?.detail || error.message));
+        } finally {
+            setUploadProgress(false);
+            e.target.value = '';
+        }
+    };
+
+    const handleDeleteFile = async (fileId) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete File',
+            message: 'Are you sure you want to delete this file?',
+            confirmVariant: 'danger',
+            onConfirm: async () => {
+                try {
+                    await projectApi.deleteFile(selectedProject.id, fileId);
+                    setConfigData(prev => ({
+                        ...prev,
+                        files: prev.files.filter(f => f.id !== fileId)
+                    }));
+                    toast.success('File deleted successfully');
+                } catch (error) {
+                    console.error('Failed to delete file:', error);
+                    toast.error('Failed to delete file');
+                }
+            }
+        });
+    };
+
+    const handleDeleteProject = async (projectId) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete Project',
+            message: 'Are you sure you want to delete this project? This will remove all files and licenses associated with it.',
+            confirmVariant: 'danger',
+            onConfirm: async () => {
+                try {
+                    await projectApi.delete(projectId);
+                    setActiveDropdown(null);
+                    toast.success('Project deleted successfully');
+                    fetchProjects();
+                } catch (error) {
+                    console.error('Failed to delete project:', error);
+                    toast.error('Failed to delete project');
+                }
+            }
+        });
+    };
+
+    const toggleDropdown = (e, projectId) => {
+        e.stopPropagation();
+        setActiveDropdown(activeDropdown === projectId ? null : projectId);
+    };
+
+    return (
+        <div className="animate-fade-in">
+            <div className="flex items-center justify-between mb-8">
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-2">Projects</h1>
+                    <p className="text-slate-400">Manage your software portfolio.</p>
+                </div>
+                <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+                    <Plus size={20} />
+                    New Project
+                </button>
+            </div>
+
+            {loading ? (
+                <div className="flex items-center justify-center py-20">
+                    <Spinner size="lg" />
+                </div>
+            ) : projects.length === 0 ? (
+                <div className="glass-card">
+                    <EmptyState
+                        icon={Folder}
+                        title="No Projects Found"
+                        description="Get started by creating your first project to manage licenses and distributions."
+                        action={() => setIsModalOpen(true)}
+                        actionLabel="Create Project"
+                    />
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {projects.map((project, index) => (
+                        <ProjectCard
+                            key={project.id}
+                            project={project}
+                            index={index}
+                            activeDropdown={activeDropdown}
+                            dropdownRef={dropdownRef}
+                            onProjectClick={handleProjectClick}
+                            onDropdownToggle={toggleDropdown}
+                            onDelete={handleDeleteProject}
+                        />
+                    ))}
+                </div>
+            )}
+
+            <CreateProjectModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                newProject={newProject}
+                setNewProject={setNewProject}
+                onSubmit={handleCreate}
+                projectCount={projects.length}
+            />
+
+            <ProjectWizard
+                isOpen={isConfigModalOpen}
+                onClose={() => {
+                    setIsConfigModalOpen(false);
+                    setCompileStatus(null);
+                }}
+                project={selectedProject}
+                configLoading={configLoading}
+                configData={configData}
+                setConfigData={setConfigData}
+                uploadProgress={uploadProgress}
+                onFileUpload={handleFileUpload}
+                onZipUpload={handleZipUpload}
+                onDeleteFile={handleDeleteFile}
+                onConfigSave={handleConfigSave}
+                licenses={projectLicenses}
+            />
+
+            <ConfirmDialog
+                isOpen={confirmDialog.isOpen}
+                onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmDialog.onConfirm}
+                title={confirmDialog.title}
+                message={confirmDialog.message}
+                confirmText="Delete"
+                confirmVariant={confirmDialog.confirmVariant}
+            />
+        </div>
+    );
+};
+
+export default Projects;
