@@ -17,7 +17,9 @@ const Navbar: React.FC = () => {
 
         {/* Desktop Menu */}
         <div className="hidden md:flex items-center gap-8">
-          <a href="#marketplace" className="text-sm text-gray-400 hover:text-white transition-colors">Marketplace</a>
+          <a href={`${APP_URL}/store`} className="text-sm font-medium text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1">
+            Store
+          </a>
           <a href="#features" className="text-sm text-gray-400 hover:text-white transition-colors">Features</a>
           <a href="#how-it-works" className="text-sm text-gray-400 hover:text-white transition-colors">How it works</a>
           <a href="#pricing" className="text-sm text-gray-400 hover:text-white transition-colors">Pricing</a>

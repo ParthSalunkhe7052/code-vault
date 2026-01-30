@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Activity, Shield, Crown, Zap, Sparkles } from 'lucide-react';
+import { LogOut, Activity, Shield, Crown, Zap, Sparkles, DollarSign, Store } from 'lucide-react';
 import { auth } from '../services/api';
 import { useSettings } from '../contexts/SettingsContext';
 import backgroundMain from '../assets/background_main.png';
@@ -52,6 +52,8 @@ const Layout = () => {
         { path: '/', icon: iconDashboard, label: 'Dashboard', isImage: true },
         { path: '/projects', icon: iconProjects, label: 'Projects', isImage: true },
         { path: '/licenses', icon: iconKeys, label: 'Access Keys', isImage: true },
+        { path: '/store', icon: Store, label: 'Marketplace', isImage: false }, // Public Store
+        { path: '/earnings', icon: DollarSign, label: 'Earnings', isImage: false }, // Seller Dashboard
         { path: '/webhooks', icon: iconWebhooks, label: 'Webhooks', isImage: true },
         // Pricing manually added with an icon since we don't have an image asset for it
         { path: '/pricing', icon: Crown, label: 'Pricing', isImage: false },
