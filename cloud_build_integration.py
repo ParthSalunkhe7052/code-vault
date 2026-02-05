@@ -5,10 +5,14 @@ This module replaces GitHub Actions API calls with Google Cloud Build API calls
 
 import json
 import os
+import re
+import yaml
+import base64
 from typing import Dict, Any, Optional
-from google.cloud import cloudbuild_v1
+from google.cloud.devtools import cloudbuild_v1
 from google.oauth2 import service_account
 from google.api_core import exceptions
+from google.protobuf import duration_pb2
 
 
 class CloudBuildClient:
@@ -25,11 +29,11 @@ class CloudBuildClient:
         Args:
             project_id: Google Cloud project ID
             credentials_path: Path to service account JSON key file
-                            If None, will try to use GOOGLE_APPLICATION_CREDENTIALS env var
+                            If None, will use gcloud auth credentials
         """
         self.project_id = project_id
 
-        # Load credentials
+        # Load credentials - use gcloud auth by default
         if credentials_path:
             credentials = service_account.Credentials.from_service_account_file(
                 credentials_path,
@@ -37,7 +41,8 @@ class CloudBuildClient:
             )
             self.client = cloudbuild_v1.CloudBuildClient(credentials=credentials)
         else:
-            # Will use GOOGLE_APPLICATION_CREDENTIALS environment variable
+            # Use gcloud auth credentials (automatically discovered)
+            # This works with: gcloud auth login
             self.client = cloudbuild_v1.CloudBuildClient()
 
     def trigger_build(self, build_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -82,28 +87,73 @@ class CloudBuildClient:
         # Create build object
         build = cloudbuild_v1.Build()
 
-        # Set source (pull from GitHub repo)
-        build.source = cloudbuild_v1.Source()
-        build.source.repo_source = cloudbuild_v1.RepoSource()
-        # Replace with your actual GitHub repo connection name
-        # You need to connect your GitHub repo to Cloud Build first
-        build.source.repo_source.repo_name = "github_ParthSalunkhe7052_code-vault"
-        build.source.repo_source.branch_name = "main"
+        # Load cloudbuild.yaml from local file (not from GitHub repo)
+        cloudbuild_path = os.path.join(os.path.dirname(__file__), "cloudbuild.yaml")
+
+        if not os.path.exists(cloudbuild_path):
+            raise FileNotFoundError(f"cloudbuild.yaml not found at {cloudbuild_path}")
+
+        with open(cloudbuild_path, "r") as f:
+            build_config_yaml = yaml.safe_load(f)
+
+        # Helper function to convert camelCase to snake_case
+        def camel_to_snake(name):
+            s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+            return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+        # Convert dict keys from camelCase to snake_case recursively
+        def convert_keys(obj):
+            if isinstance(obj, dict):
+                return {camel_to_snake(k): convert_keys(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_keys(item) for item in obj]
+            else:
+                return obj
+
+        # Set steps from cloudbuild.yaml
+        if "steps" in build_config_yaml:
+            converted_steps = convert_keys(build_config_yaml["steps"])
+            build.steps = [cloudbuild_v1.BuildStep(**step) for step in converted_steps]
+
+        # Set options (convert camelCase to snake_case)
+        if "options" in build_config_yaml:
+            converted_options = convert_keys(build_config_yaml["options"])
+            build.options = cloudbuild_v1.BuildOptions(**converted_options)
+
+        # Set timeout - use duration_pb2.Duration
+        if "timeout" in build_config_yaml:
+            timeout_str = build_config_yaml["timeout"]
+            seconds = int(timeout_str.rstrip("s"))
+            build.timeout = duration_pb2.Duration(seconds=seconds)
+
+        # Set secrets
+        if "availableSecrets" in build_config_yaml:
+            secrets_data = convert_keys(build_config_yaml["availableSecrets"])
+            build.available_secrets = cloudbuild_v1.Secrets(**secrets_data)
+
+        # Upload config to GCS to avoid substitution size limits (8KB max)
+        # Cloud Build substitutions have an 8KB limit, so we store large configs in GCS
+        from google.cloud import storage as gcs_storage
+
+        gcs_client = gcs_storage.Client()
+        config_bucket = gcs_client.bucket("codevault-builds")
+        config_blob = config_bucket.blob(f"builds/{build_id}/config.json")
+        config_blob.upload_from_string(
+            json.dumps(config), content_type="application/json"
+        )
+        config_url = f"gs://codevault-builds/builds/{build_id}/config.json"
 
         # Add substitution variables (parameters for cloudbuild.yaml)
+        # Use GCS URL for config to avoid 8KB substitution limit
         build.substitutions = {
             "_BUILD_ID": build_id,
             "_PROJECT_ID": project_id,
             "_LANGUAGE": language,
             "_TARGET_PLATFORMS": platforms,
             "_SOURCE_URL": source_url,
-            "_CONFIG_JSON": json.dumps(config),
+            "_CONFIG_URL": config_url,
             "_CALLBACK_URL": callback_url,
-            "_ENTRY_FILE": config.get("entry_file", "main.py"),
             "_OUTPUT_NAME": config.get("output_name", "app"),
-            "_PLAN_TIER": plan_tier,
-            "_COMPATIBILITY_MODE": compatibility_mode,
-            "_FAST_BUILD": fast_build,
         }
 
         try:
@@ -112,16 +162,25 @@ class CloudBuildClient:
                 project_id=self.project_id, build=build
             )
 
-            # Get build metadata
-            build_result = operation.metadata
+            # Get build metadata - operation.metadata.build IS the Build object
+            build_result = operation.metadata.build if operation.metadata else None
+
+            # Convert create_time to ISO format string
+            created_at = None
+            if (
+                build_result
+                and hasattr(build_result, "create_time")
+                and build_result.create_time
+            ):
+                created_at = build_result.create_time.isoformat()
+
+            build_id_result = build_result.id if build_result else "unknown"
 
             return {
-                "build_id": build_result.build.id,
+                "build_id": build_id_result,
                 "status": "QUEUED",
-                "logs_url": f"https://console.cloud.google.com/cloud-build/builds/{build_result.build.id}?project={self.project_id}",
-                "created_at": build_result.build.create_time.isoformat()
-                if build_result.build.create_time
-                else None,
+                "logs_url": f"https://console.cloud.google.com/cloud-build/builds/{build_id_result}?project={self.project_id}",
+                "created_at": created_at,
                 "project": self.project_id,
             }
 
@@ -144,13 +203,13 @@ class CloudBuildClient:
             return {
                 "build_id": build.id,
                 "status": build.status.name,  # QUEUED, WORKING, SUCCESS, FAILURE, etc.
-                "create_time": build.create_time.isoformat()
+                "create_time": build.create_time.ToJsonString()
                 if build.create_time
                 else None,
-                "start_time": build.start_time.isoformat()
+                "start_time": build.start_time.ToJsonString()
                 if build.start_time
                 else None,
-                "finish_time": build.finish_time.isoformat()
+                "finish_time": build.finish_time.ToJsonString()
                 if build.finish_time
                 else None,
                 "logs_url": build.log_url,

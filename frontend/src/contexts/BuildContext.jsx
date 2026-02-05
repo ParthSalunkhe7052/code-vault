@@ -18,10 +18,26 @@ export function BuildProvider({ children }) {
     // Track active WebSocket connections to prevent duplicates
     const activeSockets = useRef(new Map());
 
+    // Track if we've already attempted sync to prevent spam
+    const hasAttemptedSync = useRef(false);
+
     // Load initial state from storage
     useEffect(() => {
         const loadPersistedBuilds = async () => {
+            // Prevent multiple sync attempts
+            if (hasAttemptedSync.current) {
+                return;
+            }
+            hasAttemptedSync.current = true;
+
             try {
+                // Check if user is authenticated - skip sync if not logged in
+                const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+                if (!token) {
+                    console.log('[BuildContext] User not authenticated, skipping build sync');
+                    return;
+                }
+
                 const stored = localStorage.getItem(STORAGE_KEY);
                 if (!stored) return;
 
@@ -57,6 +73,13 @@ export function BuildProvider({ children }) {
                         }
                     } catch (err) {
                         console.error(`Failed to sync build ${buildId}:`, err);
+                        // If 401 (Unauthorized), user is not logged in - clear all storage
+                        if (err.response?.status === 401) {
+                            console.log('[BuildContext] User not authenticated (401), clearing build storage');
+                            localStorage.removeItem(STORAGE_KEY);
+                            setBuilds({});
+                            return; // Stop processing remaining builds
+                        }
                         // If 404, remove from storage
                         if (err.response?.status === 404) {
                             removePersistedBuild(projectId);

@@ -17,6 +17,8 @@ from models import (
     LicenseValidationRequest,
     LicenseValidationResponse,
     LicenseCreateRequest,
+    LicenseVariableCreateRequest,
+    LicenseVariableUpdateRequest,
 )
 from utils import (
     get_current_user,
@@ -113,16 +115,31 @@ def get_geo_from_ip(ip_address: str) -> dict:
     return result
 
 
+async def _push_validation_log_to_redis(log_data: dict):
+    """Push validation log to Redis queue for asynchronous processing by log worker."""
+    from config import REDIS_URL
+    import redis.asyncio as redis
+    
+    if not REDIS_URL:
+        logging.warning("[Redis] REDIS_URL not set, log will be dropped")
+        return
+
+    try:
+        r = redis.from_url(REDIS_URL)
+        await r.lpush("license_logs_queue", json.dumps(log_data))
+        await r.close()
+    except Exception as e:
+        logging.error(f"[Redis] Failed to push log: {e}")
+
+
 @router.post("/license/validate", response_model=LicenseValidationResponse)
 async def validate_license(
     request: Request,
     data: LicenseValidationRequest,
-    _rate_limit: None = Depends(license_validate_rate_limit)
+    _rate_limit: None = Depends(license_validate_rate_limit),
 ):
     start_time = time.time()
     client_ip = request.client.host if request.client else "unknown"
-
-    geo = await run_in_threadpool(get_geo_from_ip, client_ip)
 
     if abs(int(time.time()) - data.timestamp) > 300:
         return create_validation_response(
@@ -131,167 +148,117 @@ async def validate_license(
 
     conn = await get_db()
     try:
-        license_row = await conn.fetchrow(
-            "SELECT id, license_key, status, expires_at, max_machines, features FROM licenses WHERE license_key = $1",
-            data.license_key,
-        )
-        response_time = int((time.time() - start_time) * 1000)
-
-        if not license_row:
-            await conn.execute(
-                """
-                INSERT INTO validation_logs (license_key, hwid, ip_address, result, response_time_ms, city, country, latitude, longitude)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            """,
+        # Use transaction with row-level locking to prevent race conditions
+        async with conn.transaction():
+            # Lock the license row and JOIN with projects to get signing_secret
+            license_row = await conn.fetchrow(
+                """SELECT l.id, l.license_key, l.status, l.expires_at, l.max_machines, l.features, p.signing_secret 
+                   FROM licenses l 
+                   JOIN projects p ON l.project_id = p.id
+                   WHERE l.license_key = $1 FOR UPDATE""",
                 data.license_key,
-                data.hwid,
-                client_ip,
-                "invalid",
-                response_time,
-                geo["city"],
-                geo["country"],
-                geo["latitude"],
-                geo["longitude"],
             )
-            return create_validation_response(
-                "invalid", "License not found", data.nonce
-            )
+            response_time = int((time.time() - start_time) * 1000)
 
-        license_id = license_row["id"]
-        status = license_row["status"]
-        expires_at = license_row["expires_at"]
-        max_machines = license_row["max_machines"]
-        features = license_row["features"] if license_row["features"] else []
+            result_status = "valid"
+            message = "License valid"
+            
+            # Use project secret or fallback to global if none (for legacy)
+            from config import SECRET_KEY
+            signing_secret = license_row["signing_secret"] if license_row and license_row["signing_secret"] else SECRET_KEY
 
-        if isinstance(features, str):
-            try:
-                features = json.loads(features)
-            except Exception:
-                features = []
-        if not isinstance(features, list):
-            features = []
+            if not license_row:
+                result_status = "invalid"
+                message = "License not found"
+            elif license_row["status"] == "revoked":
+                result_status = "revoked"
+                message = "License has been revoked"
+            elif license_row["expires_at"] and license_row["expires_at"] < utc_now():
+                result_status = "expired"
+                message = "License has expired"
+            
+            # Prepare log data for Redis
+            log_data = {
+                "license_id": license_row["id"] if license_row else None,
+                "license_key": data.license_key,
+                "hwid": data.hwid,
+                "ip_address": client_ip,
+                "result": result_status,
+                "response_time_ms": response_time,
+                "machine_name": data.machine_name,
+                "created_at": utc_now().isoformat()
+            }
 
-        if status == "revoked":
-            await conn.execute(
-                """
-                INSERT INTO validation_logs (license_id, license_key, hwid, ip_address, result, response_time_ms, city, country, latitude, longitude)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
+            if result_status != "valid":
+                # Push log to Redis and return early
+                asyncio.create_task(_push_validation_log_to_redis(log_data))
+                return create_validation_response(result_status, message, data.nonce)
+
+            # Check HWID binding
+            license_id = license_row["id"]
+            existing_binding = await conn.fetchrow(
+                "SELECT id FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
                 license_id,
-                data.license_key,
                 data.hwid,
-                client_ip,
-                "revoked",
-                response_time,
-                geo["city"],
-                geo["country"],
-                geo["latitude"],
-                geo["longitude"],
-            )
-            return create_validation_response(
-                "revoked", "License has been revoked", data.nonce
             )
 
-        if expires_at and expires_at < utc_now():
-            await conn.execute(
-                """
-                INSERT INTO validation_logs (license_id, license_key, hwid, ip_address, result, response_time_ms, city, country, latitude, longitude)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-                license_id,
-                data.license_key,
-                data.hwid,
-                client_ip,
-                "expired",
-                response_time,
-                geo["city"],
-                geo["country"],
-                geo["latitude"],
-                geo["longitude"],
-            )
-            return create_validation_response(
-                "expired", "License has expired", data.nonce
-            )
+            if existing_binding:
+                await conn.execute(
+                    "UPDATE hardware_bindings SET last_seen_at = NOW(), machine_name = $1 WHERE id = $2",
+                    data.machine_name,
+                    existing_binding["id"],
+                )
+            else:
+                machine_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM hardware_bindings WHERE license_id = $1 AND is_active = TRUE",
+                    license_id,
+                )
+                if machine_count >= license_row["max_machines"]:
+                    log_data["result"] = "hwid_mismatch"
+                    asyncio.create_task(_push_validation_log_to_redis(log_data))
+                    return create_validation_response(
+                        "hwid_mismatch",
+                        f"Maximum machines ({license_row['max_machines']}) reached",
+                        data.nonce,
+                    )
 
-        # Check HWID binding
-        existing_binding = await conn.fetchrow(
-            "SELECT id, is_active FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
-            license_id,
-            data.hwid,
-        )
-
-        if existing_binding:
-            await conn.execute(
-                "UPDATE hardware_bindings SET last_seen_at = NOW(), machine_name = $1 WHERE id = $2",
-                data.machine_name,
-                existing_binding["id"],
-            )
-        else:
-            machine_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM hardware_bindings WHERE license_id = $1 AND is_active = TRUE",
-                license_id,
-            )
-            if machine_count >= max_machines:
                 await conn.execute(
                     """
-                    INSERT INTO validation_logs (license_id, license_key, hwid, ip_address, result, response_time_ms, city, country, latitude, longitude)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address)
+                    VALUES ($1, $2, $3, $4, $5)
                 """,
+                    secrets.token_hex(16),
                     license_id,
-                    data.license_key,
                     data.hwid,
+                    data.machine_name,
                     client_ip,
-                    "hwid_mismatch",
-                    response_time,
-                    geo["city"],
-                    geo["country"],
-                    geo["latitude"],
-                    geo["longitude"],
-                )
-                return create_validation_response(
-                    "hwid_mismatch",
-                    f"Maximum machines ({max_machines}) reached",
-                    data.nonce,
                 )
 
             await conn.execute(
-                """
-                INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address)
-                VALUES ($1, $2, $3, $4, $5)
-            """,
-                secrets.token_hex(16),
+                "UPDATE licenses SET last_validated_at = NOW() WHERE id = $1",
                 license_id,
-                data.hwid,
-                data.machine_name,
-                client_ip,
             )
 
-        await conn.execute(
-            "UPDATE licenses SET last_validated_at = NOW() WHERE id = $1", license_id
-        )
-        await conn.execute(
-            """
-            INSERT INTO validation_logs (license_id, license_key, hwid, ip_address, result, response_time_ms, city, country, latitude, longitude)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        """,
-            license_id,
-            data.license_key,
-            data.hwid,
-            client_ip,
-            "valid",
-            response_time,
-            geo["city"],
-            geo["country"],
-            geo["latitude"],
-            geo["longitude"],
-        )
+            # Final success log push
+            asyncio.create_task(_push_validation_log_to_redis(log_data))
+
+            # Fetch variables
+            var_rows = await conn.fetchrow(
+                """SELECT json_object_agg(key, value) as vars 
+                   FROM license_variables 
+                   WHERE license_id = $1 AND is_secret = FALSE""",
+                license_id,
+            )
+            variables = var_rows["vars"] if var_rows and var_rows["vars"] else {}
 
         return create_validation_response(
             "valid",
             "License valid",
             data.nonce,
-            expires_at=int(expires_at.timestamp()) if expires_at else None,
-            features=features if isinstance(features, list) else [],
+            expires_at=int(license_row["expires_at"].timestamp()) if license_row["expires_at"] else None,
+            features=json.loads(license_row["features"]) if isinstance(license_row["features"], str) else (license_row["features"] or []),
+            variables=variables,
+            secret=signing_secret,
         )
     finally:
         await release_db(conn)
@@ -733,6 +700,238 @@ async def get_reset_status(license_id: str, user: dict = Depends(get_current_use
             if last_reset
             else None,
             "total_resets": reset_count,
+        }
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# License Variables CRUD Endpoints
+# =============================================================================
+
+
+@router.get("/licenses/{license_id}/variables")
+async def get_license_variables(
+    license_id: str, user: dict = Depends(get_current_user)
+):
+    """Get all variables for a license (owner only)."""
+    conn = await get_db()
+    try:
+        # Verify ownership
+        license_check = await conn.fetchrow(
+            """
+            SELECT l.id FROM licenses l 
+            JOIN projects p ON l.project_id = p.id 
+            WHERE l.id = $1 AND p.user_id = $2
+        """,
+            license_id,
+            user["id"],
+        )
+
+        if not license_check:
+            raise HTTPException(status_code=404, detail="License not found")
+
+        # Get all variables (including secrets for owner)
+        rows = await conn.fetch(
+            """
+            SELECT id, key, value, is_secret, created_at, updated_at
+            FROM license_variables
+            WHERE license_id = $1
+            ORDER BY key ASC
+        """,
+            license_id,
+        )
+
+        return [
+            {
+                "id": r["id"],
+                "key": r["key"],
+                "value": r["value"],
+                "is_secret": r["is_secret"],
+                "created_at": r["created_at"].isoformat(),
+                "updated_at": r["updated_at"].isoformat(),
+            }
+            for r in rows
+        ]
+    finally:
+        await release_db(conn)
+
+
+@router.post("/licenses/{license_id}/variables")
+async def create_license_variable(
+    license_id: str,
+    data: LicenseVariableCreateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Create a new variable for a license."""
+    conn = await get_db()
+    try:
+        # Verify ownership
+        license_check = await conn.fetchrow(
+            """
+            SELECT l.id FROM licenses l 
+            JOIN projects p ON l.project_id = p.id 
+            WHERE l.id = $1 AND p.user_id = $2
+        """,
+            license_id,
+            user["id"],
+        )
+
+        if not license_check:
+            raise HTTPException(status_code=404, detail="License not found")
+
+        # Check if variable key already exists
+        existing = await conn.fetchrow(
+            """
+            SELECT id FROM license_variables 
+            WHERE license_id = $1 AND key = $2
+        """,
+            license_id,
+            data.key,
+        )
+
+        if existing:
+            raise HTTPException(
+                status_code=400, detail=f"Variable '{data.key}' already exists"
+            )
+
+        # Create variable
+        variable_id = secrets.token_hex(16)
+        await conn.execute(
+            """
+            INSERT INTO license_variables (id, license_id, key, value, is_secret)
+            VALUES ($1, $2, $3, $4, $5)
+        """,
+            variable_id,
+            license_id,
+            data.key,
+            data.value,
+            data.is_secret,
+        )
+
+        # Get created variable
+        variable = await conn.fetchrow(
+            """
+            SELECT id, key, value, is_secret, created_at, updated_at
+            FROM license_variables
+            WHERE id = $1
+        """,
+            variable_id,
+        )
+
+        return {
+            "id": variable["id"],
+            "key": variable["key"],
+            "value": variable["value"],
+            "is_secret": variable["is_secret"],
+            "created_at": variable["created_at"].isoformat(),
+            "updated_at": variable["updated_at"].isoformat(),
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.put("/licenses/{license_id}/variables/{variable_id}")
+async def update_license_variable(
+    license_id: str,
+    variable_id: str,
+    data: LicenseVariableUpdateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Update a license variable."""
+    conn = await get_db()
+    try:
+        # Verify ownership and variable exists
+        variable_check = await conn.fetchrow(
+            """
+            SELECT lv.id FROM license_variables lv
+            JOIN licenses l ON lv.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE lv.id = $1 AND lv.license_id = $2 AND p.user_id = $3
+        """,
+            variable_id,
+            license_id,
+            user["id"],
+        )
+
+        if not variable_check:
+            raise HTTPException(status_code=404, detail="Variable not found")
+
+        # Update variable
+        if data.is_secret is not None:
+            await conn.execute(
+                """
+                UPDATE license_variables 
+                SET value = $1, is_secret = $2, updated_at = NOW()
+                WHERE id = $3
+            """,
+                data.value,
+                data.is_secret,
+                variable_id,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE license_variables 
+                SET value = $1, updated_at = NOW()
+                WHERE id = $2
+            """,
+                data.value,
+                variable_id,
+            )
+
+        # Get updated variable
+        variable = await conn.fetchrow(
+            """
+            SELECT id, key, value, is_secret, created_at, updated_at
+            FROM license_variables
+            WHERE id = $1
+        """,
+            variable_id,
+        )
+
+        return {
+            "id": variable["id"],
+            "key": variable["key"],
+            "value": variable["value"],
+            "is_secret": variable["is_secret"],
+            "created_at": variable["created_at"].isoformat(),
+            "updated_at": variable["updated_at"].isoformat(),
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.delete("/licenses/{license_id}/variables/{variable_id}")
+async def delete_license_variable(
+    license_id: str, variable_id: str, user: dict = Depends(get_current_user)
+):
+    """Delete a license variable."""
+    conn = await get_db()
+    try:
+        # Verify ownership and variable exists
+        variable_check = await conn.fetchrow(
+            """
+            SELECT lv.id, lv.key FROM license_variables lv
+            JOIN licenses l ON lv.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE lv.id = $1 AND lv.license_id = $2 AND p.user_id = $3
+        """,
+            variable_id,
+            license_id,
+            user["id"],
+        )
+
+        if not variable_check:
+            raise HTTPException(status_code=404, detail="Variable not found")
+
+        # Delete variable
+        await conn.execute("DELETE FROM license_variables WHERE id = $1", variable_id)
+
+        return {
+            "status": "deleted",
+            "key": variable_check["key"],
+            "message": f"Variable '{variable_check['key']}' deleted successfully",
         }
     finally:
         await release_db(conn)

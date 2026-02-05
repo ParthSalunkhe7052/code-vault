@@ -11,13 +11,9 @@ substitutions:
   _LANGUAGE: 'python'
   _TARGET_PLATFORMS: 'windows,linux,macos'
   _SOURCE_URL: ''
-  _CONFIG_JSON: '{}'
+  _CONFIG_URL: ''  # GCS URL to config JSON (avoids 8KB substitution limit)
   _CALLBACK_URL: ''
-  _ENTRY_FILE: 'main.py'
   _OUTPUT_NAME: 'app'
-  _PLAN_TIER: 'free'
-  _COMPATIBILITY_MODE: 'false'
-  _FAST_BUILD: 'false'
 
 options:
   machineType: 'E2_HIGHCPU_8'  # 8 vCPUs for faster builds
@@ -31,6 +27,36 @@ timeout: 3600s  # 60 minutes max per build
 # Build Steps
 # ============================================
 steps:
+  # ===== STEP 0: Restore pip cache from GCS =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'restore-pip-cache'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "[Cloud Build] Restoring pip cache..."
+        mkdir -p /root/.cache/pip
+        gsutil -q cp gs://codevault-builds/cache/pip-cache.tar.gz /tmp/ 2>/dev/null && \
+          tar -xzf /tmp/pip-cache.tar.gz -C /root/.cache/ && \
+          echo "[Cloud Build] Pip cache restored" || \
+          echo "[Cloud Build] No pip cache found (first build)"
+    waitFor: ['-']
+
+  # ===== STEP 0b: Restore ccache from GCS =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'restore-ccache'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "[Cloud Build] Restoring ccache..."
+        mkdir -p /workspace/.ccache
+        gsutil -q cp gs://codevault-builds/cache/ccache-${_LANGUAGE}.tar.gz /tmp/ 2>/dev/null && \
+          tar -xzf /tmp/ccache-${_LANGUAGE}.tar.gz -C /workspace/.ccache/ && \
+          echo "[Cloud Build] ccache restored" || \
+          echo "[Cloud Build] No ccache found (first build)"
+    waitFor: ['-']
+
   # ===== STEP 1: Download Source =====
   - name: 'gcr.io/cloud-builders/curl'
     id: 'download-source'
@@ -74,12 +100,38 @@ steps:
         fi
         
         echo "[Cloud Build] Source prepared successfully"
+        
+        # Verify cloud_runner.py exists
+        if [ -f "./project/source/.github/scripts/cloud_runner.py" ]; then
+          echo "[Cloud Build] cloud_runner.py found in source bundle"
+        else
+          echo "[Cloud Build] WARNING: cloud_runner.py not found in expected location"
+          find ./project -name "cloud_runner.py" 2>/dev/null || echo "Script not found anywhere"
+        fi
     waitFor: ['download-source']
 
-  # ===== STEP 3: Build for Linux (Native) =====
+  # ===== STEP 3: Download config for Linux build =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-config-linux'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [[ "${_TARGET_PLATFORMS}" != *"linux"* ]]; then
+          echo "[Cloud Build] Skipping config download for Linux"
+          exit 0
+        fi
+        echo "[Cloud Build] Downloading config for Linux build..."
+        gsutil cp "${_CONFIG_URL}" /workspace/config.json
+        echo "[Cloud Build] Config downloaded successfully"
+    waitFor: ['extract-source']
+
+  # ===== STEP 4: Build for Linux (Native) =====
   - name: 'python:3.11-slim'
     id: 'build-linux'
     entrypoint: 'bash'
+    env:
+      - 'CCACHE_DIR=/workspace/.ccache'
     args:
       - '-c'
       - |
@@ -100,7 +152,7 @@ steps:
           ccache \
           > /dev/null 2>&1
         
-        # Install Python build tools
+        # Install Python build tools (using cache if available)
         pip install --quiet --disable-pip-version-check \
           nuitka \
           ordered-set \
@@ -108,16 +160,58 @@ steps:
           requests \
           cryptography
         
+        # Load config from workspace (downloaded in previous step)
+        decoded_config=$(cat /workspace/config.json)
+        echo "[Cloud Build] Config loaded successfully"
+        
+        # Find cloud_runner.py and determine source directory
+        echo "[Cloud Build] Looking for cloud_runner.py..."
+        if [ -f "/workspace/project/.github/scripts/cloud_runner.py" ]; then
+          runner="/workspace/project/.github/scripts/cloud_runner.py"
+          echo "[Cloud Build] Found cloud_runner.py at /workspace/project/.github/scripts/"
+        else
+          echo "[Cloud Build] ERROR: cloud_runner.py not found"
+          find /workspace/project -name "cloud_runner.py" 2>/dev/null || echo "Script not found anywhere"
+          exit 1
+        fi
+        
+        # Determine actual source directory (where the Python files are)
+        if [ -d "./project/source" ]; then
+          src_dir="./project/source"
+          echo "[Cloud Build] Using source directory: project/source/"
+        else
+          src_dir="./project"
+          echo "[Cloud Build] Using source directory: project/"
+        fi
+        echo "[Cloud Build] Build script found"
+        
         # Create artifacts directory
         mkdir -p /workspace/artifacts
         
-        # Run cloud_runner.py
-        python3 .github/scripts/cloud_runner.py \
-          --config '${_CONFIG_JSON}' \
-          --source ./project/source
+        # Debug: Show source directory contents
+        echo "[Cloud Build] Source directory: $src_dir"
+        echo "[Cloud Build] Contents of source directory:"
+        ls -la "$src_dir"
+        echo "[Cloud Build] Python files in source:"
+        find "$src_dir" -name "*.py" -type f 2>/dev/null | head -10
+        
+        # Run cloud_runner.py with decoded config and error handling
+        set +e
+        python3 "$runner" \
+          --config "$decoded_config" \
+          --source "$src_dir"
+        build_exit_code=$?
+        set -e
+        
+        if [ $build_exit_code -ne 0 ]; then
+          echo "[Cloud Build] ERROR: Linux build failed with exit code $build_exit_code"
+          echo "failed" > /workspace/build_status_linux
+          echo "Build failed - see logs above" > /workspace/build_error_linux
+          exit 1
+        fi
         
         # Package output
-        cd project/source
+        cd "$src_dir"
         if [ -d "build_output" ]; then
           cp -r build_output/* .
         fi
@@ -130,21 +224,41 @@ steps:
           echo "[Cloud Build] Found executable: $output_name"
           tar -czf "${output_name}-linux.tar.gz" "$output_name"
           mv "${output_name}-linux.tar.gz" /workspace/artifacts/
-          echo "[Cloud Build] ✓ Linux build complete"
+          echo "[Cloud Build] Linux build complete"
+          echo "completed" > /workspace/build_status_linux
         elif [ -d "build" ]; then
           # Fast build mode - zip the directory
           tar -czf "${output_name}-linux.tar.gz" build
           mv "${output_name}-linux.tar.gz" /workspace/artifacts/
-          echo "[Cloud Build] ✓ Linux build complete (fast mode)"
+          echo "[Cloud Build] Linux build complete (fast mode)"
+          echo "completed" > /workspace/build_status_linux
         else
           echo "[Cloud Build] ERROR: No output found for Linux build"
           ls -la
+          echo "failed" > /workspace/build_status_linux
+          echo "No build output found" > /workspace/build_error_linux
           exit 1
         fi
-    waitFor: ['extract-source']
+    waitFor: ['extract-source', 'restore-pip-cache', 'restore-ccache']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
+
+  # ===== STEP 3b: Download config for Windows build =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-config-windows'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [[ "${_TARGET_PLATFORMS}" != *"windows"* ]]; then
+          echo "[Cloud Build] Skipping config download for Windows"
+          exit 0
+        fi
+        echo "[Cloud Build] Downloading config for Windows build..."
+        gsutil cp "${_CONFIG_URL}" /workspace/config.json
+        echo "[Cloud Build] Config downloaded successfully"
+    waitFor: ['extract-source']
 
   # ===== STEP 4: Build for Windows (using Wine) =====
   - name: 'docker.io/tobix/pywine:3.11'
@@ -163,6 +277,31 @@ steps:
         
         echo "[Cloud Build] ===== Building for Windows ====="
         
+        # Load config from workspace (downloaded in previous step)
+        decoded_config=$(cat /workspace/config.json)
+        echo "[Cloud Build] Config loaded successfully"
+        
+        # Find cloud_runner.py and determine source directory
+        echo "[Cloud Build] Looking for cloud_runner.py..."
+        if [ -f "/workspace/project/.github/scripts/cloud_runner.py" ]; then
+          runner_path="/workspace/project/.github/scripts/cloud_runner.py"
+          echo "[Cloud Build] Found cloud_runner.py at /workspace/project/.github/scripts/"
+        else
+          echo "[Cloud Build] ERROR: cloud_runner.py not found"
+          find /workspace/project -name "cloud_runner.py" 2>/dev/null || echo "Script not found anywhere"
+          exit 1
+        fi
+        
+        # Determine actual source directory (where the Python files are)
+        if [ -d "./project/source" ]; then
+          src_dir="./project/source"
+          echo "[Cloud Build] Using source directory: project/source/"
+        else
+          src_dir="./project"
+          echo "[Cloud Build] Using source directory: project/"
+        fi
+        echo "[Cloud Build] Build script found"
+        
         # Install Nuitka in Wine Python environment
         wine python -m pip install --quiet --disable-pip-version-check \
           nuitka \
@@ -174,11 +313,37 @@ steps:
         # Create artifacts directory
         mkdir -p /workspace/artifacts
         
-        # Build using Wine
-        cd project/source
-        wine python ../../.github/scripts/cloud_runner.py \
-          --config '${_CONFIG_JSON}' \
-          --source .
+        # Build using Wine with decoded config
+        # Note: wine needs absolute paths, not relative
+        src_path=$(realpath "$src_dir")
+        echo "[Cloud Build] Source path: $src_path"
+        echo "[Cloud Build] Contents of source directory:"
+        ls -la "$src_dir"
+        echo "[Cloud Build] Python files in source:"
+        find "$src_path" -name "*.py" -type f 2>/dev/null | head -10
+        
+        # Change to source directory for the build
+        cd "$src_dir"
+        
+        # Run cloud_runner with error handling
+        # Use winepath to convert Linux path to Windows path
+        win_path=$(winepath -w "$src_path" 2>/dev/null || echo "$src_path")
+        echo "[Cloud Build] Windows path: $win_path"
+        
+        set +e
+        wine python "$runner_path" \
+          --config "$decoded_config" \
+          --source "$win_path"
+        build_exit_code=$?
+        set -e
+        
+        if [ $build_exit_code -ne 0 ]; then
+          echo "[Cloud Build] ERROR: Windows build failed with exit code $build_exit_code"
+          # Save error status for webhook
+          echo "failed" > /workspace/build_status_windows
+          echo "Build failed - see logs above" > /workspace/build_error_windows
+          exit 1
+        fi
         
         # Package output
         if [ -d "build_output" ]; then
@@ -191,15 +356,19 @@ steps:
           echo "[Cloud Build] Found executable: ${output_name}.exe"
           zip -q "${output_name}-windows.zip" "${output_name}.exe"
           mv "${output_name}-windows.zip" /workspace/artifacts/
-          echo "[Cloud Build] ✓ Windows build complete"
+          echo "[Cloud Build] Windows build complete"
+          echo "completed" > /workspace/build_status_windows
         elif [ -d "build" ]; then
           # Fast build mode
           zip -qr "${output_name}-windows.zip" build
           mv "${output_name}-windows.zip" /workspace/artifacts/
-          echo "[Cloud Build] ✓ Windows build complete (fast mode)"
+          echo "[Cloud Build] Windows build complete (fast mode)"
+          echo "completed" > /workspace/build_status_windows
         else
           echo "[Cloud Build] ERROR: No output found for Windows build"
           ls -la
+          echo "failed" > /workspace/build_status_windows
+          echo "No build output found" > /workspace/build_error_windows
           exit 1
         fi
     waitFor: ['extract-source']
@@ -208,33 +377,24 @@ steps:
         path: '/workspace/artifacts'
 
   # ===== STEP 5: Build for macOS (Cross-compilation) =====
-  # NOTE: macOS builds are complex - this uses osxcross for cross-compilation
-  # For production, consider keeping GitHub Actions for macOS or using dedicated Mac builders
+  # NOTE: macOS cross-compilation is limited. Skip gracefully if requested.
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-macos'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        set -e
-        
-        # Check if macOS build is requested
+        # Check if macOS build is requested - skip immediately if not
         if [[ "${_TARGET_PLATFORMS}" != *"macos"* ]]; then
           echo "[Cloud Build] Skipping macOS build (not in target platforms)"
           exit 0
         fi
         
-        echo "[Cloud Build] ===== Building for macOS ====="
-        echo "[Cloud Build] WARNING: macOS cross-compilation has limitations"
-        echo "[Cloud Build] For production macOS builds, consider using GitHub Actions or Mac cloud builders"
+        echo "[Cloud Build] ===== macOS Build ====="
+        echo "[Cloud Build] WARNING: macOS cross-compilation not supported in Cloud Build"
+        echo "[Cloud Build] macOS builds require native macOS runners (GitHub Actions recommended)"
         
-        # For now, skip macOS build in Cloud Build
-        # You can enable this later with proper osxcross setup
-        echo "[Cloud Build] macOS build skipped - not yet implemented in Cloud Build"
-        echo "[Cloud Build] To enable: set up osxcross in a custom Docker image"
-        
-        # Create empty placeholder to prevent pipeline failure
-        mkdir -p /workspace/artifacts
+        # Exit 0 to not fail the build - macOS is optional
         exit 0
     waitFor: ['extract-source']
     volumes:
@@ -281,10 +441,7 @@ steps:
             echo "[Cloud Build] Uploading: $file -> $platform/"
             gsutil cp "$file" "$dest"
             
-            # Make artifact publicly accessible (optional - remove if you want private)
-            # gsutil acl ch -u AllUsers:R "$dest"
-            
-            echo "[Cloud Build] ✓ Uploaded: $file"
+            echo "[Cloud Build] Uploaded: $file"
           fi
         done
         
@@ -294,40 +451,119 @@ steps:
       - name: 'artifacts'
         path: '/workspace/artifacts'
 
-  # ===== STEP 7: Send Webhook Callback =====
-  - name: 'gcr.io/cloud-builders/curl'
-    id: 'webhook-callback'
+  # ===== STEP 7: Save pip cache for future builds =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'save-pip-cache'
     entrypoint: 'bash'
-    secretEnv: ['CALLBACK_SECRET']
     args:
       - '-c'
       - |
-        set -e
+        echo "[Cloud Build] Saving pip cache..."
+        if [ -d "/root/.cache/pip" ]; then
+          tar -czf /tmp/pip-cache.tar.gz -C /root/.cache pip 2>/dev/null && \
+            gsutil -q cp /tmp/pip-cache.tar.gz gs://codevault-builds/cache/ && \
+            echo "[Cloud Build] Pip cache saved" || \
+            echo "[Cloud Build] Failed to save pip cache (non-critical)"
+        else
+          echo "[Cloud Build] No pip cache to save"
+        fi
+    waitFor: ['build-linux', 'build-windows']
+
+  # ===== STEP 8: Save ccache for future builds =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'save-ccache'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "[Cloud Build] Saving ccache..."
+        if [ -d "/workspace/.ccache" ] && [ "$(ls -A /workspace/.ccache 2>/dev/null)" ]; then
+          tar -czf /tmp/ccache-${_LANGUAGE}.tar.gz -C /workspace/.ccache . 2>/dev/null && \
+            gsutil -q cp /tmp/ccache-${_LANGUAGE}.tar.gz gs://codevault-builds/cache/ && \
+            echo "[Cloud Build] ccache saved" || \
+            echo "[Cloud Build] Failed to save ccache (non-critical)"
+        else
+          echo "[Cloud Build] No ccache to save"
+        fi
+    waitFor: ['build-linux', 'build-windows']
+
+  # ===== STEP 9: Send Webhook Callback =====
+  # This step runs regardless of build success/failure to report status
+  - name: 'gcr.io/cloud-builders/curl'
+    id: 'webhook-callback'
+    entrypoint: 'bash'
+    secretEnv: ['_CALLBACK_SECRET']
+    args:
+      - '-c'
+      - |
+        # Don't exit on error - we want to report status even if builds failed
+        set +e
         
         echo "[Cloud Build] ===== Sending Webhook Callback ====="
         
-        # Build JSON payload with artifact information
-        payload=$(cat <<EOF
-        {
-          "build_id": "${_BUILD_ID}",
-          "project_id": "${_PROJECT_ID}",
-          "status": "completed",
-          "gcs_bucket": "codevault-builds",
-          "gcs_path": "builds/${_BUILD_ID}/",
-          "platforms": "${_TARGET_PLATFORMS}",
-          "timestamp": $(date +%s),
-          "cloud_build_id": "$BUILD_ID",
-          "logs_url": "https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=cloudbuild-486309"
-        }
-        EOF
-        )
+        # Determine status from build status files
+        linux_status=$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+        windows_status=$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
         
-        # Generate HMAC signature
-        signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "$CALLBACK_SECRET" | awk '{print $2}')
+        # Read error messages if builds failed
+        linux_error=$(cat /workspace/build_error_linux 2>/dev/null || echo "")
+        windows_error=$(cat /workspace/build_error_windows 2>/dev/null || echo "")
         
-        echo "[Cloud Build] Sending webhook to: ${_CALLBACK_URL}"
+        # Determine overall build status
+        if [[ "${linux_status}" == "failed" || "${windows_status}" == "failed" ]]; then
+          overall_status="failed"
+        else
+          overall_status="completed"
+        fi
         
-        # Send webhook with retries
+        echo "[Cloud Build] Build statuses - Linux: ${linux_status}, Windows: ${windows_status}, Overall: ${overall_status}"
+        
+        # Send individual platform webhooks for each platform in target
+        if [[ "${_TARGET_PLATFORMS}" == *"linux"* ]]; then
+          echo "[Cloud Build] Reporting Linux status: ${linux_status}"
+          if [ "${linux_status}" == "failed" ]; then
+            error_msg="${linux_error:-Build failed}"
+          else
+            error_msg=""
+          fi
+          
+          payload_linux='{"build_id":"'"${_BUILD_ID}"'","platform":"linux","status":"'"${linux_status}"'","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
+          sig_linux=$(echo -n "$payload_linux" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $2}')
+          
+          curl -sf -X POST "${_CALLBACK_URL}" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $sig_linux" \
+            -H "X-Cloud-Build-ID: ${BUILD_ID}" \
+            --connect-timeout 10 \
+            -d "$payload_linux" || echo "[Cloud Build] Linux webhook failed (non-critical)"
+        fi
+        
+        if [[ "${_TARGET_PLATFORMS}" == *"windows"* ]]; then
+          echo "[Cloud Build] Reporting Windows status: ${windows_status}"
+          if [ "${windows_status}" == "failed" ]; then
+            error_msg="${windows_error:-Build failed}"
+          else
+            error_msg=""
+          fi
+          
+          payload_windows='{"build_id":"'"${_BUILD_ID}"'","platform":"windows","status":"'"${windows_status}"'","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
+          sig_windows=$(echo -n "$payload_windows" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $2}')
+          
+          curl -sf -X POST "${_CALLBACK_URL}" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $sig_windows" \
+            -H "X-Cloud-Build-ID: ${BUILD_ID}" \
+            --connect-timeout 10 \
+            -d "$payload_windows" || echo "[Cloud Build] Windows webhook failed (non-critical)"
+        fi
+        
+        # Send overall completion webhook
+        payload='{"build_id":"'"${_BUILD_ID}"'","project_id":"'"${_PROJECT_ID}"'","status":"'"${overall_status}"'","gcs_bucket":"codevault-builds","gcs_path":"builds/'"${_BUILD_ID}"'/","platforms":"'"${_TARGET_PLATFORMS}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'","logs_url":"https://console.cloud.google.com/cloud-build/builds/'"${BUILD_ID}"'?project=cloudbuild-486309"}'
+        
+        sig_overall=$(echo -n "$payload" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $2}')
+        
+        echo "[Cloud Build] Sending overall status: ${overall_status}"
+        
         max_retries=3
         retry_count=0
         success=false
@@ -335,30 +571,32 @@ steps:
         while [ "$success" = "false" ] && [ $retry_count -lt $max_retries ]; do
           if curl -sf -X POST "${_CALLBACK_URL}" \
             -H "Content-Type: application/json" \
-            -H "X-Signature: $signature" \
-            -H "X-Cloud-Build-ID: $BUILD_ID" \
+            -H "X-Signature: $sig_overall" \
+            -H "X-Cloud-Build-ID: ${BUILD_ID}" \
             --connect-timeout 10 \
             -d "$payload"; then
             success=true
-            echo "[Cloud Build] ✓ Webhook delivered successfully"
+            echo "[Cloud Build] Overall webhook delivered successfully"
           else
             retry_count=$((retry_count + 1))
-            echo "[Cloud Build] Webhook failed (attempt $retry_count/$max_retries)"
+            echo "[Cloud Build] Overall webhook failed (attempt $retry_count/$max_retries)"
             sleep 2
           fi
         done
         
         if [ "$success" = "false" ]; then
-          echo "[Cloud Build] WARNING: Webhook delivery failed after $max_retries attempts"
-          exit 1
+          echo "[Cloud Build] WARNING: Overall webhook delivery failed after $max_retries attempts"
         fi
-    waitFor: ['upload-artifacts']
+        
+        # Always exit successfully - webhook failure shouldn't fail the build
+        exit 0
+    waitFor: ['build-linux', 'build-windows', 'upload-artifacts']
 
 # ===== Secrets Configuration =====
 availableSecrets:
   secretManager:
     - versionName: projects/cloudbuild-486309/secrets/callback-webhook-secret/versions/latest
-      env: 'CALLBACK_SECRET'
+      env: '_CALLBACK_SECRET'
 
 # ===== Build Artifacts (optional - for Cloud Build UI) =====
 artifacts:

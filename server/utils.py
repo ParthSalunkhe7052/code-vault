@@ -210,16 +210,40 @@ def generate_api_key() -> str:
     return f"lw_{secrets.token_hex(24)}"
 
 
+def hash_api_key(api_key: str) -> str:
+    """Hash an API key using SHA256 for storage/comparison.
+
+    We use SHA256 instead of bcrypt because:
+    1. API keys are already high-entropy (48 hex chars)
+    2. We need to look up by hash on every authenticated request
+    3. bcrypt would be too slow for this use case
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
 def compute_signature(data: dict, secret: str) -> str:
-    """Compute HMAC-SHA256 signature for license validation response."""
+    """Compute HMAC-SHA256 signature for license validation response.
+    
+    Includes all critical fields to prevent tempering:
+    status, expires_at, features, variables, client_nonce, server_nonce, timestamp, server_time.
+    """
+    import json
+    
+    # Sort keys for consistent JSON representation of dicts/lists
+    features_json = json.dumps(sorted(data.get("features", [])), sort_keys=True)
+    variables_json = json.dumps(data.get("variables", {}), sort_keys=True)
+    
     message = "|".join(
         str(v)
         for v in [
             data.get("status", ""),
-            data.get("expires_at", ""),
+            data.get("expires_at", "") or "",
+            features_json,
+            variables_json,
             data.get("client_nonce", ""),
             data.get("server_nonce", ""),
             data.get("timestamp", ""),
+            data.get("server_time", ""),
         ]
     )
     return hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
@@ -261,7 +285,10 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     x_api_key: Optional[str] = Header(None),
 ) -> dict:
-    """Verify JWT or API key and return user."""
+    """Verify JWT or API key and return user.
+
+    API keys are hashed before comparison with stored hashes for security.
+    """
     conn = await get_db()
     try:
         if credentials:
@@ -275,9 +302,11 @@ async def get_current_user(
                     return dict(user)
 
         if x_api_key:
+            # Hash the incoming API key and compare with stored hash
+            hashed_key = hash_api_key(x_api_key)
             user = await conn.fetchrow(
                 "SELECT id, email, name, plan, role, api_key FROM users WHERE api_key = $1",
-                x_api_key,
+                hashed_key,
             )
             if user:
                 return dict(user)
@@ -304,24 +333,35 @@ def create_validation_response(
     client_nonce: str,
     expires_at: Optional[int] = None,
     features: Optional[List[str]] = None,
+    variables: Optional[dict] = None,
+    secret: Optional[str] = None,
 ) -> LicenseValidationResponse:
     """Create a signed license validation response."""
     server_nonce = generate_nonce()
     timestamp = int(time.time())
     server_time = timestamp  # Current server time for offline lease validation
+    
+    # Use provided secret or fallback to global
+    from config import SECRET_KEY
+    active_secret = secret or SECRET_KEY
+    
     response_data = {
         "status": status,
         "expires_at": expires_at or "",
+        "features": features or [],
+        "variables": variables or {},
         "client_nonce": client_nonce,
         "server_nonce": server_nonce,
         "timestamp": timestamp,
+        "server_time": server_time,
     }
-    signature = compute_signature(response_data, SECRET_KEY)
+    signature = compute_signature(response_data, active_secret)
     return LicenseValidationResponse(
         status=status,
         message=message,
         expires_at=expires_at,
         features=features or [],
+        variables=variables or {},
         client_nonce=client_nonce,
         server_nonce=server_nonce,
         timestamp=timestamp,
@@ -355,7 +395,7 @@ async def get_user_tier_limits(user_id: str, conn) -> dict:
     """,
         user_id,
     )
-    
+
     if sub:
         tier = sub["plan_tier"]
     else:

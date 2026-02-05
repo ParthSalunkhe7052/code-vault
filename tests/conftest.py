@@ -93,7 +93,7 @@ def auth_token(mock_user) -> str:
     """Generate a valid JWT token for testing."""
     try:
         import jwt
-        from config import JWT_SECRET_KEY
+        from config import JWT_SECRET
 
         payload = {
             "sub": mock_user["id"],
@@ -102,7 +102,7 @@ def auth_token(mock_user) -> str:
             "exp": datetime.now(timezone.utc) + timedelta(hours=24),
             "iat": datetime.now(timezone.utc),
         }
-        return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
+        return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     except ImportError:
         return "test_token_" + secrets.token_hex(16)
 
@@ -112,7 +112,7 @@ def admin_auth_token(mock_admin_user) -> str:
     """Generate a valid admin JWT token for testing."""
     try:
         import jwt
-        from config import JWT_SECRET_KEY
+        from config import JWT_SECRET
 
         payload = {
             "sub": mock_admin_user["id"],
@@ -121,7 +121,7 @@ def admin_auth_token(mock_admin_user) -> str:
             "exp": datetime.now(timezone.utc) + timedelta(hours=24),
             "iat": datetime.now(timezone.utc),
         }
-        return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
+        return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     except ImportError:
         return "admin_token_" + secrets.token_hex(16)
 

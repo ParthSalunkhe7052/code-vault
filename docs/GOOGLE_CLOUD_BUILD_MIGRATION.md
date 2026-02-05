@@ -273,7 +273,7 @@ All builds accept these parameters via the Cloud Build API:
 | `_LANGUAGE` | Programming language | `python`, `nodejs` |
 | `_TARGET_PLATFORMS` | Comma-separated platforms | `windows,linux,macos` |
 | `_SOURCE_URL` | Presigned URL to source ZIP | `https://s3.amazonaws.com/...` |
-| `_CONFIG_JSON` | JSON build configuration | `{"entry_file": "main.py"}` |
+| `_CONFIG_JSON_B64` | Base64-encoded JSON build configuration | `eyJlbnRyeV9maWxl...` |
 | `_CALLBACK_URL` | Webhook endpoint | `https://api.codevault.com/webhook` |
 | `_ENTRY_FILE` | Entry point file | `main.py`, `index.js` |
 | `_OUTPUT_NAME` | Output executable name | `my-app` |

@@ -10,10 +10,24 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
 
 from database import get_db, release_db
-from utils import get_current_user, utc_now, safe_join, validate_project_id, SecurityError, get_user_tier_limits, get_user_tier
-from storage_service import storage_service, upload_project_file, LOCAL_UPLOAD_DIR, validate_file_size
+from utils import (
+    get_current_user,
+    utc_now,
+    safe_join,
+    validate_project_id,
+    SecurityError,
+    get_user_tier_limits,
+    get_user_tier,
+)
+from storage_service import (
+    storage_service,
+    upload_project_file,
+    LOCAL_UPLOAD_DIR,
+    validate_file_size,
+)
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
+from routes.cloud_build_routes import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
 
 logger = logging.getLogger(__name__)
@@ -22,6 +36,7 @@ router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 # Local upload directory
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
 
 @router.get("")
 async def list_projects(user: dict = Depends(get_current_user)):
@@ -50,8 +65,11 @@ async def list_projects(user: dict = Depends(get_current_user)):
     finally:
         await release_db(conn)
 
+
 @router.post("")
-async def create_project(data: ProjectCreateRequest, user: dict = Depends(get_current_user)):
+async def create_project(
+    data: ProjectCreateRequest, user: dict = Depends(get_current_user)
+):
     conn = await get_db()
     try:
         limits = await get_user_tier_limits(user["id"], conn)
@@ -68,10 +86,11 @@ async def create_project(data: ProjectCreateRequest, user: dict = Depends(get_cu
                 )
 
         project_id = secrets.token_hex(16)
+        signing_secret = secrets.token_hex(32)
         await conn.execute(
             """
-            INSERT INTO projects (id, user_id, name, description, language, compiler_options) 
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO projects (id, user_id, name, description, language, compiler_options, signing_secret) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
         """,
             project_id,
             user["id"],
@@ -79,6 +98,7 @@ async def create_project(data: ProjectCreateRequest, user: dict = Depends(get_cu
             data.description,
             data.language,
             json.dumps(data.compiler_options),
+            signing_secret,
         )
         return {
             "id": project_id,
@@ -86,12 +106,14 @@ async def create_project(data: ProjectCreateRequest, user: dict = Depends(get_cu
             "description": data.description,
             "language": data.language,
             "compiler_options": data.compiler_options,
+            "signing_secret": signing_secret,
             "created_at": utc_now().isoformat(),
             "license_count": 0,
             "local_path": str(LOCAL_UPLOAD_DIR / project_id),
         }
     finally:
         await release_db(conn)
+
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str, user: dict = Depends(get_current_user)):
@@ -111,12 +133,13 @@ async def delete_project(project_id: str, user: dict = Depends(get_current_user)
     finally:
         await release_db(conn)
 
+
 @router.get("/{project_id}/config")
 async def get_project_config(project_id: str, user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
         project = await conn.fetchrow(
-            "SELECT id, name, settings, compiler_options, language FROM projects WHERE id = $1 AND user_id = $2",
+            "SELECT id, name, settings, compiler_options, language, signing_secret FROM projects WHERE id = $1 AND user_id = $2",
             project_id,
             user["id"],
         )
@@ -132,6 +155,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             compiler_opts = json.loads(compiler_opts)
 
         language = project.get("language", "python")
+        signing_secret = project.get("signing_secret")
 
         files = await conn.fetch(
             """
@@ -142,6 +166,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
         )
 
         import os
+
         # Get server URL for license validation API
         server_url = os.getenv("PUBLIC_API_URL", "http://127.0.0.1:8000")
         api_url = f"{server_url}/api/v1/license/validate"
@@ -162,6 +187,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             "pkg_options": settings.get("pkg_options", {}),
             "compiler_options": compiler_opts,
             "language": language,
+            "signing_secret": signing_secret,
             "api_url": api_url,
             "server_url": server_url,
             "selected_license_id": selected_license_id,
@@ -188,6 +214,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
     finally:
         await release_db(conn)
 
+
 @router.put("/{project_id}/config")
 async def update_project_config(
     project_id: str, data: ProjectConfigRequest, user: dict = Depends(get_current_user)
@@ -195,7 +222,10 @@ async def update_project_config(
     # Debug: Log what we're receiving
     logger.debug(
         "Saving config for project %s: skip_obfuscation=%s, enable_lease=%s, compiler_options=%s",
-        project_id, data.skip_obfuscation, data.enable_lease, data.compiler_options
+        project_id,
+        data.skip_obfuscation,
+        data.enable_lease,
+        data.compiler_options,
     )
 
     conn = await get_db()
@@ -242,12 +272,15 @@ async def update_project_config(
     finally:
         await release_db(conn)
 
+
 @router.post("/{project_id}/upload")
 async def upload_files(
     project_id: str,
     files: List[UploadFile] = File(...),
     user: dict = Depends(get_current_user),
-    _rate_limit: None = Depends(RateLimitDependency(max_requests=10, window_seconds=60, prefix="project:upload")),
+    _rate_limit: None = Depends(
+        RateLimitDependency(max_requests=10, window_seconds=60, prefix="project:upload")
+    ),
 ):
     conn = await get_db()
     try:
@@ -271,9 +304,7 @@ async def upload_files(
                     detail=f"File '{filename}': {error_msg}",
                 )
 
-            stored = await upload_project_file(
-                project_id, filename, content
-            )
+            stored = await upload_project_file(project_id, filename, content)
 
             file_id = secrets.token_hex(16)
             await conn.execute(
@@ -301,9 +332,14 @@ async def upload_files(
                     "created_at": utc_now().isoformat(),
                 }
             )
+
+        # Invalidate cached source since files have changed
+        await invalidate_cached_source(project_id)
+
         return uploaded
     finally:
         await release_db(conn)
+
 
 @router.get("/{project_id}/files")
 async def list_files(project_id: str, user: dict = Depends(get_current_user)):
@@ -338,6 +374,7 @@ async def list_files(project_id: str, user: dict = Depends(get_current_user)):
     finally:
         await release_db(conn)
 
+
 @router.delete("/{project_id}/files/{file_id}")
 async def delete_file(
     project_id: str, file_id: str, user: dict = Depends(get_current_user)
@@ -364,12 +401,17 @@ async def delete_file(
     finally:
         await release_db(conn)
 
+
 @router.post("/{project_id}/upload-zip")
 async def upload_project_zip(
     project_id: str,
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
-    _rate_limit: None = Depends(RateLimitDependency(max_requests=5, window_seconds=60, prefix="project:upload-zip")),
+    _rate_limit: None = Depends(
+        RateLimitDependency(
+            max_requests=5, window_seconds=60, prefix="project:upload-zip"
+        )
+    ),
 ):
     """Upload an entire project as a ZIP file."""
     conn = await get_db()
@@ -405,6 +447,10 @@ async def upload_project_zip(
         source_dir = safe_join(project_dir, "source")
         if source_dir.exists():
             shutil.rmtree(source_dir)
+
+        # Invalidate cached source in R2 to ensure fresh builds
+        await invalidate_cached_source(project_id)
+
         source_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -415,7 +461,7 @@ async def upload_project_zip(
                     if not str(member_path).startswith(str(source_dir.resolve())):
                         raise HTTPException(
                             status_code=400,
-                            detail="Invalid ZIP: contains path traversal attempt"
+                            detail="Invalid ZIP: contains path traversal attempt",
                         )
                 zip_ref.extractall(source_dir)
         except zipfile.BadZipFile:
@@ -471,13 +517,25 @@ async def upload_project_zip(
         logger.error(f"Invalid ZIP file for project {project_id}: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
     except PermissionError as e:
-        logger.error(f"Permission error processing ZIP for project {project_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Server permission error - please contact support")
+        logger.error(
+            f"Permission error processing ZIP for project {project_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail="Server permission error - please contact support"
+        )
     except OSError as e:
-        logger.error(f"OS error processing ZIP for project {project_id}: {e}", exc_info=True)
+        logger.error(
+            f"OS error processing ZIP for project {project_id}: {e}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"File system error: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error processing ZIP for project {project_id}: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}")
+        logger.error(
+            f"Unexpected error processing ZIP for project {project_id}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}"
+        )
     finally:
         await release_db(conn)

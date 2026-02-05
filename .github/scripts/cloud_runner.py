@@ -21,8 +21,8 @@ from typing import Optional, List
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - [CloudRunner] - %(message)s',
-    datefmt='%H:%M:%S'
+    format="%(asctime)s - [CloudRunner] - %(message)s",
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -476,30 +476,31 @@ _cv_check_demo_expired()
 # Cloud Runner Logic
 # =============================================================================
 
+
 class CloudRunner:
     """Execute optimized builds with Nuitka and Turbo Mode."""
-    
+
     def __init__(self, source_dir: Path, output_dir: Path, config: dict):
         self.source_dir = source_dir
         self.output_dir = output_dir
         self.config = config
-        
+
     def run(self) -> Path:
         """Execute the full build pipeline."""
         logger.info(f"Starting build for: {self.config.get('project_name', 'Unknown')}")
-        
+
         # 1. Prepare Environment
         self._prepare_dependencies()
-        
+
         # 2. Find and validate entry file
         entry_file = self._find_entry_file(self.config.get("entry_file", "main.py"))
-        
+
         # 2.5 Syntax Check
         self._check_syntax(entry_file)
-        
+
         # 3. Inject Wrapper
         self._inject_license_wrapper(entry_file)
-        
+
         # 4. Compile
         return self._compile_nuitka(entry_file)
 
@@ -507,20 +508,20 @@ class CloudRunner:
         """Check Python syntax of the entry file."""
         entry_path = self.source_dir / entry_file
         try:
-            with open(entry_path, 'r', encoding='utf-8') as f:
+            with open(entry_path, "r", encoding="utf-8") as f:
                 source = f.read()
-            compile(source, str(entry_path), 'exec')
+            compile(source, str(entry_path), "exec")
         except SyntaxError as e:
             error_msg = f"Syntax Error in {entry_file} line {e.lineno}: {e.msg}"
             logger.error(error_msg)
-            
+
             # Write to error file for the workflow to pick up
             err_file = self.output_dir / "error_message.txt"
             # Ensure output dir exists
             self.output_dir.mkdir(parents=True, exist_ok=True)
             with open(err_file, "w") as f:
                 f.write(error_msg)
-            
+
             sys.exit(1)
         except Exception as e:
             logger.warning(f"Could not verify syntax: {e}")
@@ -531,28 +532,41 @@ class CloudRunner:
         if (self.source_dir / entry_file).exists():
             logger.info(f"Found entry file: {entry_file}")
             return entry_file
-        
+
         # Try flattened structure (e.g., "app/main.py" -> "main.py")
         flat_entry = Path(entry_file).name
         if (self.source_dir / flat_entry).exists():
-            logger.warning(f"Entry file '{entry_file}' not found, using flattened: '{flat_entry}'")
+            logger.warning(
+                f"Entry file '{entry_file}' not found, using flattened: '{flat_entry}'"
+            )
             return flat_entry
-        
+
         # Try common Python entry point names
-        common_entries = ["main.py", "app.py", "__main__.py", "run.py", "start.py", "index.py"]
+        common_entries = [
+            "main.py",
+            "app.py",
+            "__main__.py",
+            "run.py",
+            "start.py",
+            "index.py",
+        ]
         for alt in common_entries:
             if (self.source_dir / alt).exists():
-                logger.warning(f"Entry file '{entry_file}' not found, using alternative: '{alt}'")
+                logger.warning(
+                    f"Entry file '{entry_file}' not found, using alternative: '{alt}'"
+                )
                 return alt
-        
+
         # List available Python files for better error message
         py_files = list(self.source_dir.glob("*.py"))
         if py_files:
             # Use the first Python file as a last resort
             fallback = py_files[0].name
-            logger.warning(f"No standard entry file found, using first Python file: '{fallback}'")
+            logger.warning(
+                f"No standard entry file found, using first Python file: '{fallback}'"
+            )
             return fallback
-        
+
         # No Python files at all - this will fail
         all_files = [f.name for f in self.source_dir.iterdir() if f.is_file()][:10]
         raise FileNotFoundError(
@@ -565,31 +579,41 @@ class CloudRunner:
         req_file = self.source_dir / "requirements.txt"
         if req_file.exists():
             logger.info("Installing dependencies...")
-            
+
             # Filter requirements
             content = req_file.read_text(encoding="utf-8")
             filtered_lines = []
-            
+
             for line in content.splitlines():
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                    
+
                 # Skip heavy C-dependant libs if not supported
-                if re.search(r'^(ta-lib|TA-Lib)', line, re.IGNORECASE):
+                if re.search(r"^(ta-lib|TA-Lib)", line, re.IGNORECASE):
                     logger.warning("Skipping ta-lib (requires system libs)")
                     continue
-                    
+
                 filtered_lines.append(line)
-            
+
             # Write filtered
             filtered_req = self.source_dir / "requirements_filtered.txt"
             filtered_req.write_text("\n".join(filtered_lines), encoding="utf-8")
-            
+
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-r", str(filtered_req),
-                 "--quiet", "--disable-pip-version-check", "--no-warn-script-location"],
-                stdout=sys.stdout, stderr=sys.stderr
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(filtered_req),
+                    "--quiet",
+                    "--disable-pip-version-check",
+                    "--no-warn-script-location",
+                ],
+                stdout=sys.stdout,
+                stderr=sys.stderr,
             )
 
     def _uses_tkinter(self) -> bool:
@@ -599,7 +623,11 @@ class CloudRunner:
                 try:
                     content = py_file.read_text(encoding="utf-8", errors="ignore")
                     # Check for tkinter imports
-                    if re.search(r'^(?:import\s+tkinter|from\s+tkinter\s+import)', content, re.MULTILINE):
+                    if re.search(
+                        r"^(?:import\s+tkinter|from\s+tkinter\s+import)",
+                        content,
+                        re.MULTILINE,
+                    ):
                         return True
                 except Exception:
                     continue
@@ -612,36 +640,38 @@ class CloudRunner:
         entry_path = self.source_dir / entry_file
         if not entry_path.exists():
             raise FileNotFoundError(f"Entry file not found: {entry_file}")
-            
+
         logger.info("Injecting license protection...")
         original_code = entry_path.read_text(encoding="utf-8")
-        
+
         license_key = self.config.get("license_key", "GENERIC_BUILD")
         api_url = self.config.get("api_url", "")
-        
+
         if license_key == "demo":
             wrapper = PYTHON_DEMO_WRAPPER
         else:
-            wrapper = PYTHON_WRAPPER_TEMPLATE.replace("{license_key}", license_key).replace("{server_url}", api_url)
-            
+            wrapper = PYTHON_WRAPPER_TEMPLATE.replace(
+                "{license_key}", license_key
+            ).replace("{server_url}", api_url)
+
         entry_path.write_text(wrapper + "\n\n" + original_code, encoding="utf-8")
 
     def _compile_nuitka(self, entry_file: str) -> Path:
         """Run Nuitka with Turbo Mode optimizations."""
         output_name = self.config.get("output_name") or "app"
-        
+
         # CRITICAL FIX: Ensure output_name is never empty
         if not output_name or output_name.strip() == "":
             output_name = "app"
             logger.warning("output_name was empty, defaulting to 'app'")
-        
+
         # Sanitize output name (remove invalid characters)
         output_name = "".join(c for c in output_name if c.isalnum() or c in "-_")
         if not output_name:
             output_name = "app"
-        
+
         logger.info(f"Output name: {output_name}")
-        
+
         # Platform specific output naming
         if sys.platform == "win32":
             output_exe = f"{output_name}.exe"
@@ -649,18 +679,20 @@ class CloudRunner:
             output_exe = f"{output_name}.app"
         else:
             output_exe = output_name
-            
+
         cmd = [
-            sys.executable, "-m", "nuitka",
+            sys.executable,
+            "-m",
+            "nuitka",
             "--standalone",
             # "--onefile", # Moved to logic below
             "--remove-output",
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            # "--disable-ccache",  # ENABLED CACHING FOR OPTIMIZATION
+            "--ccache",  # Enable ccache for faster C compilation on repeat builds
             # "--show-progress", # Disabled to reduce CI log spam
         ]
-        
+
         # Add macOS specific flags
         if sys.platform == "darwin":
             cmd.append("--macos-create-app-bundle")
@@ -668,58 +700,111 @@ class CloudRunner:
         # Fast Build Logic (Skip compression)
         fast_build = self.config.get("fast_build", False)
         if fast_build:
-             logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
-             # In fast build, we output to a directory
-             # The packaging step in CI will zip this directory
+            logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
+            # In fast build, we output to a directory
+            # The packaging step in CI will zip this directory
         else:
-             cmd.append("--onefile")
+            cmd.append("--onefile")
 
-        cmd.extend([
-            f"--output-filename={output_exe}",
-            f"--output-dir={self.output_dir}"
-        ])
-        
+        cmd.extend(
+            [f"--output-filename={output_exe}", f"--output-dir={self.output_dir}"]
+        )
+
         # Parallel jobs
-        # Cap at 2 to prevent OOM on standard GitHub Runners (7GB RAM)
-        # Nuitka C compilation is very memory intensive per job
+        # Cloud Build E2_HIGHCPU_8 has 8 vCPUs and 8GB RAM
+        # Use 75% of CPUs for optimal performance while leaving headroom
+        # GitHub Actions runners (7GB RAM) use fewer cores to prevent OOM
         available_cpus = multiprocessing.cpu_count()
-        job_count = min(available_cpus, 2)
+
+        # Detect if running in Cloud Build (8+ CPUs) vs GitHub Actions (2 CPUs)
+        if available_cpus >= 8:
+            # Cloud Build: Use up to 6 cores (75% of 8, leaves headroom)
+            job_count = max(2, min(int(available_cpus * 0.75), 8))
+        else:
+            # GitHub Actions: Conservative setting
+            job_count = min(available_cpus, 2)
+
         cmd.append(f"--jobs={job_count}")
-        logger.info(f"Using {job_count} CPU cores (capped for stability)")
-        
+        logger.info(
+            f"Using {job_count} CPU cores (detected {available_cpus} available)"
+        )
+
         # Turbo Mode Blacklist
         # Standard blacklist + aggressive optimizations
         blacklist = [
-            "test", "unittest", "pytest", "pdb", "doctest", "trace", "pyclbr", "pstats", "profile", "cProfile",
-            "imaplib", "poplib", "smtplib", "nntplib", "ftplib", "telnetlib",
-            "cgi", "cgitb", "wsgiref", "http.server", "xmlrpc", "pydoc", "webbrowser", "turtle", "turtledemo",
-            "idlelib", "tkinter", "curses",
+            "test",
+            "unittest",
+            "pytest",
+            "pdb",
+            "doctest",
+            "trace",
+            "pyclbr",
+            "pstats",
+            "profile",
+            "cProfile",
+            "imaplib",
+            "poplib",
+            "smtplib",
+            "nntplib",
+            "ftplib",
+            "telnetlib",
+            "cgi",
+            "cgitb",
+            "wsgiref",
+            "http.server",
+            "xmlrpc",
+            "pydoc",
+            "webbrowser",
+            "turtle",
+            "turtledemo",
+            "idlelib",
+            "tkinter",
+            "curses",
             # Heavy libraries that cause Nuitka recursion issues - compiled as bytecode instead
-            "sqlalchemy", "pandas", "numpy", "scipy", "PIL", "matplotlib", "certifi"
+            "sqlalchemy",
+            "pandas",
+            "numpy",
+            "scipy",
+            "PIL",
+            "matplotlib",
+            "certifi",
         ]
-        
+
         compatibility_mode = self.config.get("compatibility_mode", False)
-        
+
         if not compatibility_mode:
             logger.info("⚡ TURBO MODE ENABLED")
             # Enable anti-bloat to reduce compilation size and time
             cmd.append("--enable-plugin=anti-bloat")
-            
-            # Aggressive exclusions
+
+            # Aggressive exclusions (but keep Unicode support)
             turbo_exclusions = [
-                "encodings.cp1006", "encodings.cp1026", "encodings.cp1125", "encodings.cp1140",
-                "lzma", "bz2", "calendar", "sched"
+                "encodings.cp1006",
+                "encodings.cp1026",
+                "encodings.cp1125",
+                "encodings.cp1140",
+                "lzma",
+                "bz2",
+                "calendar",
+                "sched",
             ]
             blacklist.extend(turbo_exclusions)
         else:
             logger.info("Using Compatibility Mode (Standard optimizations)")
-            # In compat mode, we might disable anti-bloat if it causes issues, 
+            # In compat mode, we might disable anti-bloat if it causes issues,
             # or keep it enabled but less aggressive. For now, let's enable it as standard.
             cmd.append("--enable-plugin=anti-bloat")
-            
+
+        # Ensure UTF-8 and Unicode support for emojis and international characters
+        # Include necessary encoding modules for full Unicode support
+        cmd.append("--include-module=encodings.utf_8")
+        cmd.append("--include-module=encodings.utf_8_sig")
+        cmd.append("--include-module=encodings.unicode_escape")
+        cmd.append("--include-module=encodings.raw_unicode_escape")
+
         for module in blacklist:
             cmd.append(f"--nofollow-import-to={module}")
-            
+
         # NOTE: Removed --enable-plugin=tk-inter as it significantly slows builds
         # The wrapper code has fallback for when tkinter is not available
         # Only add it if the project actually imports tkinter
@@ -728,55 +813,56 @@ class CloudRunner:
             cmd.append("--enable-plugin=tk-inter")
         else:
             logger.info("Skipping tk-inter plugin (not used by project)")
-        
+
         # Add entry file
         cmd.append(str(self.source_dir / entry_file))
-        
+
         logger.info("Starting Nuitka compilation...")
         logger.info(f"Entry file: {entry_file}")
         logger.info(f"Output file: {output_exe}")
         logger.info(f"Output dir: {self.output_dir}")
-        
+
         # Log the full command for debugging
         logger.info(f"Nuitka command (first 500 chars): {' '.join(cmd)[:500]}...")
-        
+
         subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
-        
+
         final_path = self.output_dir / output_exe
         if not final_path.exists():
-             # Search recursive if Nuitka moved it
-             found = list(self.output_dir.rglob(output_exe))
-             if found:
-                 final_path = found[0]
-             else:
-                 # Fallback for macOS: checking if it produced a binary instead of .app
-                 if sys.platform == "darwin":
-                     fallback = self.output_dir / output_name
-                     if fallback.exists():
-                         final_path = fallback
-                     else:
-                         raise FileNotFoundError("Output executable not found")
-                 else:
-                     raise FileNotFoundError("Output executable not found")
-                 
+            # Search recursive if Nuitka moved it
+            found = list(self.output_dir.rglob(output_exe))
+            if found:
+                final_path = found[0]
+            else:
+                # Fallback for macOS: checking if it produced a binary instead of .app
+                if sys.platform == "darwin":
+                    fallback = self.output_dir / output_name
+                    if fallback.exists():
+                        final_path = fallback
+                    else:
+                        raise FileNotFoundError("Output executable not found")
+                else:
+                    raise FileNotFoundError("Output executable not found")
+
         logger.info(f"Build complete: {final_path}")
         return final_path
+
 
 def main():
     parser = argparse.ArgumentParser(description="CodeVault Cloud Runner")
     parser.add_argument("--config", required=True, help="JSON config string")
     parser.add_argument("--source", required=True, help="Source directory")
     args = parser.parse_args()
-    
+
     try:
         config = json.loads(args.config)
         source_dir = Path(args.source).resolve()
         output_dir = source_dir / "build_output"
         output_dir.mkdir(exist_ok=True)
-        
+
         runner = CloudRunner(source_dir, output_dir, config)
         exe_path = runner.run()
-        
+
         # Output result for GH Actions (using new GITHUB_OUTPUT environment variable)
         if "GITHUB_OUTPUT" in os.environ:
             with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -784,10 +870,11 @@ def main():
         else:
             # Fallback for local testing
             print(f"::set-output name=exe_path::{exe_path}")
-        
+
     except Exception as e:
         logger.error(f"Build failed: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

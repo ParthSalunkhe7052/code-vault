@@ -29,3 +29,8 @@ stripe>=7.0.0
 # Geolocation (Mission Control Map)
 geoip2>=4.8.0
 urllib3>=2.2.2
+
+# Google Cloud Build
+google-cloud-build>=3.25.0
+google-auth>=2.29.0
+google-cloud-storage>=2.14.0

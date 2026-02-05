@@ -53,6 +53,7 @@ class LicenseValidationResponse(BaseModel):
     message: str = ""
     expires_at: Optional[int] = None
     features: List[str] = []
+    variables: dict = {}  # Key-value pairs for variable injection
     client_nonce: str
     server_nonce: str
     timestamp: int
@@ -146,3 +147,19 @@ class WebhookUpdateRequest(BaseModel):
 
 class HWIDResetRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
+
+
+# =============================================================================
+# License Variable Models
+# =============================================================================
+
+
+class LicenseVariableCreateRequest(BaseModel):
+    key: str = Field(..., min_length=1, max_length=100, pattern="^[a-zA-Z0-9_]+$")
+    value: str = Field(..., max_length=1000)
+    is_secret: bool = False
+
+
+class LicenseVariableUpdateRequest(BaseModel):
+    value: str = Field(..., max_length=1000)
+    is_secret: Optional[bool] = None

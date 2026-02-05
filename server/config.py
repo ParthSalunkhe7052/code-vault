@@ -187,10 +187,10 @@ TIER_LIMITS = {
     "pro": {
         "_tier_name": "Pro",
         "max_projects": -1,  # unlimited
-        "max_licenses_per_project": 200,
+        "max_licenses_per_project": 5000, # Increased from 200
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 10,
+        "cloud_builds_per_month": 25, # Increased from 10
         "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
@@ -198,16 +198,16 @@ TIER_LIMITS = {
         "node_support": True,
     },
     "enterprise": {
-        "_tier_name": "Agency",
+        "_tier_name": "Enterprise",
         "max_projects": -1,  # unlimited
         "max_licenses_per_project": -1,  # unlimited
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 50,  # 50 credits
+        "cloud_builds_per_month": 100,  # 100 credits
         "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
-        "team_seats": 5,
+        "team_seats": 10, # Increased from 5
         "white_labeling": True,
         "node_support": True,
     },
@@ -223,25 +223,26 @@ PRICING_CONFIG = {
     },
     "pro": {
         "name": "Pro",
-        "price": 29,
+        "price": 15, # Reduced from 29
         "currency": "USD",
         "price_id": STRIPE_PRICE_PRO,
         "features": [
             "Unlimited Projects",
-            "500 Licenses",
-            "15 Cloud Builds/mo",
-            "Whop Integration",
+            "5,000 Licenses",
+            "25 Cloud Builds/mo",
             "Analytics",
+            "Node.js Support"
         ],
     },
     "enterprise": {
-        "name": "Agency",
-        "price": 99,
+        "name": "Enterprise",
+        "price": 250, # Increased from 99
         "currency": "USD",
         "price_id": STRIPE_PRICE_ENTERPRISE,
         "features": [
             "Unlimited Licenses",
-            "50 Cloud Builds/mo",
+            "100 Cloud Builds/mo",
+            "10 Team Seats (RBAC)",
             "Priority Support",
             "White Labeling",
         ],

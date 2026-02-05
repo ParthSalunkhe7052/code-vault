@@ -69,14 +69,6 @@ class SubscriptionStatus(BaseModel):
     limits: dict
 
 
-class PublicPurchaseRequest(BaseModel):
-    store_slug: str
-    buyer_email: EmailStr
-    buyer_name: Optional[str] = None
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
-
-
 # =============================================================================
 # Authentication (FIX C1: Proper auth instead of request.state)
 # =============================================================================
@@ -178,7 +170,10 @@ async def create_or_get_stripe_customer(user_id: str, email: str, conn) -> str:
     try:
         # FIXED: Add idempotency key for customer creation
         import hashlib
-        idempotency_key = f"customer_{hashlib.sha256(user_id.encode()).hexdigest()[:24]}"
+
+        idempotency_key = (
+            f"customer_{hashlib.sha256(user_id.encode()).hexdigest()[:24]}"
+        )
 
         # Create new Stripe customer
         customer = stripe.Customer.create(
@@ -306,6 +301,7 @@ async def create_checkout_session(
             # FIXED: Add idempotency key to prevent duplicate charges on retries
             # Use user_id + price_id to ensure consistent idempotency per user/plan
             import hashlib
+
             idempotency_key = f"checkout_{user['id']}_{hashlib.sha256(data.price_id.encode()).hexdigest()[:16]}"
 
             session = stripe.checkout.Session.create(
@@ -359,6 +355,7 @@ async def create_customer_portal(
         try:
             # FIXED: Add idempotency key to prevent duplicate portal sessions
             import hashlib
+
             idempotency_key = f"portal_{user['id']}_{hashlib.sha256(return_url.encode()).hexdigest()[:16]}"
 
             session = stripe.billing_portal.Session.create(
@@ -414,11 +411,13 @@ async def stripe_webhook(
                 )
                 raise HTTPException(
                     status_code=500,
-                    detail="Webhook processing unavailable. Server configuration error."
+                    detail="Webhook processing unavailable. Server configuration error.",
                 )
 
             if not stripe_signature:
-                logger.warning("[Stripe Webhook] Missing Stripe-Signature header in production")
+                logger.warning(
+                    "[Stripe Webhook] Missing Stripe-Signature header in production"
+                )
                 raise HTTPException(status_code=400, detail="Missing signature header")
 
             # Verify signature - this is the critical security check
@@ -438,6 +437,7 @@ async def stripe_webhook(
             else:
                 # Dev mode without secret - allow but warn loudly
                 import json
+
                 event_data = json.loads(payload)
                 event = stripe.Event.construct_from(event_data, stripe.api_key)
                 logger.warning(
@@ -465,10 +465,12 @@ async def stripe_webhook(
         if event_id:
             already_processed = await conn.fetchval(
                 "SELECT event_id FROM processed_webhook_events WHERE event_id = $1",
-                event_id
+                event_id,
             )
             if already_processed:
-                logger.info(f"[Stripe Webhook] Idempotency: Event {event_id} already processed, skipping")
+                logger.info(
+                    f"[Stripe Webhook] Idempotency: Event {event_id} already processed, skipping"
+                )
                 return {"status": "success", "message": "Event already processed"}
 
         async with conn.transaction():
@@ -478,10 +480,9 @@ async def stripe_webhook(
                 # Handle checkout completion - route to appropriate handler
                 if event.type == "checkout.session.completed":
                     session = event.data.object
+                    # Only handle subscription checkouts
                     if getattr(session, "mode", None) == "subscription":
                         await handle_subscription_checkout_completed(session, conn)
-                    elif getattr(session, "mode", None) == "payment":
-                        await handle_license_purchase_completed(session, conn)
                     else:
                         # Default to subscription if mode not specified
                         await handle_subscription_checkout_completed(session, conn)
@@ -507,23 +508,24 @@ async def stripe_webhook(
                     await conn.execute(
                         "INSERT INTO processed_webhook_events (event_id, event_type) VALUES ($1, $2)",
                         event_id,
-                        event.type
+                        event.type,
                     )
 
                 return {"status": "success"}
 
             except Exception as handler_error:
-                logger.error(f"[Stripe Webhook] Handler error for {event.type}: {handler_error}")
+                logger.error(
+                    f"[Stripe Webhook] Handler error for {event.type}: {handler_error}"
+                )
                 # Re-raise to trigger the outer exception handler and return 500
                 raise handler_error
 
     except Exception as e:
         # FIXED: Return 500 so Stripe will retry (Issue #4)
-        logger.error(f"[Stripe Webhook] Critical error processing event {event_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal error processing webhook"
+        logger.error(
+            f"[Stripe Webhook] Critical error processing event {event_id}: {e}"
         )
+        raise HTTPException(status_code=500, detail="Internal error processing webhook")
     finally:
         await release_db(conn)
 
@@ -612,9 +614,12 @@ async def handle_subscription_checkout_completed(session, conn):
             if credits > 0:
                 await conn.execute(
                     "UPDATE users SET build_credits = $1 WHERE id = $2",
-                    credits, user_id
+                    credits,
+                    user_id,
                 )
-                logger.info(f"[Credit System] Refilled {credits} credits for user {user_id}")
+                logger.info(
+                    f"[Credit System] Refilled {credits} credits for user {user_id}"
+                )
 
             logger.info(
                 f"[Stripe Webhook] Subscription created/updated for user {user_id}: {tier}"
@@ -622,93 +627,6 @@ async def handle_subscription_checkout_completed(session, conn):
 
         except stripe.error.StripeError as e:
             logger.error(f"[Stripe Webhook] Error retrieving subscription: {e}")
-
-
-async def handle_license_purchase_completed(session, conn):
-    """
-    FIX C2: Handle completed license purchase - create license for buyer.
-    This handles one-time payment checkouts for end-user license purchases.
-    """
-    purchase_id = (
-        session.metadata.get("purchase_id") if hasattr(session, "metadata") else None
-    )
-    if not purchase_id:
-        logger.warning("[Stripe Webhook] No purchase_id in checkout session metadata")
-        return
-
-    # Get purchase record
-    purchase = await conn.fetchrow(
-        """
-        SELECT * FROM license_purchases WHERE id = $1
-    """,
-        purchase_id,
-    )
-
-    if not purchase:
-        logger.warning(f"[Stripe Webhook] Purchase not found: {purchase_id}")
-        return
-
-    if purchase["status"] == "completed":
-        logger.info(f"[Stripe Webhook] Purchase already completed: {purchase_id}")
-        return
-
-    # Generate license key
-    license_key = generate_license_key()
-    license_id = str(uuid.uuid4())
-
-    # Create license
-    await conn.execute(
-        """
-        INSERT INTO licenses (
-            id, project_id, license_key, status, max_machines,
-            client_name, client_email, created_at
-        ) VALUES ($1, $2, $3, 'active', 1, $4, $5, NOW())
-    """,
-        license_id,
-        purchase["project_id"],
-        license_key,
-        purchase["buyer_name"],
-        purchase["buyer_email"],
-    )
-
-    # Update purchase record
-    payment_intent = getattr(session, "payment_intent", None)
-    await conn.execute(
-        """
-        UPDATE license_purchases SET
-            license_id = $2,
-            stripe_payment_intent_id = $3,
-            status = 'completed'
-        WHERE id = $1
-    """,
-        purchase_id,
-        license_id,
-        payment_intent,
-    )
-
-    logger.info(
-        f"[Stripe Webhook] License created for purchase {purchase_id}: {license_key}"
-    )
-
-    # Send email to buyer with license key
-    try:
-        from email_service import notify_license_created
-
-        project = await conn.fetchrow(
-            "SELECT name FROM projects WHERE id = $1", purchase["project_id"]
-        )
-        await notify_license_created(
-            client_name=purchase["buyer_name"] or "Customer",
-            client_email=purchase["buyer_email"],
-            license_key=license_key,
-            project_name=project["name"] if project else "Your Software",
-            expires_at=None,  # Purchased licenses don't expire by default
-            max_machines=1,
-            features=[],
-        )
-        logger.info(f"[Stripe Webhook] Sent license email to {purchase['buyer_email']}")
-    except Exception as e:
-        logger.error(f"[Stripe Webhook] Failed to send license email: {e}")
 
 
 async def handle_subscription_updated(subscription, conn):
@@ -805,22 +723,27 @@ async def handle_invoice_paid(invoice, conn):
         """,
             subscription_id,
         )
-        
+
         # Credit System: Refill credits on successful payment (monthly reset)
         sub = await conn.fetchrow(
-            "SELECT user_id, plan_tier FROM subscriptions WHERE stripe_subscription_id = $1", 
-            subscription_id
+            "SELECT user_id, plan_tier FROM subscriptions WHERE stripe_subscription_id = $1",
+            subscription_id,
         )
         if sub:
-            credits = TIER_LIMITS.get(sub["plan_tier"], {}).get("cloud_builds_per_month", 0)
+            credits = TIER_LIMITS.get(sub["plan_tier"], {}).get(
+                "cloud_builds_per_month", 0
+            )
             # -1 means unlimited, so we don't need to set credits (or set to high number)
             # But the check in cloud_build_routes ignores enterprise, so this is mostly for Pro/Free
             if credits > 0:
                 await conn.execute(
                     "UPDATE users SET build_credits = $1 WHERE id = $2",
-                    credits, sub["user_id"]
+                    credits,
+                    sub["user_id"],
                 )
-                logger.info(f"[Credit System] Monthly refill: {credits} credits for user {sub['user_id']}")
+                logger.info(
+                    f"[Credit System] Monthly refill: {credits} credits for user {sub['user_id']}"
+                )
 
         logger.info(
             f"[Stripe Webhook] Invoice paid for subscription: {subscription_id}"
@@ -852,24 +775,21 @@ async def handle_invoice_failed(invoice, conn):
 async def handle_charge_refunded(charge, conn):
     """
     FIXED: Handle charge refund events (Issue #5).
-    Revokes access for refunded subscription/license purchases.
+    Revokes access for refunded subscriptions.
     """
     # Get subscription ID from charge
     subscription_id = None
     if hasattr(charge, "subscription"):
         subscription_id = charge.subscription
 
-    # Get customer ID from charge
-    customer_id = None
-    if hasattr(charge, "customer"):
-        customer_id = charge.customer
-
     # Get refund amount
     refund_amount = None
     if hasattr(charge, "amount_refunded"):
         refund_amount = charge.amount_refunded
 
-    logger.info(f"[Stripe Webhook] Processing refund: {charge.id} (amount: {refund_amount})")
+    logger.info(
+        f"[Stripe Webhook] Processing refund: {charge.id} (amount: {refund_amount})"
+    )
 
     # Handle subscription refunds
     if subscription_id:
@@ -893,230 +813,11 @@ async def handle_charge_refunded(charge, conn):
         if user_id:
             await sync_user_tier(user_id, "free", conn)
 
-        logger.info(f"[Stripe Webhook] Subscription refunded and downgraded: {subscription_id}")
-
-    # Handle one-time license purchase refunds
-    elif customer_id:
-        # Find any license purchases tied to this customer
-        purchases = await conn.fetch(
-            """
-            SELECT id, license_id FROM license_purchases
-            WHERE stripe_payment_intent_id = $1 OR stripe_checkout_session_id = $2
-        """,
-            getattr(charge, "payment_intent", None),
-            getattr(charge, "checkout_session", None),
+        logger.info(
+            f"[Stripe Webhook] Subscription refunded and downgraded: {subscription_id}"
         )
-
-        for purchase in purchases:
-            # Revoke the license if it exists
-            if purchase["license_id"]:
-                await conn.execute(
-                    """
-                    UPDATE licenses SET status = 'revoked', updated_at = NOW()
-                    WHERE id = $1
-                """,
-                    purchase["license_id"],
-                )
-                logger.info(f"[Stripe Webhook] Revoked license for refunded purchase: {purchase['license_id']}")
-
-            # Mark purchase as refunded
-            await conn.execute(
-                """
-                UPDATE license_purchases SET status = 'refunded' WHERE id = $1
-            """,
-                purchase["id"],
-            )
 
     logger.info(f"[Stripe Webhook] Refund processing completed for charge: {charge.id}")
-
-
-# =============================================================================
-# Public Store Endpoints (for end-user license purchases - NO AUTH REQUIRED)
-# =============================================================================
-
-
-@router.get("/public/store/{store_slug}")
-async def get_public_store(store_slug: str):
-    """Get public project info for store page (no auth required)."""
-    conn = await get_db()
-    try:
-        project = await conn.fetchrow(
-            """
-            SELECT p.id, p.name, p.description, p.price_cents, p.currency, p.store_slug,
-                   u.name as developer_name
-            FROM projects p
-            JOIN users u ON p.user_id = u.id
-            WHERE p.store_slug = $1 AND p.is_public = TRUE AND p.price_cents > 0
-        """,
-            store_slug,
-        )
-
-        if not project:
-            raise HTTPException(status_code=404, detail="Store not found")
-
-        return {
-            "id": project["id"],
-            "name": project["name"],
-            "description": project["description"],
-            "price": project["price_cents"] / 100,  # Convert cents to dollars
-            "currency": project["currency"],
-            "developer": project["developer_name"],
-        }
-    finally:
-        await release_db(conn)
-
-
-@router.post("/public/purchase")
-async def create_license_purchase(data: PublicPurchaseRequest, request: Request):
-    """Create a Stripe Checkout session for license purchase (no auth required)."""
-    if not STRIPE_SECRET_KEY:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
-
-    conn = await get_db()
-    try:
-        # Get project info
-        project = await conn.fetchrow(
-            """
-            SELECT id, name, price_cents, currency, user_id
-            FROM projects
-            WHERE store_slug = $1 AND is_public = TRUE AND price_cents > 0
-        """,
-            data.store_slug,
-        )
-
-        if not project:
-            raise HTTPException(status_code=404, detail="Store not found")
-
-        # Check if developer can sell licenses (has pro or enterprise)
-        dev_sub = await get_user_subscription(project["user_id"], conn)
-        if dev_sub["plan_tier"] == "free":
-            raise HTTPException(
-                status_code=403, detail="Developer needs Pro plan to sell licenses"
-            )
-
-        # Default URLs
-        base_url = str(request.base_url).rstrip("/")
-        success_url = (
-            data.success_url
-            or f"{base_url}/license/success?session_id={{CHECKOUT_SESSION_ID}}"
-        )
-        cancel_url = (
-            data.cancel_url or f"{base_url}/store/{data.store_slug}?canceled=true"
-        )
-
-        # Create purchase record
-        purchase_id = str(uuid.uuid4())
-
-        try:
-            # FIXED: Add idempotency key to prevent duplicate license purchases
-            import hashlib
-            # Use project_id + buyer_email + timestamp hash for idempotency
-            unique_str = f"{project['id']}_{data.buyer_email}_{data.buyer_name or ''}"
-            idempotency_key = f"license_purchase_{hashlib.sha256(unique_str.encode()).hexdigest()[:32]}"
-
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=[
-                    {
-                        "price_data": {
-                            "currency": project["currency"],
-                            "unit_amount": project["price_cents"],
-                            "product_data": {
-                                "name": f"{project['name']} - License",
-                                "description": f"License key for {project['name']}",
-                            },
-                        },
-                        "quantity": 1,
-                    }
-                ],
-                mode="payment",
-                customer_email=data.buyer_email,
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={
-                    "purchase_id": purchase_id,
-                    "project_id": project["id"],
-                    "buyer_email": data.buyer_email,
-                    "buyer_name": data.buyer_name or "",
-                },
-                idempotency_key=idempotency_key,
-            )
-
-            # Save purchase record
-            await conn.execute(
-                """
-                INSERT INTO license_purchases (
-                    id, project_id, stripe_checkout_session_id, buyer_email, buyer_name,
-                    amount_cents, currency, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-            """,
-                purchase_id,
-                project["id"],
-                session.id,
-                data.buyer_email,
-                data.buyer_name,
-                project["price_cents"],
-                project["currency"],
-            )
-
-            return {"checkout_url": session.url, "session_id": session.id}
-
-        except stripe.error.StripeError as e:
-            logger.error(f"[Stripe] License purchase checkout error: {str(e)}")
-            # Security: Don't expose Stripe error details to client
-            raise HTTPException(
-                status_code=502,
-                detail="Could not create checkout session. Please try again later.",
-            )
-    finally:
-        await release_db(conn)
-
-
-@router.get("/public/license/{license_key}")
-async def get_license_portal(license_key: str):
-    """Get license info for the license portal (no auth required)."""
-    conn = await get_db()
-    try:
-        license_row = await conn.fetchrow(
-            """
-            SELECT l.id, l.license_key, l.status, l.expires_at, l.max_machines, l.features,
-                   l.client_name, l.client_email, l.created_at,
-                   p.name as project_name, p.description as project_description
-            FROM licenses l
-            JOIN projects p ON l.project_id = p.id
-            WHERE l.license_key = $1
-        """,
-            license_key,
-        )
-
-        if not license_row:
-            raise HTTPException(status_code=404, detail="License not found")
-
-        # Count active machines
-        machine_count = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM hardware_bindings
-            WHERE license_id = $1 AND is_active = TRUE
-        """,
-            license_row["id"],
-        )
-
-        return {
-            "license_key": license_row["license_key"],
-            "status": license_row["status"],
-            "expires_at": license_row["expires_at"],
-            "max_machines": license_row["max_machines"],
-            "active_machines": machine_count,
-            "features": license_row["features"],
-            "client_name": license_row["client_name"],
-            "created_at": license_row["created_at"],
-            "project": {
-                "name": license_row["project_name"],
-                "description": license_row["project_description"],
-            },
-        }
-    finally:
-        await release_db(conn)
 
 
 # =============================================================================

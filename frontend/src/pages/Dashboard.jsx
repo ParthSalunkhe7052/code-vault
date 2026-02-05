@@ -18,7 +18,7 @@ const Dashboard = () => {
         try {
             const [statsData, userData, projectsData] = await Promise.all([
                 stats.getDashboard(),
-                auth.getProfile(),
+                auth.getMe(),
                 projects.list()
             ]);
             setDashboardStats(statsData);

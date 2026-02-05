@@ -12,6 +12,7 @@ from pydantic import BaseModel, EmailStr, Field
 from models import LoginRequest, RegisterRequest, ResetPasswordRequest
 from utils import (
     generate_api_key,
+    hash_api_key,
     create_jwt_token,
     get_current_user,
     get_current_admin_user,
@@ -34,11 +35,11 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 async def register(
     request: Request,
     data: RegisterRequest,
-    _rate_limit: None = Depends(register_rate_limit)
+    _rate_limit: None = Depends(register_rate_limit),
 ):
     # Normalize email to lowercase for case-insensitive comparison
     data.email = data.email.lower().strip()
-    
+
     conn = await get_db()
     try:
         existing = await conn.fetchrow(
@@ -50,6 +51,7 @@ async def register(
         password_hash = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
         user_id = secrets.token_hex(16)
         api_key = generate_api_key()
+        api_key_hash = hash_api_key(api_key)  # Store hash, return plaintext to user
 
         await conn.execute(
             """
@@ -59,7 +61,7 @@ async def register(
             data.email,
             password_hash,
             data.name,
-            api_key,
+            api_key_hash,  # Store the hash
         )
 
         token = create_jwt_token(user_id, data.email)
@@ -71,7 +73,7 @@ async def register(
                 "email": data.email,
                 "name": data.name,
                 "plan": "free",
-                "api_key": api_key,
+                "api_key": api_key,  # Return plaintext - only time user sees it
             },
         }
     finally:
@@ -80,13 +82,11 @@ async def register(
 
 @router.post("/login")
 async def login(
-    request: Request,
-    data: LoginRequest,
-    _rate_limit: None = Depends(login_rate_limit)
+    request: Request, data: LoginRequest, _rate_limit: None = Depends(login_rate_limit)
 ):
     # Normalize email to lowercase for case-insensitive comparison
     data.email = data.email.lower().strip()
-    
+
     conn = await get_db()
     try:
         user = await conn.fetchrow(
@@ -103,7 +103,9 @@ async def login(
                 data.password.encode(), user["password_hash"].encode()
             )
             if not password_match:
-                logger.warning(f"[Login] Password mismatch for user ID: {user['id'][:8]}...")
+                logger.warning(
+                    f"[Login] Password mismatch for user ID: {user['id'][:8]}..."
+                )
                 raise HTTPException(status_code=401, detail="Invalid email or password")
         except Exception as e:
             logger.error(f"[Login] Password verification error: {str(e)}")
@@ -122,7 +124,7 @@ async def login(
                 "name": user["name"],
                 "plan": user["plan"],
                 "role": user.get("role", "user"),
-                "api_key": user["api_key"],
+                "api_key": "lw_****" if user["api_key"] else None,  # Don't expose hash
             },
         }
     finally:
@@ -137,14 +139,19 @@ async def get_me(user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
         # Fetch latest plan_tier from subscriptions table (authoritative source)
-        sub_row = await conn.fetchrow("""
+        sub_row = await conn.fetchrow(
+            """
             SELECT plan_tier FROM subscriptions
             WHERE user_id = $1
             ORDER BY created_at DESC LIMIT 1
-        """, user["id"])
-        
+        """,
+            user["id"],
+        )
+
         # Get build credits
-        user_row = await conn.fetchrow("SELECT build_credits FROM users WHERE id = $1", user["id"])
+        user_row = await conn.fetchrow(
+            "SELECT build_credits FROM users WHERE id = $1", user["id"]
+        )
         build_credits = user_row["build_credits"] if user_row else 0
 
         # Use subscription tier if exists, otherwise fall back to users.plan
@@ -153,15 +160,17 @@ async def get_me(user: dict = Depends(get_current_user)):
         # FIX: Sync credits if 0 and user is entitled to them (e.g. fresh upgrade or monthly reset missed)
         tier_limits = await get_user_tier_limits(user["id"], conn)
         monthly_allowance = tier_limits.get("cloud_builds_per_month", 0)
-        
+
         if build_credits == 0 and monthly_allowance > 0:
             await conn.execute(
                 "UPDATE users SET build_credits = $1 WHERE id = $2",
                 monthly_allowance,
-                user["id"]
+                user["id"],
             )
             build_credits = monthly_allowance
-            logger.info(f"Synced build credits for user {user['id']} to {monthly_allowance}")
+            logger.info(
+                f"Synced build credits for user {user['id']} to {monthly_allowance}"
+            )
 
         return {
             "id": user["id"],
@@ -169,7 +178,9 @@ async def get_me(user: dict = Depends(get_current_user)):
             "name": user.get("name"),
             "plan": plan,
             "role": user.get("role", "user"),
-            "api_key": user.get("api_key"),
+            "api_key": "lw_****"
+            if user.get("api_key")
+            else None,  # Don't expose hash, show masked indicator
             "build_credits": build_credits,
             "created_at": utc_now().isoformat(),
         }
@@ -181,17 +192,62 @@ async def get_me(user: dict = Depends(get_current_user)):
 async def regenerate_api_key_endpoint(
     request: Request,
     user: dict = Depends(get_current_user),
-    _rate_limit: None = Depends(api_key_regen_rate_limit)
+    _rate_limit: None = Depends(api_key_regen_rate_limit),
 ):
     new_api_key = generate_api_key()
+    new_api_key_hash = hash_api_key(new_api_key)  # Store hash, return plaintext
     conn = await get_db()
     try:
         await conn.execute(
             "UPDATE users SET api_key = $1, updated_at = NOW() WHERE id = $2",
-            new_api_key,
+            new_api_key_hash,  # Store the hash
             user["id"],
         )
-        return {"api_key": new_api_key}
+        return {"api_key": new_api_key}  # Return plaintext - only time user sees it
+    finally:
+        await release_db(conn)
+
+
+@router.get("/limits")
+async def get_user_limits(user: dict = Depends(get_current_user)):
+    """Get current user's tier limits from the backend (single source of truth)."""
+    from utils import get_user_tier_limits
+    from config import TIER_LIMITS
+
+    conn = await get_db()
+    try:
+        # Get the user's actual tier limits from subscription
+        limits = await get_user_tier_limits(user["id"], conn)
+
+        # Get build credits
+        user_row = await conn.fetchrow(
+            "SELECT build_credits FROM users WHERE id = $1", user["id"]
+        )
+        build_credits = user_row["build_credits"] if user_row else 0
+
+        # Get user's current tier name
+        sub_row = await conn.fetchrow(
+            """SELECT plan_tier FROM subscriptions
+               WHERE user_id = $1 AND status = 'active'
+               ORDER BY created_at DESC LIMIT 1""",
+            user["id"],
+        )
+        tier = sub_row["plan_tier"] if sub_row else user.get("plan", "free")
+        tier = tier.lower() if tier else "free"
+
+        return {
+            "tier": tier,
+            "tier_name": limits.get("_tier_name", tier.capitalize()),
+            "max_projects": limits.get("max_projects", 1),
+            "max_licenses_per_project": limits.get("max_licenses_per_project", 50),
+            "cloud_builds_per_month": limits.get("cloud_builds_per_month", 0),
+            "build_credits_remaining": build_credits,
+            "can_cloud_build": limits.get("cloud_compilation", False),
+            "cloud_platforms": limits.get("cloud_platforms", ["windows"]),
+            "analytics": limits.get("analytics", False),
+            "webhooks": limits.get("webhooks", False),
+            "node_support": limits.get("node_support", False),
+        }
     finally:
         await release_db(conn)
 
@@ -201,7 +257,7 @@ async def reset_password(
     request: Request,
     data: ResetPasswordRequest,
     user: dict = Depends(get_current_user),
-    _rate_limit: None = Depends(password_reset_rate_limit)
+    _rate_limit: None = Depends(password_reset_rate_limit),
 ):
     """Reset password for logged-in user - FIXED: Requires current password for security."""
     conn = await get_db()
@@ -221,12 +277,16 @@ async def reset_password(
                 data.current_password.encode(), current_user["password_hash"].encode()
             )
             if not password_match:
-                raise HTTPException(status_code=401, detail="Current password is incorrect")
+                raise HTTPException(
+                    status_code=401, detail="Current password is incorrect"
+                )
         except Exception:
             raise HTTPException(status_code=401, detail="Current password is incorrect")
 
         # Hash and update new password
-        password_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
+        password_hash = bcrypt.hashpw(
+            data.new_password.encode(), bcrypt.gensalt()
+        ).decode()
         await conn.execute(
             "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
             password_hash,
@@ -240,6 +300,7 @@ async def reset_password(
 # Pydantic model for admin password reset (fixing security issue #7)
 class AdminResetPasswordRequest(BaseModel):
     """Request model for admin password reset with proper validation."""
+
     email: EmailStr
     new_password: str = Field(..., min_length=8, max_length=128)
 
@@ -249,7 +310,7 @@ async def admin_reset_password(
     request: Request,
     data: AdminResetPasswordRequest,
     admin_user: dict = Depends(get_current_admin_user),
-    _rate_limit: None = Depends(password_reset_rate_limit)
+    _rate_limit: None = Depends(password_reset_rate_limit),
 ):
     """Admin endpoint to reset any user's password (admin auth required)"""
     # Normalize email to match stored format (consistent with register/login)
@@ -261,7 +322,9 @@ async def admin_reset_password(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        password_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
+        password_hash = bcrypt.hashpw(
+            data.new_password.encode(), bcrypt.gensalt()
+        ).decode()
         await conn.execute(
             "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
             password_hash,

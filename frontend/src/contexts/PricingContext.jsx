@@ -9,7 +9,8 @@ export const TIERS = {
   ENTERPRISE: 'enterprise'
 };
 
-const LIMITS = {
+// Default limits (fallback only - real limits come from backend)
+const DEFAULT_LIMITS = {
   [TIERS.FREE]: {
     maxProjects: 1,
     maxLicenses: 50,
@@ -36,26 +37,50 @@ const LIMITS = {
 export const PricingProvider = ({ children }) => {
   const [tier, setTier] = useState(TIERS.FREE);
   const [buildCredits, setBuildCredits] = useState(0);
+  const [limits, setLimits] = useState(DEFAULT_LIMITS[TIERS.FREE]);
   const [loading, setLoading] = useState(true);
 
-  // Load User Data & Enforce Logic
+  // Load User Data from Backend (single source of truth)
   useEffect(() => {
     const initPricing = async () => {
       try {
         const user = await auth.getUser();
         
         if (user) {
-           // ADMIN OVERRIDE: If admin, FORCE ENTERPRISE
-           if (user.role === 'admin') {
-               console.log('[Pricing] Admin detected. Forcing Enterprise tier.');
-               setTier(TIERS.ENTERPRISE);
-               setBuildCredits(Infinity);
-           } else {
-               // Normal user: Use plan from DB or default to free
-               const userPlan = user.plan || TIERS.FREE;
-               setTier(userPlan);
-               setBuildCredits(user.build_credits || LIMITS[userPlan]?.buildCredits || 0);
-           }
+          // Use the plan from the database - no client-side overrides
+          const userPlan = user.plan || TIERS.FREE;
+          setTier(userPlan);
+          
+          // Fetch actual limits from backend
+          try {
+            const response = await fetch('/api/v1/auth/limits', {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              }
+            });
+            if (response.ok) {
+              const backendLimits = await response.json();
+              setLimits({
+                maxProjects: backendLimits.max_projects === -1 ? Infinity : backendLimits.max_projects,
+                maxLicenses: backendLimits.max_licenses_per_project === -1 ? Infinity : backendLimits.max_licenses_per_project,
+                buildCredits: backendLimits.cloud_builds_per_month === -1 ? Infinity : backendLimits.cloud_builds_per_month,
+                canCloudBuild: backendLimits.can_cloud_build,
+                offlineLease: userPlan !== TIERS.FREE,
+                analytics: backendLimits.analytics,
+                webhooks: backendLimits.webhooks,
+                nodeSupport: backendLimits.node_support
+              });
+              setBuildCredits(backendLimits.build_credits_remaining || 0);
+            } else {
+              // Fallback to default limits if endpoint fails
+              setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+              setBuildCredits(user.build_credits || 0);
+            }
+          } catch {
+            // Fallback to default limits
+            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setBuildCredits(user.build_credits || 0);
+          }
         }
       } catch (err) {
         console.error('[Pricing] Failed to load user pricing data', err);
@@ -82,20 +107,20 @@ export const PricingProvider = ({ children }) => {
   };
 
   const canCreateProject = (currentCount) => {
-    return currentCount < LIMITS[tier].maxProjects;
+    return currentCount < limits.maxProjects;
   };
 
   const canCreateLicense = (currentCount) => {
-    return currentCount < LIMITS[tier].maxLicenses;
+    return currentCount < limits.maxLicenses;
   };
 
   const hasBuildCredits = () => {
     if (tier === TIERS.FREE) return false; 
-    return buildCredits > 0 || LIMITS[tier].buildCredits === Infinity;
+    return buildCredits > 0 || limits.buildCredits === Infinity;
   };
 
   const consumeBuildCredit = () => {
-    if (LIMITS[tier].buildCredits === Infinity) return true;
+    if (limits.buildCredits === Infinity) return true;
     if (buildCredits > 0) {
       setBuildCredits(prev => prev - 1);
       return true;
@@ -103,13 +128,13 @@ export const PricingProvider = ({ children }) => {
     return false;
   };
 
-  const getLimits = () => LIMITS[tier];
+  const getLimits = () => limits;
 
   return (
     <PricingContext.Provider value={{
       tier,
       buildCredits,
-      limits: LIMITS[tier],
+      limits,
       loading,
       upgradeToPro,
       downgradeToFree,

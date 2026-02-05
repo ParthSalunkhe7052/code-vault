@@ -457,6 +457,38 @@ def _lw_validate():
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = _lw_json.loads(resp.read().decode('utf-8'))
             
+            # CRITICAL SECURITY: Verify Signature
+            server_sig = result.get("signature")
+            if not server_sig:
+                _lw_show_error("SECURITY ERROR", "Server response is unsigned.", "Validation failed for security reasons.")
+            
+            # Recompute signature locally to verify
+            # Fields: status|expires_at|features|variables|client_nonce|server_nonce|timestamp|server_time
+            import hmac as _lw_hmac
+            
+            # Consistent JSON for comparison
+            features_json = _lw_json.dumps(sorted(result.get("features", [])), sort_keys=True)
+            variables_json = _lw_json.dumps(result.get("variables", {}), sort_keys=True)
+            
+            msg = "|".join(str(v) for v in [
+                result.get("status", ""),
+                result.get("expires_at", "") or "",
+                features_json,
+                variables_json,
+                result.get("client_nonce", ""),
+                result.get("server_nonce", ""),
+                result.get("timestamp", ""),
+                result.get("server_time", "")
+            ])
+            
+            # Using the embedded secret key
+            # NOTE: In production, the compiler should inject this secret
+            _LW_SECRET = "{secret_key}" 
+            expected_sig = _lw_hmac.new(_LW_SECRET.encode(), msg.encode(), _lw_hash.sha256).hexdigest()
+            
+            if not _lw_hmac.compare_digest(server_sig, expected_sig):
+                _lw_show_error("SECURITY ERROR", "Server signature mismatch.", "The response from the license server appears to be tampered with or forged.")
+
             if result.get("status") == "valid":
                 print("✅ License validated online")
                 

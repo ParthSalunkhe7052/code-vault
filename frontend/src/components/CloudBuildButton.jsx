@@ -141,8 +141,14 @@ export function CloudBuildButton({
   };
 
   const pollStatus = async (id) => {
+    let pollCount = 0;
+    
     const checkStatus = async () => {
       try {
+        pollCount++;
+        // Sync with Cloud Build every 5th poll (15 seconds) to ensure status accuracy
+        const shouldSync = pollCount % 5 === 0;
+        
         if (isMultiPlatform) {
           // Poll multi-platform artifacts endpoint
           const response = await api.get(`/cloud-build/${id}/artifacts`);
@@ -183,7 +189,9 @@ export function CloudBuildButton({
             const finalStatus = failedCount === targetPlatforms.length ? 'failed' : 'completed';
             setStatus(finalStatus);
             if (finalStatus === 'failed') {
-                setError('All platform builds failed');
+                // Collect all errors
+                const errors = artifacts.filter(a => a.error).map(a => `${a.platform}: ${a.error}`);
+                setError(errors.length > 0 ? errors.join('; ') : 'All platform builds failed');
             }
             
             // Sync Global Context (Mocking a single status object for the parent)
@@ -199,15 +207,16 @@ export function CloudBuildButton({
             return; // Stop polling
           }
         } else {
-          // Single platform - use existing status endpoint
-          const response = await api.get(`/cloud-build/${id}/status`);
+          // Single platform - use existing status endpoint with sync parameter
+          const response = await api.get(`/cloud-build/${id}/status${shouldSync ? '?sync=true' : ''}`);
           const { 
             status: buildStatus, 
             progress: buildProgress, 
             download_url, 
             download_key,  // Backward compatibility
             error: buildError,
-            artifacts  // Also check artifacts for error/download
+            artifacts,  // Also check artifacts for error/download
+            synced
           } = response.data;
           
           setProgress(buildProgress || 0);
@@ -226,6 +235,7 @@ export function CloudBuildButton({
             }
           }
           
+          // Handle terminal states
           if (buildStatus === 'completed') {
             setStatus('completed');
             setDownloadUrl(finalDownloadUrl);
@@ -237,7 +247,15 @@ export function CloudBuildButton({
             return; // Stop polling
           } else if (buildStatus === 'failed') {
             setStatus('failed');
-            setError(finalError || "Build failed - check GitHub Actions logs for details");
+            setError(finalError || "Build failed - check logs for details");
+            // Sync Global Context
+            if (projectBuild && projectBuild.updateStatus) {
+                projectBuild.updateStatus(response.data);
+            }
+            return; // Stop polling
+          } else if (buildStatus === 'cancelled') {
+            setStatus('cancelled');
+            setError('Build was cancelled');
             // Sync Global Context
             if (projectBuild && projectBuild.updateStatus) {
                 projectBuild.updateStatus(response.data);
@@ -272,18 +290,54 @@ export function CloudBuildButton({
   };
 
   const cancelBuild = async () => {
-    if (!buildId || status !== 'building') return;
+    if (!buildId) return;
+    
+    // Allow cancel in building, starting, or if status might be stale
+    if (!['building', 'starting', 'pending', 'queued'].includes(status)) {
+      // Even if UI shows different status, try to cancel anyway
+      // Cloud Build will tell us if it's already done
+    }
     
     try {
-      await api.post(`/cloud-build/${buildId}/cancel`);
-      setStatus('cancelled');
-      setError('Build cancelled by user');
+      setError(null);
+      const response = await api.post(`/cloud-build/${buildId}/cancel`);
+      
+      // Handle response from server
+      const result = response.data;
+      
+      if (result.status === 'cancelled') {
+        setStatus('cancelled');
+        if (result.synced_from_cloud) {
+          setError('Build was already cancelled or completed');
+        } else {
+          setError('Build cancelled by user');
+        }
+      } else if (result.status === 'completed') {
+        setStatus('completed');
+        setError('Build already completed');
+        // Refresh to get download URL
+        pollStatus(buildId);
+      } else if (result.status === 'failed') {
+        setStatus('failed');
+        setError('Build already failed');
+      } else {
+        setStatus(result.status);
+        setError(result.message || 'Build status updated');
+      }
+      
       if (pollIntervalRef.current) {
         clearTimeout(pollIntervalRef.current);
       }
     } catch (err) {
       console.error('Failed to cancel build:', err);
-      setError(err.response?.data?.detail || 'Failed to cancel build');
+      const errorMsg = err.response?.data?.detail || err.message || 'Failed to cancel build';
+      setError(errorMsg);
+      
+      // If we get a 400/404, the build might already be done
+      // Refresh status to check
+      if (err.response?.status === 400 || err.response?.status === 404) {
+        pollStatus(buildId);
+      }
     }
   };
 
@@ -398,6 +452,11 @@ export function CloudBuildButton({
             <X className="w-4 h-4" />
             Cancel Build
           </button>
+          
+          {/* Sync status hint */}
+          <p className="text-xs text-slate-500 text-center">
+            Status syncs every 15 seconds with Cloud Build
+          </p>
         </div>
       )}
 
