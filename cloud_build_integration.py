@@ -120,11 +120,26 @@ class CloudBuildClient:
             converted_options = convert_keys(build_config_yaml["options"])
             build.options = cloudbuild_v1.BuildOptions(**converted_options)
 
-        # Set timeout - use duration_pb2.Duration
-        if "timeout" in build_config_yaml:
-            timeout_str = build_config_yaml["timeout"]
-            seconds = int(timeout_str.rstrip("s"))
-            build.timeout = duration_pb2.Duration(seconds=seconds)
+        # Set timeout based on plan tier - use duration_pb2.Duration
+        tier = build_config.get("plan_tier", "free")
+        timeout_seconds = {
+            "free": 1800,  # 30 minutes
+            "pro": 3600,  # 60 minutes
+            "business": 7200,  # 120 minutes
+        }.get(tier, 3600)
+        build.timeout = duration_pb2.Duration(seconds=timeout_seconds)
+
+        # Set machine type based on plan tier
+        # Access MachineType via BuildOptions to avoid import errors
+        MachineType = cloudbuild_v1.BuildOptions.MachineType
+
+        machine_types = {
+            "business": MachineType.N1_HIGHCPU_8,  # Faster, more expensive (~7-8 min builds)
+            "pro": MachineType.E2_HIGHCPU_8,  # Balanced (~8-9 min builds)
+            "free": MachineType.E2_MEDIUM,  # Budget (free tier) (~12-15 min builds)
+        }
+        machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
+        build.options.machine_type = machine_type
 
         # Set secrets
         if "availableSecrets" in build_config_yaml:
@@ -351,12 +366,11 @@ class BuildTrigger:
         """
         Your existing GitHub Actions trigger code
         (Keep this for backward compatibility during migration)
+        NOTE: GitHub Actions has been deprecated, this method always raises an error.
         """
-        import requests
-
-        # Your existing GitHub Actions trigger logic here
-        # ...
-        pass
+        raise NotImplementedError(
+            "GitHub Actions support has been removed. Please use Cloud Build."
+        )
 
 
 if __name__ == "__main__":
