@@ -21,7 +21,7 @@ export const pricingService = {
 
     /**
      * Get configuration for a specific plan.
-     * @param {string} plan - 'free', 'pro', or 'enterprise'
+     * @param {string} plan - 'free', 'pro', or 'business'
      */
     async getPlanConfig(plan) {
         const config = await this.getConfig();

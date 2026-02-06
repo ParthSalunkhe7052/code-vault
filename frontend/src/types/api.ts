@@ -13,8 +13,8 @@ export interface User {
   email: string;
   name: string;
   role: "user" | "admin";
-  tier: "free" | "pro" | "enterprise";
-  stripe_customer_id: string | null;
+  tier: "free" | "pro" | "business";
+  polar_customer_id: string | null;
   api_key: string;
   created_at: string;
   updated_at?: string;
@@ -327,7 +327,7 @@ export interface SubscriptionStatus {
   status: "active" | "canceled" | "past_due" | "trialing" | null;
   current_period_end?: string | Date | null;  // More flexible type for backend responses
   cancel_at_period_end?: boolean;
-  stripe_customer_id?: string;
+  polar_customer_id?: string;
   limits: Record<string, number>;  // Added from backend response
 }
 
@@ -338,8 +338,7 @@ export interface PricingTier {
   price_yearly: number;
   features: string[];
   limits: TierLimits;
-  stripe_price_id_monthly: string;
-  stripe_price_id_yearly: string;
+  polar_product_id: string;
 }
 
 export interface TierLimits {

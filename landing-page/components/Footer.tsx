@@ -36,8 +36,7 @@ const Footer: React.FC = () => {
           <div>
             <h5 className="font-semibold text-white mb-4">Social</h5>
             <ul className="space-y-2 text-sm text-gray-400">
-              <li><a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a></li>
-              <li><a href="https://discord.gg" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Discord</a></li>
+              <li><a href="https://github.com/ParthSalunkhe7052/code-vault" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a></li>
             </ul>
           </div>
         </div>
