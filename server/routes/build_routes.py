@@ -432,12 +432,13 @@ async def get_build_bundle(
         }
 
         # Debug: Log final config being written to bundle
+        # CodeQL: These fields are non-sensitive configuration flags, not secrets.
         logger.debug(
             "[BUNDLE DEBUG] Final config for bundle: skip_obfuscation=%s, enable_lease=%s, show_branding=%s, tier=%s",
-            config["skip_obfuscation"],
-            config["enable_lease"],
-            config["show_branding"],
-            config["tier"],
+            str(config.get("skip_obfuscation")),
+            str(config.get("enable_lease")),
+            str(config.get("show_branding")),
+            str(config.get("tier")),
         )
 
         with tempfile.NamedTemporaryFile(

@@ -175,6 +175,12 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
     """
     import shutil
 
+    # Security: Validate source_dir is within allowed base directory
+    # This path is constructed from validated project_id via validate_safe_path
+    source_dir = source_dir.resolve()
+    if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
+        raise HTTPException(400, "Invalid source directory path")
+
     # Create new zip (always fresh, no caching to avoid stale files)
     zip_path = source_dir.parent / f"source_{build_id}.zip"
 
@@ -267,6 +273,12 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
 
 async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path):
     """Trigger a Cloud Build job using gcloud CLI wrapper."""
+    # Security: Validate source_dir is within allowed base directory
+    # This path is constructed from validated project_id via validate_safe_path
+    source_dir = source_dir.resolve()
+    if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
+        raise HTTPException(400, "Invalid source directory path")
+
     conn = None
     try:
         # Import Cloud Build client
@@ -441,8 +453,14 @@ async def start_cloud_build(
             project_settings = json.loads(project_settings) if project_settings else {}
 
         # 3. Source Validation
+        # Security: Validate project_id and construct safe source directory path
         safe_project_dir = validate_safe_path(UPLOAD_DIR, request.project_id)
         source_dir = safe_project_dir / "source"
+
+        # Validate the constructed path is within UPLOAD_DIR
+        source_dir = source_dir.resolve()
+        if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
+            raise HTTPException(400, "Invalid source directory path")
 
         if not source_dir.exists():
             # Fallback path logic
@@ -451,6 +469,10 @@ async def start_cloud_build(
             safe_alt = validate_safe_path(projects_base, request.project_id)
             if (safe_alt / "source").exists():
                 source_dir = safe_alt / "source"
+                # Re-validate after path change
+                source_dir = source_dir.resolve()
+                if not str(source_dir).startswith(str(projects_base.resolve())):
+                    raise HTTPException(400, "Invalid source directory path")
             else:
                 raise HTTPException(400, "No source files found.")
 
@@ -1431,8 +1453,14 @@ async def retry_build(
             )
 
         # Trigger build
+        # Security: Validate project_id and construct safe source directory path
         safe_project_dir = validate_safe_path(UPLOAD_DIR, build["project_id"])
         source_dir = safe_project_dir / "source"
+
+        # Validate the constructed path is within UPLOAD_DIR
+        source_dir = source_dir.resolve()
+        if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
+            raise HTTPException(400, "Invalid source directory path")
 
         if source_dir.exists():
             background_tasks.add_task(
@@ -1778,14 +1806,24 @@ async def get_queue_position(build_id: str) -> Optional[int]:
 async def trigger_build_directly(build_id: str, config: dict, project_id: str):
     """Fallback: trigger build directly without queue."""
     try:
+        # Security: Validate project_id and construct safe source directory path
         safe_project_dir = validate_safe_path(UPLOAD_DIR, project_id)
         source_dir = safe_project_dir / "source"
+
+        # Validate the constructed path is within UPLOAD_DIR
+        source_dir = source_dir.resolve()
+        if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
+            raise HTTPException(400, "Invalid source directory path")
 
         if not source_dir.exists():
             projects_base = UPLOAD_DIR / "projects"
             safe_alt = validate_safe_path(projects_base, project_id)
             if (safe_alt / "source").exists():
                 source_dir = safe_alt / "source"
+                # Re-validate after path change
+                source_dir = source_dir.resolve()
+                if not str(source_dir).startswith(str(projects_base.resolve())):
+                    raise HTTPException(400, "Invalid source directory path")
 
         await trigger_cloud_build(build_id, config, source_dir)
         return {"status": "running", "message": "Build started immediately"}

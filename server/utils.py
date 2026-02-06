@@ -218,6 +218,8 @@ def hash_api_key(api_key: str) -> str:
     2. We need to look up by hash on every authenticated request
     3. bcrypt would be too slow for this use case
     """
+    # CodeQL: SHA256 is used intentionally for performance on high-entropy keys.
+    # This is not a password storage scenario.
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
