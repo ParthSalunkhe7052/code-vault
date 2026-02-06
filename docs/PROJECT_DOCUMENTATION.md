@@ -63,7 +63,7 @@ CodeVault uses a **Web + CLI** hybrid architecture.
 - **FastAPI**: High-performance async Python framework.
 - **PostgreSQL**: Robust relational database for licenses and users.
 - **Redis**: Caching layer for high-speed validation.
-- **Stripe**: Payment processing for monetization.
+- **Polar**: Payment processing for monetization.
 - **Resend**: Email delivery service.
 
 ### 2. Web Dashboard (`frontend/`)

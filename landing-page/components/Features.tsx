@@ -146,8 +146,8 @@ const Features: React.FC = () => {
 
            {/* Card 6: Anti-Debug */}
            <FeatureCard 
-             title="Anti-Debug & VM"
-             description="Automatic detection of common debugging tools and virtual machines."
+             title="Anti-Debug & VM (Coming Soon)"
+             description="Planned detection of common debugging tools and virtual machines."
              icon={<ShieldCheck className="w-6 h-6 text-red-400" />}
              className="md:col-span-1"
              fullWidthDesc={true}

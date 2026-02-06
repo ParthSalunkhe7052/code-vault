@@ -204,6 +204,20 @@ TIER_LIMITS = {
         "white_labeling": True,
         "node_support": True,
     },
+    "enterprise": {
+        "_tier_name": "Enterprise",
+        "max_projects": -1,  # unlimited
+        "max_licenses_per_project": -1,  # unlimited
+        "can_sell_licenses": True,
+        "cloud_compilation": True,
+        "cloud_builds_per_month": -1,  # unlimited
+        "cloud_platforms": ["windows", "macos", "linux"],
+        "analytics": True,
+        "webhooks": True,
+        "team_seats": -1,  # unlimited
+        "white_labeling": True,
+        "node_support": True,
+    },
 }
 
 # Pricing Configuration
@@ -223,8 +237,10 @@ PRICING_CONFIG = {
             "Unlimited Projects",
             "500 Licenses",
             "25 Cloud Builds/mo",
+            "Offline Leases",
             "Analytics & Webhooks",
             "Node.js Support",
+            "No Branding / Splash Screen",
         ],
     },
     "business": {
@@ -238,6 +254,20 @@ PRICING_CONFIG = {
             "10 Team Seats (RBAC)",
             "Priority Support",
             "White Labeling",
+        ],
+    },
+    "enterprise": {
+        "name": "Enterprise",
+        "price": "Custom",
+        "currency": "USD",
+        "features": [
+            "Unlimited Licenses",
+            "Unlimited Cloud Builds",
+            "Unlimited Team Seats",
+            "Dedicated Support",
+            "Custom SLAs",
+            "Dedicated Build Runners",
+            "Security Reviews",
         ],
     },
 }
