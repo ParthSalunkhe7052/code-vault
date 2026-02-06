@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail } from 'lucide-react';
-import { auth } from '../services/api';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
 
 const Login = () => {
     const toast = useToast();
+    const { login, register } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
@@ -75,10 +77,10 @@ const Login = () => {
 
         try {
             if (isRegisterMode) {
-                await auth.register(email.trim(), password, name.trim());
+                await register(email.trim(), password, name.trim());
                 toast.success('Account created successfully!');
             } else {
-                await auth.login(email.trim(), password);
+                await login(email.trim(), password);
                 toast.success('Welcome back!');
             }
             navigate('/');

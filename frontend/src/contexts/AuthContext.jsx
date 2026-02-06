@@ -23,6 +23,18 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
     }, []);
 
+    const login = useCallback(async (email, password) => {
+        const userData = await auth.login(email, password);
+        setUser(userData);
+        return userData;
+    }, []);
+
+    const register = useCallback(async (email, password, name) => {
+        const userData = await auth.register(email, password, name);
+        setUser(userData);
+        return userData;
+    }, []);
+
     useEffect(() => {
         const initAuth = async () => {
             if (auth.isAuthenticated()) {
@@ -39,7 +51,9 @@ export const AuthProvider = ({ children }) => {
         isAuthenticated: !!user,
         isAdmin: user?.role === 'admin',
         refreshUser,
-        logout
+        logout,
+        login,
+        register
     };
 
     return (

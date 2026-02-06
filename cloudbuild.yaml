@@ -197,16 +197,23 @@ steps:
         
         # Run cloud_runner.py with decoded config and error handling
         set +e
-        python3 "$runner" \
+        # Capture both stdout and stderr for error reporting
+        build_output=$(python3 "$runner" \
           --config "$decoded_config" \
-          --source "$src_dir"
+          --source "$src_dir" 2>&1)
         build_exit_code=$?
         set -e
         
         if [ $build_exit_code -ne 0 ]; then
           echo "[Cloud Build] ERROR: Linux build failed with exit code $build_exit_code"
+          echo "$build_output"
           echo "failed" > /workspace/build_status_linux
-          echo "Build failed - see logs above" > /workspace/build_error_linux
+          # Extract the actual error message (last few lines of output)
+          error_msg=$(echo "$build_output" | tail -n 5 | tr '\n' ' ' | sed 's/"/\\"/g' | cut -c1-500)
+          if [ -z "$error_msg" ]; then
+            error_msg="Build failed with exit code $build_exit_code"
+          fi
+          echo "$error_msg" > /workspace/build_error_linux
           exit 1
         fi
         
@@ -331,17 +338,24 @@ steps:
         echo "[Cloud Build] Windows path: $win_path"
         
         set +e
-        wine python "$runner_path" \
+        # Capture both stdout and stderr for error reporting
+        build_output=$(wine python "$runner_path" \
           --config "$decoded_config" \
-          --source "$win_path"
+          --source "$win_path" 2>&1)
         build_exit_code=$?
         set -e
         
         if [ $build_exit_code -ne 0 ]; then
           echo "[Cloud Build] ERROR: Windows build failed with exit code $build_exit_code"
-          # Save error status for webhook
+          echo "$build_output"
+          # Save error status for webhook - capture actual error message
           echo "failed" > /workspace/build_status_windows
-          echo "Build failed - see logs above" > /workspace/build_error_windows
+          # Extract the actual error message (last few lines of output)
+          error_msg=$(echo "$build_output" | tail -n 5 | tr '\n' ' ' | sed 's/"/\\"/g' | cut -c1-500)
+          if [ -z "$error_msg" ]; then
+            error_msg="Build failed with exit code $build_exit_code"
+          fi
+          echo "$error_msg" > /workspace/build_error_windows
           exit 1
         fi
         

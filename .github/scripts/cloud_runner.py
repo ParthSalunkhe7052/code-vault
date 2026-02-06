@@ -689,7 +689,8 @@ class CloudRunner:
             "--remove-output",
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--ccache",  # Enable ccache for faster C compilation on repeat builds
+            "--disable-dll-dependency-cache",  # Disable depends.exe which fails in Wine/Cloud Build
+            # "--ccache", # Removed: not supported in all Nuitka versions
             # "--show-progress", # Disabled to reduce CI log spam
         ]
 

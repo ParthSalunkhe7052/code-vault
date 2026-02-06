@@ -1,6 +1,11 @@
-import os
 import logging
-from config import ENVIRONMENT
+from config import (
+    ENVIRONMENT,
+    POLAR_ACCESS_TOKEN,
+    POLAR_WEBHOOK_SECRET,
+    POLAR_PRODUCT_PRO,
+    POLAR_PRODUCT_BUSINESS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +20,7 @@ def run_startup_checks():
     missing = []
 
     # 1. Polar Access Token (required for payment processing)
-    if not os.getenv("POLAR_ACCESS_TOKEN"):
+    if not POLAR_ACCESS_TOKEN:
         if ENVIRONMENT == "production":
             missing.append("POLAR_ACCESS_TOKEN")
         else:
@@ -24,16 +29,16 @@ def run_startup_checks():
             )
 
     # 2. Polar Webhook Secret (needed for webhook verification)
-    if not os.getenv("POLAR_WEBHOOK_SECRET"):
+    if not POLAR_WEBHOOK_SECRET:
         logger.warning(
             "POLAR_WEBHOOK_SECRET is missing. Polar webhook endpoints will reject incoming webhooks."
         )
 
     # 3. Polar Product IDs
-    if not os.getenv("POLAR_PRODUCT_PRO"):
+    if not POLAR_PRODUCT_PRO:
         logger.warning("POLAR_PRODUCT_PRO is not set. Pro plan checkout will not work.")
 
-    if not os.getenv("POLAR_PRODUCT_BUSINESS"):
+    if not POLAR_PRODUCT_BUSINESS:
         logger.warning(
             "POLAR_PRODUCT_BUSINESS is not set. Business plan checkout will not work."
         )
