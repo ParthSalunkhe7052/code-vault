@@ -126,8 +126,9 @@ if ENVIRONMENT == "production":
     if JWT_SECRET == "jwt-secret-change-in-production":
         config_issues.append("JWT_SECRET must be changed from default in production!")
     if not POLAR_WEBHOOK_SECRET:
-        config_issues.append(
-            "POLAR_WEBHOOK_SECRET must be set in production for secure webhooks!"
+        # Warn but don't block startup — webhook endpoint will reject unsigned payloads
+        print(
+            "[Config] WARNING: POLAR_WEBHOOK_SECRET is not set. Polar webhooks will be rejected until configured."
         )
 
     # Additional production security checks
