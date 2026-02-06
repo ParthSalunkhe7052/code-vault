@@ -169,6 +169,7 @@ class CloudBuildClient:
             "_CONFIG_URL": config_url,
             "_CALLBACK_URL": callback_url,
             "_OUTPUT_NAME": config.get("output_name", "app"),
+            "_DEBUG_BUILD": str(build_config.get("debug_build", "false")).lower(),
         }
 
         try:
