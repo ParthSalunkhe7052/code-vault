@@ -205,13 +205,21 @@ def _lw_check_gui_available():
         return False
 
 def _lw_get_hwid():
-    """Generate hardware ID."""
+    """Generate robust hardware ID."""
     try:
-        info = f"{_lw_platform.node()}|{_lw_platform.machine()}|{_lw_platform.processor()}"
+        import uuid as _lw_uuid
+        # Get stable machine identifier
+        mac = ":".join(re.findall("..", "%012x" % _lw_uuid.getnode()))
+        info = f"{_lw_platform.node()}|{_lw_platform.machine()}|{_lw_platform.processor()}|{mac}"
         return _lw_hash.sha256(info.encode()).hexdigest()[:32]
     except Exception as e:
-        print(f"[License Wrapper] Warning: Could not generate HWID: {e}")
-        return "unknown-hwid"
+        print(f"[License Wrapper] Warning: Could not generate robust HWID: {e}")
+        try:
+            # Fallback to standard info
+            info = f"{_lw_platform.node()}|{_lw_platform.machine()}|{_lw_platform.processor()}"
+            return _lw_hash.sha256(info.encode()).hexdigest()[:32]
+        except Exception:
+            return "unknown-hwid"
 
 def _lw_get_license_key_path():
     """Get path to license.key file next to the executable."""

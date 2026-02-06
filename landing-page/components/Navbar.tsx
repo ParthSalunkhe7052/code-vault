@@ -6,7 +6,7 @@ const Navbar: React.FC = () => {
   const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0B0C10]/80 backdrop-blur-md">
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0f1a]/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg">
@@ -36,7 +36,7 @@ const Navbar: React.FC = () => {
 
       {/* Mobile Menu */}
       {isOpen && (
-        <div className="md:hidden absolute top-16 left-0 right-0 bg-[#0B0C10] border-b border-white/10 p-6 flex flex-col gap-4">
+        <div className="md:hidden absolute top-16 left-0 right-0 bg-[#0a0f1a] border-b border-white/10 p-6 flex flex-col gap-4">
           <a href="#features" className="text-gray-400 hover:text-white">Features</a>
           <a href="#how-it-works" className="text-gray-400 hover:text-white">How it works</a>
           <a href="#pricing" className="text-gray-400 hover:text-white">Pricing</a>

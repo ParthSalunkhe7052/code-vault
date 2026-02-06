@@ -1,60 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Activity, Shield, Crown, Zap, Sparkles } from 'lucide-react';
-import { auth } from '../services/api';
+import { LogOut, Activity, Shield, Crown, Zap, Sparkles, LayoutDashboard, Box, Key, Webhook, Settings } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import backgroundMain from '../assets/background_main.png';
-import iconDashboard from '../assets/icon_dashboard.png';
-import iconProjects from '../assets/icon_projects.png';
-import iconKeys from '../assets/icon_keys.png';
-import iconWebhooks from '../assets/icon_webhooks.png';
-import iconSettings from '../assets/icon_settings.png';
 import GlobalBuildStatus from './GlobalBuildStatus';
 
 const Layout = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { user, isAdmin, logout } = useAuth();
     const { settings } = useSettings();
     const isDarkMatter = settings.theme === 'dark-matter';
 
-    const [user, setUser] = useState(null);
-
-    useEffect(() => {
-        const loadUser = async () => {
-            try {
-                const userData = await auth.getUser();
-                setUser(userData);
-            } catch (error) {
-                console.error('Failed to load user:', error);
-            }
-        };
-        loadUser();
-
-        const handleUserUpdate = () => loadUser();
-        window.addEventListener('user-updated', handleUserUpdate);
-        return () => window.removeEventListener('user-updated', handleUserUpdate);
-    }, []);
-
-    const isAdmin = user?.role === 'admin';
     const userPlan = user?.plan || 'free';
     const PlanIcon = userPlan === 'enterprise' ? Crown : userPlan === 'pro' ? Zap : Sparkles;
     const planColor = userPlan === 'enterprise' ? 'text-amber-400' : userPlan === 'pro' ? 'text-violet-400' : 'text-slate-400';
     const planBg = userPlan === 'enterprise' ? 'bg-amber-500/10 border-amber-500/20' : userPlan === 'pro' ? 'bg-violet-500/10 border-violet-500/20' : 'bg-slate-800 border-white/10';
 
     const handleLogout = async () => {
-        await auth.logout();
+        await logout();
         navigate('/login');
     };
 
-    // Modified Nav Items: Pricing moved above Settings
     const navItems = [
-        { path: '/', icon: iconDashboard, label: 'Dashboard', isImage: true },
-        { path: '/projects', icon: iconProjects, label: 'Projects', isImage: true },
-        { path: '/licenses', icon: iconKeys, label: 'Access Keys', isImage: true },
-        { path: '/webhooks', icon: iconWebhooks, label: 'Webhooks', isImage: true },
-        // Pricing manually added with an icon since we don't have an image asset for it
-        { path: '/pricing', icon: Crown, label: 'Pricing', isImage: false },
-        { path: '/settings', icon: iconSettings, label: 'Settings', isImage: true },
+        { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+        { path: '/projects', icon: Box, label: 'Projects' },
+        { path: '/licenses', icon: Key, label: 'Access Keys' },
+        { path: '/webhooks', icon: Webhook, label: 'Webhooks' },
+        { path: '/pricing', icon: Crown, label: 'Pricing' },
+        { path: '/settings', icon: Settings, label: 'Settings' },
     ];
 
     const primaryActiveClass = isDarkMatter
@@ -85,9 +60,7 @@ const Layout = () => {
                     <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--cv-text-muted)' }}>
                         Mission Control
                     </div>
-                    {navItems.map((item) => {
-                        const IconComponent = item.isImage ? null : item.icon;
-                        return (
+                    {navItems.map((item) => (
                         <NavLink
                             key={item.path}
                             to={item.path}
@@ -103,26 +76,15 @@ const Layout = () => {
                                 transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
                             })}
                         >
-                            {item.isImage ? (
-                                <img
-                                    src={item.icon}
-                                    alt={item.label}
-                                    className={`w-8 h-8 object-contain mix-blend-screen transition-opacity duration-150 ${location.pathname === item.path || (item.path === '/' && location.pathname === '/')
-                                        ? ''
-                                        : 'opacity-70 hover:opacity-100'
-                                        }`}
-                                />
-                            ) : (
-                                <div className="w-8 h-8 flex items-center justify-center">
-                                     <IconComponent size={20} />
-                                </div>
-                            )}
+                            <div className="w-8 h-8 flex items-center justify-center">
+                                 <item.icon size={20} />
+                            </div>
                             <span className="font-medium tracking-wide">{item.label}</span>
                             {(location.pathname === item.path || (item.path === '/' && location.pathname === '/')) && (
                                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full" style={{ backgroundColor: 'var(--cv-primary)', boxShadow: '0 0 6px var(--cv-primary-glow)' }} />
                             )}
                         </NavLink>
-                    )})}
+                    ))}
 
                     {isAdmin && (
                         <>

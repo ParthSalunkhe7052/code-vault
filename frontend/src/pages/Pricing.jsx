@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, X, Sparkles, Zap, Crown, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Check, X, Sparkles, Zap, Crown, ArrowRight, Loader2 } from 'lucide-react';
 import { usePricing, TIERS } from '../contexts/PricingContext';
 import { auth } from '../services/api';
 
@@ -91,10 +91,10 @@ const PricingTier = ({
 
 const Pricing = () => {
     const navigate = useNavigate();
-    const { tier: currentPlan, upgradeToPro, downgradeToFree } = usePricing();
+    const { tier: currentPlan, createCheckout } = usePricing();
     const [loading, setLoading] = useState('');
-    const [successMessage, setSuccessMessage] = useState('');
-    
+    const [errorMessage, setErrorMessage] = useState('');
+
     const isAuthenticated = auth.isAuthenticated();
 
     const handleSubscribe = async (targetTier) => {
@@ -103,24 +103,28 @@ const Pricing = () => {
             return;
         }
 
+        if (targetTier === TIERS.FREE) {
+            // Can't "subscribe" to free — they'd need to cancel via Polar portal
+            return;
+        }
+
         setLoading(targetTier);
-        
-        // Mock API call
-        setTimeout(() => {
-            if (targetTier === TIERS.PRO) {
-                upgradeToPro();
-                setSuccessMessage('🎉 Successfully upgraded to Pro!');
-            } else if (targetTier === TIERS.FREE) {
-                downgradeToFree();
-                setSuccessMessage('Downgraded to Free plan.');
-            }
+        setErrorMessage('');
+
+        try {
+            await createCheckout(targetTier);
+            // User will be redirected to Polar checkout
+        } catch (err) {
+            console.error('Checkout error:', err);
+            setErrorMessage('Failed to start checkout. Please try again.');
+        } finally {
             setLoading('');
-        }, 1000);
+        }
     };
 
     const tiers = [
         {
-            name: 'Hobbyist',
+            name: 'Free',
             price: 0,
             period: 'forever',
             description: 'For testing and small tools',
@@ -134,14 +138,14 @@ const Pricing = () => {
             ],
             limitations: [
                 'No Cloud Builds',
-                'Watermarked Splash Screen',
-                'No Offline Leases'
+                'No Node.js Support',
+                'No Analytics or Webhooks',
             ],
             tier: TIERS.FREE,
         },
         {
             name: 'Pro',
-            price: 29,
+            price: 15,
             period: 'month',
             description: 'For indie developers shipping apps',
             icon: Zap,
@@ -149,32 +153,30 @@ const Pricing = () => {
             popular: true,
             features: [
                 'Unlimited Projects',
-                '200 Active Licenses',
-                '10 Cloud Builds / mo',
-                'Offline Leases',
-                'No Splash Screen',
-                'Early Access Program'
+                '500 Active Licenses',
+                '25 Cloud Builds / month',
+                'Node.js Support',
+                'Analytics & Webhooks',
+                'No Branding / Splash Screen',
             ],
             tier: TIERS.PRO,
         },
         {
-            name: 'Enterprise',
-            price: 99,
+            name: 'Business',
+            price: 39,
             period: 'month',
-            description: 'For studios and scale',
+            description: 'For teams and studios at scale',
             icon: Crown,
             iconColor: 'from-amber-500 to-orange-500',
             features: [
                 'Unlimited Projects',
-                'Unlimited Licenses',
-                'Priority Cloud Builds',
-                'Team Access (RBAC)',
-                'Dedicated Support',
+                '5,000 Active Licenses',
+                '100 Cloud Builds / month',
+                '10 Team Seats',
+                'White Label Branding',
+                'Priority Support',
             ],
-            limitations: [
-                '$0.05 per user overage'
-            ],
-            tier: TIERS.ENTERPRISE,
+            tier: TIERS.BUSINESS,
         },
     ];
 
@@ -186,13 +188,13 @@ const Pricing = () => {
                         Simple, Transparent Pricing
                     </h1>
                     <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-                        Start for free, scale when you ship.
+                        Build once, distribute unlimited times with different license keys. Start free, scale when you ship.
                     </p>
                 </div>
 
-                {successMessage && (
-                    <div className="mb-8 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-center">
-                        <p className="text-emerald-400">{successMessage}</p>
+                {errorMessage && (
+                    <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
+                        <p className="text-red-400">{errorMessage}</p>
                     </div>
                 )}
 
@@ -208,7 +210,7 @@ const Pricing = () => {
                                 currentPlan === tier.tier
                                     ? 'Current Plan'
                                     : tier.tier === TIERS.FREE
-                                        ? 'Downgrade'
+                                        ? 'Free Forever'
                                         : 'Upgrade'
                             }
                         />
@@ -222,11 +224,19 @@ const Pricing = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <h3 className="text-lg font-semibold text-white mb-2">How does the Free tier work?</h3>
-                            <p className="text-slate-400 text-sm">You get 1 project and 50 licenses forever. Perfect for testing CodeVault.</p>
+                            <p className="text-slate-400 text-sm">You get 1 project and 50 licenses forever. Perfect for testing CodeVault before committing.</p>
                         </div>
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">What happens if I need more builds?</h3>
-                            <p className="text-slate-400 text-sm">Pro users get 10 builds/month. You can purchase add-on packs or upgrade to Enterprise for priority queue.</p>
+                            <h3 className="text-lg font-semibold text-white mb-2">What are Cloud Builds?</h3>
+                            <p className="text-slate-400 text-sm">Cloud builds compile your project on our servers so you don't need local compilers. Pro gets 25/month, Business gets 100/month.</p>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white mb-2">Can I cancel anytime?</h3>
+                            <p className="text-slate-400 text-sm">Yes. You can cancel from your Polar billing portal at any time. You'll keep access until the end of your billing period.</p>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white mb-2">What does "build once, distribute unlimited" mean?</h3>
+                            <p className="text-slate-400 text-sm">One cloud build produces a protected executable. You can then issue as many unique license keys as your plan allows to distribute it to different users.</p>
                         </div>
                     </div>
                 </div>

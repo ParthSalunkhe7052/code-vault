@@ -691,9 +691,9 @@ const ProjectWizard = ({
                                         <span className="text-indigo-400">/</span>
                                         {project?.name || 'Untitled Project'}
                                     </h2>
-                                    {configData.tier === 'enterprise' && (
+                                    {configData.tier === 'business' && (
                                         <span className="px-2 py-0.5 text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-full uppercase tracking-wider">
-                                            Enterprise
+                                            Business
                                         </span>
                                     )}
                                     {configData.tier === 'pro' && (

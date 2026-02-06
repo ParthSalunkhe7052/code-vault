@@ -223,16 +223,16 @@ def hash_api_key(api_key: str) -> str:
 
 def compute_signature(data: dict, secret: str) -> str:
     """Compute HMAC-SHA256 signature for license validation response.
-    
+
     Includes all critical fields to prevent tempering:
     status, expires_at, features, variables, client_nonce, server_nonce, timestamp, server_time.
     """
     import json
-    
+
     # Sort keys for consistent JSON representation of dicts/lists
     features_json = json.dumps(sorted(data.get("features", [])), sort_keys=True)
     variables_json = json.dumps(data.get("variables", {}), sort_keys=True)
-    
+
     message = "|".join(
         str(v)
         for v in [
@@ -340,11 +340,12 @@ def create_validation_response(
     server_nonce = generate_nonce()
     timestamp = int(time.time())
     server_time = timestamp  # Current server time for offline lease validation
-    
+
     # Use provided secret or fallback to global
     from config import SECRET_KEY
+
     active_secret = secret or SECRET_KEY
-    
+
     response_data = {
         "status": status,
         "expires_at": expires_at or "",
@@ -444,7 +445,7 @@ async def get_user_tier(user_id: str, conn) -> dict:
 
     return {
         "tier": tier,
-        "is_pro": tier in ["pro", "enterprise"],
-        "can_remove_branding": tier in ["pro", "enterprise"],
-        "can_custom_branding": tier == "enterprise",
+        "is_pro": tier in ["pro", "business"],
+        "can_remove_branding": tier in ["pro", "business"],
+        "can_custom_branding": tier == "business",
     }

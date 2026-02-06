@@ -16,7 +16,13 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from database import get_db, release_db
-from utils import get_current_user, safe_join, validate_project_id, SecurityError, get_user_tier
+from utils import (
+    get_current_user,
+    safe_join,
+    validate_project_id,
+    SecurityError,
+    get_user_tier,
+)
 from storage_service import LOCAL_UPLOAD_DIR as UPLOAD_DIR
 from config import LICENSE_SERVER_URL, CLI_VERSION
 from compilers import check_build_prerequisites, get_build_orchestrator, BuildConfig
@@ -30,6 +36,7 @@ router = APIRouter(prefix="/api/v1", tags=["build"])
 # =============================================================================
 
 compile_jobs_cache = {}
+
 
 async def cleanup_compile_cache():
     """Background task to remove completed jobs from cache after 1 hour."""
@@ -47,12 +54,15 @@ async def cleanup_compile_cache():
         if to_remove:
             logger.info(f"[Cache Cleanup] Removed {len(to_remove)} old compile jobs")
 
+
 # =============================================================================
 # Models
 # =============================================================================
 
+
 class InstallerBuildRequest(BaseModel):
     """Request for building an installer package"""
+
     project_name: str = Field(..., description="Name of the application")
     project_version: str = Field("1.0.0", description="Version string")
     publisher: str = Field("", description="Publisher name")
@@ -67,9 +77,11 @@ class InstallerBuildRequest(BaseModel):
     create_start_menu: bool = Field(True)
     output_dir: str = Field(..., description="Output directory for final build")
 
+
 # =============================================================================
 # Endpoints
 # =============================================================================
+
 
 @router.get("/build/prerequisites")
 async def get_build_prerequisites():
@@ -80,7 +92,11 @@ async def get_build_prerequisites():
 @router.post("/build/installer")
 async def build_installer(
     data: InstallerBuildRequest,
-    _rate_limit: None = Depends(RateLimitDependency(max_requests=3, window_seconds=300, prefix="build:installer")),
+    _rate_limit: None = Depends(
+        RateLimitDependency(
+            max_requests=3, window_seconds=300, prefix="build:installer"
+        )
+    ),
 ):
     """Start a professional Windows installer build job (async)."""
 
@@ -181,7 +197,9 @@ async def _run_installer_build_job(job_id: str, data: InstallerBuildRequest):
 
 
 @router.get("/build/installer/{job_id}/status")
-async def get_installer_build_status(job_id: str):
+async def get_installer_build_status(
+    job_id: str, user: dict = Depends(get_current_user)
+):
     """Get the status of an installer build job."""
     if job_id not in compile_jobs_cache:
         raise HTTPException(status_code=404, detail="Build job not found")
@@ -200,7 +218,7 @@ async def get_installer_build_status(job_id: str):
 
 
 @router.delete("/build/installer/{job_id}/cancel")
-async def cancel_installer_build(job_id: str):
+async def cancel_installer_build(job_id: str, user: dict = Depends(get_current_user)):
     """Cancel a running installer build job."""
     if job_id not in compile_jobs_cache:
         raise HTTPException(status_code=404, detail="Build job not found")
@@ -230,6 +248,7 @@ async def cancel_installer_build(job_id: str):
 # =============================================================================
 # CLI / Local Compilation Endpoints
 # =============================================================================
+
 
 @router.get("/cli/version")
 async def get_cli_version():
@@ -300,6 +319,7 @@ async def get_compile_config(
             ),
             "license_key": license_key,
             "server_url": server_url,
+            "signing_secret": project.get("signing_secret"),
             "nuitka_options": nuitka_options,
             "files": file_list,
             "is_multi_folder": settings.get("is_multi_folder", False),
@@ -344,7 +364,10 @@ async def get_build_bundle(
         # Debug: Log settings
         logger.debug(
             "[BUNDLE DEBUG] Project %s: Settings from DB=%s, skip_obfuscation=%s, enable_lease=%s",
-            project_id, settings, settings.get('skip_obfuscation'), settings.get('enable_lease')
+            project_id,
+            settings,
+            settings.get("skip_obfuscation"),
+            settings.get("enable_lease"),
         )
 
         language = (
@@ -392,6 +415,7 @@ async def get_build_bundle(
             "license_key": license_key,
             "api_url": api_url,
             "server_url": server_url,
+            "signing_secret": project.get("signing_secret"),
             "nuitka_options": settings.get("nuitka_options", {}),
             "pkg_options": settings.get("pkg_options", {}),
             "compiler_options": compiler_options,
@@ -410,7 +434,10 @@ async def get_build_bundle(
         # Debug: Log final config being written to bundle
         logger.debug(
             "[BUNDLE DEBUG] Final config for bundle: skip_obfuscation=%s, enable_lease=%s, show_branding=%s, tier=%s",
-            config['skip_obfuscation'], config['enable_lease'], config['show_branding'], config['tier']
+            config["skip_obfuscation"],
+            config["enable_lease"],
+            config["show_branding"],
+            config["tier"],
         )
 
         with tempfile.NamedTemporaryFile(

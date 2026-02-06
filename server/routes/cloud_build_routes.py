@@ -24,7 +24,13 @@ from datetime import datetime, timezone
 from database import get_db, release_db
 from storage_service import storage_service
 from utils import get_current_user, get_user_tier_limits, get_user_tier
-from config import GITHUB_TOKEN, GITHUB_REPO, BUILD_CALLBACK_SECRET, ENVIRONMENT
+from config import (
+    GITHUB_TOKEN,
+    GITHUB_REPO,
+    BUILD_CALLBACK_SECRET,
+    ENVIRONMENT,
+    GCP_PROJECT_ID,
+)
 from middleware.rate_limiter import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -325,7 +331,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path):
 
         # Trigger build via CLI wrapper
         logger.info(f"[CloudBuild] Triggering Cloud Build for {build_id}")
-        cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
+        cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
         result = cloud_build.trigger_build(build_config)
 
         # Store GCP Build ID in database (reuse github_run_id field for now)
@@ -375,17 +381,17 @@ async def start_cloud_build(
 
         # Platform restrictions based on tier
         if tier["tier"] == "free":
-            # Free tier: Windows & Linux only (macOS costs 10x GitHub minutes)
+            # Free tier: Windows & Linux only (macOS requires native runners)
             if "macos" in request.target_platforms:
                 raise HTTPException(
                     403,
-                    "macOS builds require Pro or Enterprise plan (10x compute cost). "
+                    "macOS builds require Pro or Business plan. "
                     "Upgrade or select Windows/Linux only.",
                 )
 
         # Credit System Enforcement
-        # Enterprise has unlimited builds (no credit deduction)
-        if tier["tier"] != "enterprise":
+        # Business has unlimited builds (no credit deduction)
+        if tier["tier"] != "business":
             from config import BUILD_COST_STANDARD
 
             cost = BUILD_COST_STANDARD
@@ -412,14 +418,14 @@ async def start_cloud_build(
                 user["id"],
             )
 
-        # Global concurrency limit (protect GitHub Actions quota)
+        # Global concurrency limit (protect Cloud Build quota)
         active_builds = await conn.fetchval("""
             SELECT COUNT(*) FROM cloud_builds 
             WHERE status IN ('pending', 'queued', 'running')
             AND created_at > NOW() - INTERVAL '2 hours'
         """)
 
-        MAX_CONCURRENT_BUILDS = 15  # Leave headroom for GitHub's 20-job limit
+        MAX_CONCURRENT_BUILDS = 15  # Cloud Build concurrent build limit
 
         if active_builds >= MAX_CONCURRENT_BUILDS:
             raise HTTPException(
@@ -549,7 +555,7 @@ async def start_cloud_build(
 
         # 5. Add to Queue (Priority based on Tier)
         priority = 10  # Default (Pro)
-        if tier["tier"] == "enterprise":
+        if tier["tier"] == "business":
             priority = 1
         elif tier["tier"] == "free":
             priority = 50
@@ -560,9 +566,9 @@ async def start_cloud_build(
         )
 
         return CloudBuildResponse(
-            build_id=build_id, 
-            status="pending", 
-            message=queue_result.get("message", "Cloud build queued.")
+            build_id=build_id,
+            status="pending",
+            message=queue_result.get("message", "Cloud build queued."),
         )
 
     finally:
@@ -571,7 +577,7 @@ async def start_cloud_build(
 
 @router.post("/webhook")
 async def build_webhook(request: Request):
-    """Callback from GitHub Actions - with retry logic for transient failures."""
+    """Callback from Cloud Build - with retry logic for transient failures."""
     if not await verify_webhook_signature(request):
         raise HTTPException(401, "Invalid signature")
 
@@ -815,7 +821,7 @@ async def scheduled_cloud_build_cleanup():
     Runs daily to delete old builds based on tier:
     - Free tier: 7 days retention
     - Pro tier: 30 days retention
-    - Enterprise: 90 days retention
+    - Business: 90 days retention
     """
     logger.info("[CloudBuild Cleanup] Starting scheduled cleanup task")
 
@@ -835,7 +841,7 @@ async def scheduled_cloud_build_cleanup():
                 AND (plan_tier = 'free' OR plan_tier IS NULL)
                 AND user_id NOT IN (
                     SELECT user_id FROM subscriptions 
-                    WHERE plan_tier IN ('pro', 'enterprise') AND status = 'active'
+                    WHERE plan_tier IN ('pro', 'business') AND status = 'active'
                 )
             """)
 
@@ -849,14 +855,14 @@ async def scheduled_cloud_build_cleanup():
                 AND plan_tier = 'pro'
             """)
 
-            # Enterprise tier: 90 days
+            # Business tier: 90 days
             await conn.execute("""
                 UPDATE cloud_builds 
                 SET deleted_at = NOW()
                 WHERE deleted_at IS NULL
                 AND created_at < NOW() - INTERVAL '90 days'
                 AND status IN ('completed', 'failed', 'cancelled')
-                AND plan_tier = 'enterprise'
+                AND plan_tier = 'business'
             """)
 
             # Delete orphaned artifacts from storage for deleted builds
@@ -1027,7 +1033,7 @@ async def get_build_status(
                 else:
                     from cloud_build_cli_wrapper import CloudBuildClient
 
-                cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
+                cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(build["github_run_id"])
 
                 # Map GCP status to our status
@@ -1179,7 +1185,7 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
             else:
                 from cloud_build_cli_wrapper import CloudBuildClient
 
-            cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
+            cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
             gcp_status = cloud_build.get_build_status(build["github_run_id"])
 
             real_gcp_status = gcp_status.get("status", "")
@@ -1273,7 +1279,7 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
                 else:
                     from cloud_build_cli_wrapper import CloudBuildClient
 
-                cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
+                cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(build["github_run_id"])
 
                 # If build already completed/failed in GCP, update DB to match
@@ -1343,7 +1349,7 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
                 else:
                     from cloud_build_cli_wrapper import CloudBuildClient
 
-                cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
+                cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 cloud_build.cancel_build(build["github_run_id"])
                 logger.info(
                     f"[CloudBuild] Successfully cancelled GCP Build {build['github_run_id']}"
@@ -1558,7 +1564,7 @@ async def get_build_history(
 
 @router.post("/webhook/progress")
 async def progress_webhook(request: Request):
-    """Receive progress updates from GitHub Actions."""
+    """Receive progress updates from Cloud Build."""
     if not await verify_webhook_signature(request):
         raise HTTPException(401, "Invalid signature")
 
@@ -1640,7 +1646,7 @@ _queue_processor_started = False
 
 
 async def add_to_queue(
-    build_id: str, config: dict, user_id: int, priority: int, project_id: str
+    build_id: str, config: dict, user_id: str, priority: int, project_id: str
 ):
     """Add a build to the Redis queue."""
     redis_client = await get_redis_client()
@@ -1679,73 +1685,81 @@ async def add_to_queue(
 
 async def process_build_queue():
     """Background task that processes builds from the queue."""
-    redis_client = await get_redis_client()
-    if not redis_client:
-        logger.warning("[Queue] Redis not available, queue processing disabled")
-        return
+    try:
+        redis_client = await get_redis_client()
+        if not redis_client:
+            logger.warning("[Queue] Redis not available, queue processing disabled")
+            return
 
-    queue_name = "cloud_build_queue"
-    logger.info("[Queue] Build queue processor started")
+        queue_name = "cloud_build_queue"
+        logger.info("[Queue] Build queue processor started")
 
-    while True:
-        try:
-            # Get highest priority item (lowest score)
-            items = await redis_client.zrange(queue_name, 0, 0, withscores=True)
+        while True:
+            try:
+                # Get highest priority item (lowest score)
+                items = await redis_client.zrange(queue_name, 0, 0, withscores=True)
 
-            if items:
-                queue_item_json, priority = items[0]
-                queue_item = json.loads(queue_item_json)
+                if items:
+                    queue_item_json, priority = items[0]
+                    queue_item = json.loads(queue_item_json)
 
-                build_id = queue_item["build_id"]
-                config = queue_item["config"]
-                project_id = queue_item["project_id"]
+                    build_id = queue_item["build_id"]
+                    config = queue_item["config"]
+                    project_id = queue_item["project_id"]
 
-                # Check if build is still pending
-                conn = await get_db()
-                try:
-                    build = await conn.fetchrow(
-                        "SELECT status FROM cloud_builds WHERE id = $1", build_id
-                    )
-
-                    if build and build["status"] == "pending":
-                        # Get source directory
-                        safe_project_dir = validate_safe_path(UPLOAD_DIR, project_id)
-                        source_dir = safe_project_dir / "source"
-
-                        if not source_dir.exists():
-                            projects_base = UPLOAD_DIR / "projects"
-                            safe_alt = validate_safe_path(projects_base, project_id)
-                            if (safe_alt / "source").exists():
-                                source_dir = safe_alt / "source"
-
-                        if source_dir.exists() and list(source_dir.iterdir()):
-                            # Trigger the build
-                            logger.info(
-                                f"[Queue] Processing build {build_id} (priority: {priority})"
-                            )
-                            await trigger_cloud_build(build_id, config, source_dir)
-                        else:
-                            logger.error(f"[Queue] Build {build_id} source not found")
-                            await conn.execute(
-                                "UPDATE cloud_builds SET status = 'failed', error_message = $1 WHERE id = $2",
-                                "Source files not found",
-                                build_id,
-                            )
-                    else:
-                        logger.info(
-                            f"[Queue] Build {build_id} already processed or cancelled"
+                    # Check if build is still pending
+                    conn = await get_db()
+                    try:
+                        build = await conn.fetchrow(
+                            "SELECT status FROM cloud_builds WHERE id = $1", build_id
                         )
-                finally:
-                    await release_db(conn)
 
-                # Remove from queue
-                await redis_client.zrem(queue_name, queue_item_json)
-            else:
-                # Queue empty - wait a bit
-                await asyncio.sleep(2)
-        except Exception as e:
-            logger.error(f"[Queue] Error processing queue: {e}")
-            await asyncio.sleep(5)
+                        if build and build["status"] == "pending":
+                            # Get source directory
+                            safe_project_dir = validate_safe_path(
+                                UPLOAD_DIR, project_id
+                            )
+                            source_dir = safe_project_dir / "source"
+
+                            if not source_dir.exists():
+                                projects_base = UPLOAD_DIR / "projects"
+                                safe_alt = validate_safe_path(projects_base, project_id)
+                                if (safe_alt / "source").exists():
+                                    source_dir = safe_alt / "source"
+
+                            if source_dir.exists() and list(source_dir.iterdir()):
+                                # Trigger the build
+                                logger.info(
+                                    f"[Queue] Processing build {build_id} (priority: {priority})"
+                                )
+                                await trigger_cloud_build(build_id, config, source_dir)
+                            else:
+                                logger.error(
+                                    f"[Queue] Build {build_id} source not found"
+                                )
+                                await conn.execute(
+                                    "UPDATE cloud_builds SET status = 'failed', error_message = $1 WHERE id = $2",
+                                    "Source files not found",
+                                    build_id,
+                                )
+                        else:
+                            logger.info(
+                                f"[Queue] Build {build_id} already processed or cancelled"
+                            )
+                    finally:
+                        await release_db(conn)
+
+                    # Remove from queue
+                    await redis_client.zrem(queue_name, queue_item_json)
+                else:
+                    # Queue empty - wait a bit
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"[Queue] Error processing queue: {e}")
+                await asyncio.sleep(5)
+    except Exception as e:
+        logger.error(f"[Queue] Fatal error in queue processor: {e}")
+        raise
 
 
 async def get_queue_position(build_id: str) -> Optional[int]:

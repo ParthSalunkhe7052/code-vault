@@ -36,7 +36,7 @@ const FeatureCard: React.FC<{
 
 const Features: React.FC = () => {
   return (
-    <section id="features" className="py-32 bg-[#0B0C10] relative">
+    <section id="features" className="py-32 bg-background relative">
       <div className="max-w-7xl mx-auto px-6">
         
         <div className="mb-24 md:text-center max-w-3xl mx-auto">
@@ -124,7 +124,7 @@ const Features: React.FC = () => {
              description="Your apps don't need constant internet. We issue cryptographically signed leases that allow applications to run offline for a configurable grace period (e.g., 7 days) while maintaining full control."
              icon={<Clock className="w-6 h-6 text-orange-400" />}
            >
-              <div className="absolute bottom-6 right-6 flex items-center gap-3 bg-[#0F1115] p-3 rounded-xl border border-white/10 shadow-xl">
+               <div className="absolute bottom-6 right-6 flex items-center gap-3 bg-surface p-3 rounded-xl border border-white/10 shadow-xl">
                  <div className="px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
                     <span className="text-xs font-medium text-green-400">Valid Lease</span>

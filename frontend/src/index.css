@@ -1,5 +1,5 @@
-/* Import Google Fonts - must be first */
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+/* Import Google Fonts - optimized for 2026 */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,12 +9,12 @@
    Theme Variables - Default Dark Theme
    ============================================================================= */
 :root {
-    /* Core colors - Default Theme (Indigo/Cyan) */
-    --cv-bg: #0a0f1a;
-    --cv-bg-secondary: #111827;
-    --cv-bg-elevated: #1f2937;
-    --cv-card: rgba(17, 24, 39, 0.92);
-    --cv-card-solid: #111827;
+    /* Core colors - Standardized Palette */
+    --cv-bg: #0B0C10;
+    --cv-bg-secondary: #0F1115;
+    --cv-bg-elevated: #16181D;
+    --cv-card: rgba(15, 17, 21, 0.92);
+    --cv-card-solid: #0F1115;
 
     /* Text colors */
     --cv-text: #e5e7eb;

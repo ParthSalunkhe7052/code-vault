@@ -169,6 +169,7 @@ async def get_admin_analytics(
 
 # ============== NEW ADMIN ENDPOINTS ==============
 
+
 @router.get("/revenue")
 async def get_revenue_analytics(user: dict = Depends(get_current_admin_user)):
     """Get revenue analytics - MRR, subscription breakdown, growth data."""
@@ -182,13 +183,13 @@ async def get_revenue_analytics(user: dict = Depends(get_current_admin_user)):
             GROUP BY plan_tier
         """)
 
-        # Calculate MRR (pro=$20, enterprise=$50)
+        # Calculate MRR (pro=$15, business=$39)
         mrr_result = await conn.fetchrow("""
             SELECT
-                COALESCE(SUM(CASE WHEN plan_tier = 'pro' THEN 20 ELSE 0 END), 0) +
-                COALESCE(SUM(CASE WHEN plan_tier = 'enterprise' THEN 50 ELSE 0 END), 0) as mrr,
+                COALESCE(SUM(CASE WHEN plan_tier = 'pro' THEN 15 ELSE 0 END), 0) +
+                COALESCE(SUM(CASE WHEN plan_tier = 'business' THEN 39 ELSE 0 END), 0) as mrr,
                 COUNT(*) FILTER (WHERE plan_tier = 'pro') as pro_count,
-                COUNT(*) FILTER (WHERE plan_tier = 'enterprise') as enterprise_count
+                COUNT(*) FILTER (WHERE plan_tier = 'business') as business_count
             FROM subscriptions
             WHERE status = 'active'
         """)
@@ -212,10 +213,16 @@ async def get_revenue_analytics(user: dict = Depends(get_current_admin_user)):
         return {
             "mrr": mrr_result["mrr"] if mrr_result else 0,
             "pro_subscribers": mrr_result["pro_count"] if mrr_result else 0,
-            "enterprise_subscribers": mrr_result["enterprise_count"] if mrr_result else 0,
+            "enterprise_subscribers": mrr_result["enterprise_count"]
+            if mrr_result
+            else 0,
             "tier_breakdown": [dict(r) for r in tier_breakdown],
             "subscription_history": [
-                {"date": r["date"].isoformat(), "tier": r["plan_tier"], "count": r["count"]}
+                {
+                    "date": r["date"].isoformat(),
+                    "tier": r["plan_tier"],
+                    "count": r["count"],
+                }
                 for r in subscription_history
             ],
             "users_by_plan": [dict(r) for r in users_by_plan],
@@ -269,7 +276,9 @@ async def get_system_health(user: dict = Depends(get_current_admin_user)):
                 {
                     "id": r["id"],
                     "message": r["error_message"][:200] if r["error_message"] else None,
-                    "timestamp": r["created_at"].isoformat() if r["created_at"] else None,
+                    "timestamp": r["created_at"].isoformat()
+                    if r["created_at"]
+                    else None,
                 }
                 for r in recent_errors
             ],
@@ -282,7 +291,9 @@ async def get_system_health(user: dict = Depends(get_current_admin_user)):
                 ),
             },
             "api_performance": {
-                "validations_last_hour": validation_stats["total_validations"] if validation_stats else 0,
+                "validations_last_hour": validation_stats["total_validations"]
+                if validation_stats
+                else 0,
             },
         }
     finally:
@@ -306,7 +317,10 @@ async def update_user_plan(
 ):
     """Admin: Change a user's subscription tier."""
     if data.plan not in ["free", "pro", "enterprise"]:
-        raise HTTPException(status_code=400, detail="Invalid plan tier. Must be 'free', 'pro', or 'enterprise'")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid plan tier. Must be 'free', 'pro', or 'enterprise'",
+        )
 
     conn = await get_db()
     try:
@@ -361,7 +375,9 @@ async def update_user_role(
 ):
     """Admin: Change a user's role."""
     if data.role not in ["user", "admin"]:
-        raise HTTPException(status_code=400, detail="Invalid role. Must be 'user' or 'admin'")
+        raise HTTPException(
+            status_code=400, detail="Invalid role. Must be 'user' or 'admin'"
+        )
 
     conn = await get_db()
     try:
@@ -396,7 +412,9 @@ async def ban_user(
     try:
         async with conn.transaction():
             # Verify user exists with role
-            user = await conn.fetchrow("SELECT id, email, role FROM users WHERE id = $1", user_id)
+            user = await conn.fetchrow(
+                "SELECT id, email, role FROM users WHERE id = $1", user_id
+            )
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Loader, Hammer, FolderOpen, CheckCircle, XCircle, AlertCircle, Download, Settings, ChevronDown, ChevronUp, FileText, Lock } from 'lucide-react';
 import { auth } from '../../services/api';
+import { useToast } from '../Toast';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -13,6 +14,7 @@ const DirectBuildSection = ({
     hasUploadedFiles = false,  // Whether files have been uploaded to server
     serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'  // Backend server URL
 }) => {
+    const toast = useToast();
     const [selectedLicense, setSelectedLicense] = useState('');
     const [outputDir, setOutputDir] = useState('');
     const [projectPath, setProjectPath] = useState('');
@@ -269,18 +271,18 @@ const DirectBuildSection = ({
                 console.error('Download failed:', error);
             }
             setDownloading(false);
-            alert(`Download failed: ${error}`);
+            toast.error(`Download failed: ${error}`);
         }
     };
 
     const handleBuild = () => {
         if (!entryFile) {
-            alert('Please select an entry file first');
+            toast.warning('Please select an entry file first');
             return;
         }
 
         if (!prerequisites.allReady) {
-            alert('Please ensure Python and Nuitka are installed');
+            toast.warning('Please ensure Python and Nuitka are installed');
             return;
         }
 

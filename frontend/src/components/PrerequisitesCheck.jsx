@@ -40,10 +40,10 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
                         runtime: { loading: false, ...nodeResult }
                     }));
                 } catch (e) {
-                    // Fallback: assume Node.js is installed if we can't check
+                    // Node.js check failed - mark as not installed
                     setStatus(prev => ({
                         ...prev,
-                        runtime: { loading: false, installed: true, version: 'detected', path: null }
+                        runtime: { loading: false, installed: false, version: null, path: null }
                     }));
                 }
 
@@ -100,6 +100,13 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
             });
         }
     }, [isNodeJS]);
+
+    // Auto-run checks when the modal opens
+    useEffect(() => {
+        if (isOpen) {
+            checkAll();
+        }
+    }, [isOpen, checkAll]);
 
     const installCompiler = useCallback(async () => {
         setInstalling('compiler');

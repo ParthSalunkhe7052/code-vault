@@ -12,8 +12,8 @@ _server_dir = Path(__file__).parent
 _project_root = _server_dir.parent
 _env_locations = [
     _project_root / "data" / ".env",  # Production: data/.env
-    _project_root / ".env",            # Development: project root .env
-    _server_dir / ".env",              # Fallback: server/.env
+    _project_root / ".env",  # Development: project root .env
+    _server_dir / ".env",  # Fallback: server/.env
 ]
 
 _env_loaded = False
@@ -45,16 +45,6 @@ CORS_ALLOW_ALL = os.getenv("CORS_ALLOW_ALL", "false").lower() == "true"
 
 # Environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-
-# =============================================================================
-# Load All Environment Variables FIRST (before validation)
-# =============================================================================
-
-# Security
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
-JWT_SECRET = os.getenv("JWT_SECRET", "jwt-secret-change-in-production")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
 
 # Redis (Upstash)
 UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
@@ -97,14 +87,16 @@ CLI_DOWNLOAD_URLS = {
     "linux": os.getenv("CLI_DOWNLOAD_LINUX", ""),
 }
 
-# Stripe Configuration
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Polar Payment Configuration
+POLAR_ACCESS_TOKEN = os.getenv("POLAR_ACCESS_TOKEN", "")
+POLAR_WEBHOOK_SECRET = os.getenv("POLAR_WEBHOOK_SECRET", "")
 
-# Stripe Price IDs
-STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "")
-STRIPE_PRICE_ENTERPRISE = os.getenv("STRIPE_PRICE_ENTERPRISE", "")
+# Polar Product IDs
+POLAR_PRODUCT_PRO = os.getenv("POLAR_PRODUCT_PRO", "")
+POLAR_PRODUCT_BUSINESS = os.getenv("POLAR_PRODUCT_BUSINESS", "")
+
+# Google Cloud Build
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "cloudbuild-486309")
 
 # =============================================================================
 # SECURITY VALIDATION (Startup Checks)
@@ -127,16 +119,12 @@ if not DATABASE_URL:
 # Validate secrets in production
 if ENVIRONMENT == "production":
     if SECRET_KEY == "dev-secret-key-change-in-production":
-        config_issues.append(
-            "SECRET_KEY must be changed from default in production!"
-        )
+        config_issues.append("SECRET_KEY must be changed from default in production!")
     if JWT_SECRET == "jwt-secret-change-in-production":
+        config_issues.append("JWT_SECRET must be changed from default in production!")
+    if not POLAR_WEBHOOK_SECRET:
         config_issues.append(
-            "JWT_SECRET must be changed from default in production!"
-        )
-    if not STRIPE_WEBHOOK_SECRET:
-        config_issues.append(
-            "STRIPE_WEBHOOK_SECRET must be set in production for secure webhooks!"
+            "POLAR_WEBHOOK_SECRET must be set in production for secure webhooks!"
         )
 
     # Additional production security checks
@@ -148,12 +136,14 @@ if ENVIRONMENT == "production":
 # Warn in development, fail in production
 if config_issues:
     if ENVIRONMENT == "production":
-        error_msg = "\n".join([
-            "CRITICAL CONFIGURATION ERRORS:",
-            *config_issues,
-            "",
-            "Server cannot start in production with these issues."
-        ])
+        error_msg = "\n".join(
+            [
+                "CRITICAL CONFIGURATION ERRORS:",
+                *config_issues,
+                "",
+                "Server cannot start in production with these issues.",
+            ]
+        )
         raise ValueError(error_msg)
     else:
         print("\n[Config] ⚠️  DEVELOPMENT MODE: Configuration warnings:")
@@ -166,7 +156,6 @@ print(f"[Config] Environment: {ENVIRONMENT}")
 
 # Build Credit Costs
 BUILD_COST_STANDARD = 1
-BUILD_COST_FAST = 0  # Free for now to encourage testing
 
 # Subscription Tier Limits
 # -1 means unlimited
@@ -187,27 +176,27 @@ TIER_LIMITS = {
     "pro": {
         "_tier_name": "Pro",
         "max_projects": -1,  # unlimited
-        "max_licenses_per_project": 5000, # Increased from 200
+        "max_licenses_per_project": 500,
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 25, # Increased from 10
+        "cloud_builds_per_month": 25,
         "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
         "team_seats": 1,
         "node_support": True,
     },
-    "enterprise": {
-        "_tier_name": "Enterprise",
+    "business": {
+        "_tier_name": "Business",
         "max_projects": -1,  # unlimited
-        "max_licenses_per_project": -1,  # unlimited
+        "max_licenses_per_project": 5000,
         "can_sell_licenses": True,
         "cloud_compilation": True,
-        "cloud_builds_per_month": 100,  # 100 credits
+        "cloud_builds_per_month": 100,
         "cloud_platforms": ["windows", "macos", "linux"],
         "analytics": True,
         "webhooks": True,
-        "team_seats": 10, # Increased from 5
+        "team_seats": 10,
         "white_labeling": True,
         "node_support": True,
     },
@@ -223,24 +212,24 @@ PRICING_CONFIG = {
     },
     "pro": {
         "name": "Pro",
-        "price": 15, # Reduced from 29
+        "price": 15,
         "currency": "USD",
-        "price_id": STRIPE_PRICE_PRO,
+        "product_id": POLAR_PRODUCT_PRO,
         "features": [
             "Unlimited Projects",
-            "5,000 Licenses",
+            "500 Licenses",
             "25 Cloud Builds/mo",
-            "Analytics",
-            "Node.js Support"
+            "Analytics & Webhooks",
+            "Node.js Support",
         ],
     },
-    "enterprise": {
-        "name": "Enterprise",
-        "price": 250, # Increased from 99
+    "business": {
+        "name": "Business",
+        "price": 39,
         "currency": "USD",
-        "price_id": STRIPE_PRICE_ENTERPRISE,
+        "product_id": POLAR_PRODUCT_BUSINESS,
         "features": [
-            "Unlimited Licenses",
+            "5,000 Licenses",
             "100 Cloud Builds/mo",
             "10 Team Seats (RBAC)",
             "Priority Support",

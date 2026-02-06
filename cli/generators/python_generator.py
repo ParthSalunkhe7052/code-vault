@@ -127,12 +127,13 @@ def validate_server_url(server_url: str) -> str:
         raise WrapperGenerationError(str(e))
 
 
-def get_python_wrapper(license_key: str, server_url: str, lease_enabled: bool = False, show_branding: bool = True) -> str:
+def get_python_wrapper(license_key: str, server_url: str, secret_key: str = "dev-secret-key", lease_enabled: bool = False, show_branding: bool = True) -> str:
     """Get Python license wrapper code.
 
     Args:
         license_key: The license key to embed (must be alphanumeric with hyphens)
         server_url: The server URL for validation (must be valid http/https URL)
+        secret_key: The signing secret for the project (default: dev-secret-key)
         lease_enabled: Whether offline lease mode is enabled (default: False)
         show_branding: Whether to show CodeVault branding splash (default: True for free tier)
 
@@ -149,6 +150,7 @@ def get_python_wrapper(license_key: str, server_url: str, lease_enabled: bool = 
     # Escape for safe embedding in Python string literals
     safe_license_key = escape_for_python_string(validated_license_key)
     safe_server_url = escape_for_python_string(validated_server_url)
+    safe_secret_key = escape_for_python_string(secret_key)
 
     # Build wrapper with optional branding
     wrapper_parts = []
@@ -160,6 +162,7 @@ def get_python_wrapper(license_key: str, server_url: str, lease_enabled: bool = 
     # Now safe to replace in template
     code = PYTHON_WRAPPER_TEMPLATE.replace("{license_key}", safe_license_key)
     code = code.replace("{server_url}", safe_server_url)
+    code = code.replace("{secret_key}", safe_secret_key)
     code = code.replace("{lease_enabled}", "True" if lease_enabled else "False")
     
     wrapper_parts.append(code)

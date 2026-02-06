@@ -11,6 +11,7 @@ import hmac
 import ipaddress
 import logging
 import socket
+import asyncio
 from typing import Optional, List
 from urllib.parse import urlparse
 
@@ -88,7 +89,7 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
 
     # Check .local TLD
     hostname_lower = hostname.lower()
-    if hostname_lower.endswith('.local'):
+    if hostname_lower.endswith(".local"):
         return False, "Webhook URL cannot target .local domains"
 
     # Check known dangerous hostnames
@@ -149,17 +150,22 @@ def validate_webhook_url_legacy(url: str) -> tuple[bool, str]:
         # It's a hostname, not an IP - try to resolve it
         try:
             # Resolve hostname to check if it points to a private IP
-            resolved_ips = socket.getaddrinfo(hostname, parsed.port or 443, socket.AF_UNSPEC)
+            resolved_ips = socket.getaddrinfo(
+                hostname, parsed.port or 443, socket.AF_UNSPEC
+            )
             for family, _, _, _, sockaddr in resolved_ips:
                 ip_str = sockaddr[0]
                 if is_private_ip(ip_str):
-                    return False, f"Webhook URL hostname resolves to private IP: {ip_str}"
+                    return (
+                        False,
+                        f"Webhook URL hostname resolves to private IP: {ip_str}",
+                    )
         except socket.gaierror:
             # Can't resolve - let it fail at request time
             pass
 
     # Block .local TLD explicitly
-    if hostname_lower.endswith('.local'):
+    if hostname_lower.endswith(".local"):
         return False, "Webhook URL cannot target .local domains"
 
     # Reasonable length limit
@@ -177,11 +183,101 @@ class WebhookUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+async def _deliver_webhook(
+    client: httpx.AsyncClient, webhook: dict, event: str, payload: dict, conn
+):
+    """Internal helper to deliver a single webhook and log results."""
+    webhook_id = webhook["id"]
+    url = webhook["url"]
+    secret = webhook["secret"]
+
+    # RE-VALIDATE immediately before making the HTTP request
+    is_valid, message = await validate_webhook_url(url)
+    if not is_valid:
+        logger.error(
+            f"[Webhook] Pre-request validation failed for {webhook_id}: {message}"
+        )
+        return
+
+    webhook_payload = {
+        "event": event,
+        "timestamp": utc_now().isoformat(),
+        "data": payload,
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        payload_str = json.dumps(webhook_payload, sort_keys=True)
+        signature = hmac.new(
+            secret.encode(), payload_str.encode(), hashlib.sha256
+        ).hexdigest()
+        headers["X-Webhook-Signature"] = signature
+
+    start_time = time.time()
+    delivery_id = secrets.token_hex(16)
+
+    try:
+        response = await client.post(url, json=webhook_payload, headers=headers)
+        delivery_time_ms = int((time.time() - start_time) * 1000)
+
+        success = 200 <= response.status_code < 300
+        await conn.execute(
+            """
+            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        """,
+            delivery_id,
+            webhook_id,
+            event,
+            json.dumps(webhook_payload),
+            response.status_code,
+            response.text[:1000] if response.text else None,
+            delivery_time_ms,
+            success,
+        )
+
+        if success:
+            await conn.execute(
+                "UPDATE webhooks SET last_triggered_at = NOW(), failure_count = 0 WHERE id = $1",
+                webhook_id,
+            )
+        else:
+            await conn.execute(
+                "UPDATE webhooks SET last_triggered_at = NOW(), failure_count = failure_count + 1 WHERE id = $1",
+                webhook_id,
+            )
+
+    except Exception as e:
+        delivery_time_ms = int((time.time() - start_time) * 1000)
+        await conn.execute(
+            """
+            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        """,
+            delivery_id,
+            webhook_id,
+            event,
+            json.dumps(webhook_payload),
+            0,
+            str(e)[:1000],
+            delivery_time_ms,
+            False,
+        )
+
+        await conn.execute(
+            "UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = $1",
+            webhook_id,
+        )
+        safe_url = sanitize_log_message(url)
+        safe_error = sanitize_log_message(str(e))
+        logger.error(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
+
+
 async def trigger_webhook(user_id: str, event: str, payload: dict):
     """
     Send webhook notifications for an event.
     Fetches all active webhooks for the user subscribed to this event,
-    sends HTTP POST requests, and logs delivery results.
+    sends HTTP POST requests in parallel, and logs delivery results.
     """
     conn = await get_db()
     try:
@@ -193,6 +289,7 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
             user_id,
         )
 
+        to_trigger = []
         for webhook in rows:
             events = webhook["events"]
             if isinstance(events, str):
@@ -201,105 +298,25 @@ async def trigger_webhook(user_id: str, event: str, payload: dict):
                 except Exception:
                     events = []
 
-            if event not in events:
-                continue
+            if event in events:
+                to_trigger.append(webhook)
 
-            webhook_id = webhook["id"]
-            url = webhook["url"]
-            secret = webhook["secret"]
+        if not to_trigger:
+            return
 
-            # RE-VALIDATE immediately before making the HTTP request
-            is_valid, message = await validate_webhook_url(url)
-            if not is_valid:
-                logger.error(f"[Webhook] Pre-request validation failed for {webhook_id}: {message}")
-                continue
-
-            webhook_payload = {
-                "event": event,
-                "timestamp": utc_now().isoformat(),
-                "data": payload,
-            }
-
-            headers = {"Content-Type": "application/json"}
-            if secret:
-                payload_str = json.dumps(webhook_payload, sort_keys=True)
-                signature = hmac.new(
-                    secret.encode(), payload_str.encode(), hashlib.sha256
-                ).hexdigest()
-                headers["X-Webhook-Signature"] = signature
-
-            start_time = time.time()
-            delivery_id = secrets.token_hex(16)
-
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(
-                        url, json=webhook_payload, headers=headers
-                    )
-                    delivery_time_ms = int((time.time() - start_time) * 1000)
-
-                    success = 200 <= response.status_code < 300
-                    await conn.execute(
-                        """
-                        INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-                    """,
-                        delivery_id,
-                        webhook_id,
-                        event,
-                        json.dumps(webhook_payload),
-                        response.status_code,
-                        response.text[:1000] if response.text else None,
-                        delivery_time_ms,
-                        success,
-                    )
-
-                    if success:
-                        await conn.execute(
-                            """
-                            UPDATE webhooks SET last_triggered_at = NOW(), failure_count = 0 WHERE id = $1
-                        """,
-                            webhook_id,
-                        )
-                    else:
-                        await conn.execute(
-                            """
-                            UPDATE webhooks SET last_triggered_at = NOW(), failure_count = failure_count + 1 WHERE id = $1
-                        """,
-                            webhook_id,
-                        )
-
-            except Exception as e:
-                delivery_time_ms = int((time.time() - start_time) * 1000)
-                await conn.execute(
-                    """
-                    INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-                """,
-                    delivery_id,
-                    webhook_id,
-                    event,
-                    json.dumps(webhook_payload),
-                    0,
-                    str(e)[:1000],
-                    delivery_time_ms,
-                    False,
-                )
-
-                await conn.execute(
-                    """
-                    UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = $1
-                """,
-                    webhook_id,
-                )
-                safe_url = sanitize_log_message(url)
-                safe_error = sanitize_log_message(str(e))
-                logger.error(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tasks = [
+                _deliver_webhook(client, webhook, event, payload, conn)
+                for webhook in to_trigger
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     except Exception as e:
         safe_event = sanitize_log_message(event)
         safe_error = sanitize_log_message(str(e))
-        logger.error(f"[Webhook] Error triggering webhooks for {safe_event}: {safe_error}")
+        logger.error(
+            f"[Webhook] Error triggering webhooks for {safe_event}: {safe_error}"
+        )
     finally:
         await release_db(conn)
 
@@ -502,7 +519,9 @@ async def update_webhook(
             params.append(webhook_id)
             # FIXED: Using parameterized query with whitelist validation
             # The param_count is already at the correct value after all additions
-            query = f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}"
+            query = (
+                f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}"
+            )
             await conn.execute(query, *params)
 
         return await get_webhook(webhook_id, user)
@@ -592,8 +611,12 @@ async def test_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
         # RE-VALIDATE immediately before making the HTTP request
         is_valid, message = await validate_webhook_url(url)
         if not is_valid:
-            logger.error(f"[Webhook Test] Pre-request validation failed for {webhook_id}: {message}")
-            raise HTTPException(status_code=400, detail=f"Webhook URL validation failed: {message}")
+            logger.error(
+                f"[Webhook Test] Pre-request validation failed for {webhook_id}: {message}"
+            )
+            raise HTTPException(
+                status_code=400, detail=f"Webhook URL validation failed: {message}"
+            )
 
         test_payload = {
             "event": "test",

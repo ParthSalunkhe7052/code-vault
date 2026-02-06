@@ -72,7 +72,7 @@ const ProjectCard = ({
             {buildStatus === 'running' && (
                 <div className="absolute inset-0 z-10 bg-gray-950/40 backdrop-blur-[1px] rounded-xl flex items-center justify-center animate-in fade-in duration-300">
                     <div className="bg-gray-900/90 p-3 px-5 rounded-xl border border-emerald-500/30 shadow-2xl shadow-emerald-500/10 flex items-center gap-3">
-                        <Loader size={18} className="text-emerald-400 animate-spin" />
+                        <Loader2 size={18} className="text-emerald-400 animate-spin" />
                         <div className="flex flex-col">
                             <span className="text-emerald-400 font-bold text-xs tracking-wider">BUILDING</span>
                             <span className="text-slate-400 text-[10px]">Click to view progress</span>

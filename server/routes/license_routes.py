@@ -34,14 +34,6 @@ from middleware.rate_limiter import license_validate_rate_limit
 router = APIRouter(prefix="/api/v1", tags=["Licenses"])
 
 
-# Import trigger_webhook from webhook_routes
-def _get_trigger_webhook():
-    """Lazy import to avoid circular dependency."""
-    from routes.webhook_routes import trigger_webhook
-
-    return trigger_webhook
-
-
 # GeoIP functions (import from geoip module when created, for now inline)
 _geoip_warned = False  # Module-level flag to avoid log spam
 
@@ -197,15 +189,34 @@ async def validate_license(
             # Check HWID binding
             license_id = license_row["id"]
             existing_binding = await conn.fetchrow(
-                "SELECT id FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
+                "SELECT id, is_active FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
                 license_id,
                 data.hwid,
             )
 
             if existing_binding:
+                # If machine was deactivated, check if we can reactivate it (limit check)
+                if not existing_binding["is_active"]:
+                    machine_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM hardware_bindings WHERE license_id = $1 AND is_active = TRUE",
+                        license_id,
+                    )
+                    if machine_count >= license_row["max_machines"]:
+                        log_data["result"] = "hwid_mismatch"
+                        asyncio.create_task(_push_validation_log_to_redis(log_data))
+                        return create_validation_response(
+                            "hwid_mismatch",
+                            f"Maximum machines ({license_row['max_machines']}) reached",
+                            data.nonce,
+                        )
+
+                # Update existing binding (reactivate if needed, always update IP)
                 await conn.execute(
-                    "UPDATE hardware_bindings SET last_seen_at = NOW(), machine_name = $1 WHERE id = $2",
+                    """UPDATE hardware_bindings 
+                       SET last_seen_at = NOW(), machine_name = $1, ip_address = $2, is_active = TRUE 
+                       WHERE id = $3""",
                     data.machine_name,
+                    client_ip,
                     existing_binding["id"],
                 )
             else:
@@ -224,8 +235,8 @@ async def validate_license(
 
                 await conn.execute(
                     """
-                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address, is_active)
+                    VALUES ($1, $2, $3, $4, $5, TRUE)
                 """,
                     secrets.token_hex(16),
                     license_id,
@@ -374,7 +385,7 @@ async def create_license(
                 data.features,
             )
 
-        trigger_webhook = _get_trigger_webhook()
+        from routes.webhook_routes import trigger_webhook
         asyncio.create_task(
             trigger_webhook(
                 user["id"],
@@ -440,7 +451,7 @@ async def revoke_license(license_id: str, user: dict = Depends(get_current_user)
         if result == "UPDATE 0":
             raise HTTPException(status_code=404, detail="License not found")
 
-        trigger_webhook = _get_trigger_webhook()
+        from routes.webhook_routes import trigger_webhook
         asyncio.create_task(
             trigger_webhook(
                 user["id"],
@@ -522,6 +533,19 @@ async def delete_binding(
 ):
     conn = await get_db()
     try:
+        # SECURITY FIX: Verify ownership before deletion
+        license_check = await conn.fetchrow(
+            """
+            SELECT l.id FROM licenses l 
+            JOIN projects p ON l.project_id = p.id 
+            WHERE l.id = $1 AND p.user_id = $2
+        """,
+            license_id,
+            user["id"],
+        )
+        if not license_check:
+            raise HTTPException(status_code=404, detail="License not found or access denied")
+
         await conn.execute(
             "DELETE FROM hardware_bindings WHERE id = $1 AND license_id = $2",
             binding_id,
@@ -586,7 +610,7 @@ async def reset_hwid(
         )
 
         # Trigger webhook
-        trigger_webhook = _get_trigger_webhook()
+        from routes.webhook_routes import trigger_webhook
         asyncio.create_task(
             trigger_webhook(
                 user["id"],

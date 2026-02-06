@@ -527,7 +527,7 @@ steps:
             error_msg=""
           fi
           
-          payload_linux='{"build_id":"'"${_BUILD_ID}"'","platform":"linux","status":"'"${linux_status}"'","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
+          payload_linux='{"build_id":"'"${_BUILD_ID}"'","platform":"linux","status":"'"${linux_status}"'","download_key":"builds/'"${_BUILD_ID}"'/linux/'"${_OUTPUT_NAME}"'-linux.tar.gz","filename":"'"${_OUTPUT_NAME}"'-linux.tar.gz","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
           sig_linux=$(echo -n "$payload_linux" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $2}')
           
           curl -sf -X POST "${_CALLBACK_URL}" \
@@ -546,7 +546,7 @@ steps:
             error_msg=""
           fi
           
-          payload_windows='{"build_id":"'"${_BUILD_ID}"'","platform":"windows","status":"'"${windows_status}"'","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
+          payload_windows='{"build_id":"'"${_BUILD_ID}"'","platform":"windows","status":"'"${windows_status}"'","download_key":"builds/'"${_BUILD_ID}"'/windows/'"${_OUTPUT_NAME}"'-windows.zip","filename":"'"${_OUTPUT_NAME}"'-windows.zip","error":"'"${error_msg}"'","timestamp":'"$(date +%s)"',"cloud_build_id":"'"${BUILD_ID}"'"}'
           sig_windows=$(echo -n "$payload_windows" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $2}')
           
           curl -sf -X POST "${_CALLBACK_URL}" \

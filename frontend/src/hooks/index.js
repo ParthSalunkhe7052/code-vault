@@ -8,7 +8,7 @@
  */
 
 export { default as useDebounce } from './useDebounce';
-export { useConfirmDialog, ConfirmDialogProvider } from './useConfirmDialog';
+export { default as useConfirmDialog } from './useConfirmDialog';
 export {
   useKeyboardShortcuts,
   useKeyboardShortcut,

@@ -243,7 +243,7 @@ class CloudBuildClient:
 
 def example_usage():
     """
-    Example: How to use this in your Digital Ocean backend
+    Example: How to use this in your backend
     """
 
     # Initialize client (one-time setup)

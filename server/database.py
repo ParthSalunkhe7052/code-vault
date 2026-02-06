@@ -39,12 +39,12 @@ async def init_database():
     # Increased max_size for better concurrency under Enterprise load
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=2,
-        max_size=20,
+        min_size=5,
+        max_size=50,
         timeout=30,
         command_timeout=60
     )
-    print(f"[Database] Pool initialized (min_size=2, max_size=20)")
+    print(f"[Database] Pool initialized (min_size=5, max_size=50)")
 
 
 async def close_database():

@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import re
 
+
 # =============================================================================
 # Logging Filter to reduce /status endpoint spam
 # =============================================================================
@@ -41,6 +42,7 @@ logging.getLogger("uvicorn.access").addFilter(BuildStatusEndpointFilter())
 # Security Headers Middleware
 # =============================================================================
 
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses."""
 
@@ -49,7 +51,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # HSTS - Force HTTPS (only in production)
         if ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains; preload"
+            )
 
         # Prevent MIME sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -109,7 +113,9 @@ async def app_lifespan(app: FastAPI):
     # Initialize rate limiter with Redis
     if REDIS_URL:
         await init_rate_limiter(REDIS_URL)
-        logging.getLogger(__name__).info("[Startup] Rate limiter initialized with Redis")
+        logging.getLogger(__name__).info(
+            "[Startup] Rate limiter initialized with Redis"
+        )
     else:
         logging.getLogger(__name__).warning(
             "[Startup] REDIS_URL not configured - rate limiting disabled"
@@ -173,7 +179,7 @@ else:
 # Include Route Modules
 # =============================================================================
 
-from routes.stripe_routes import router as stripe_router
+from routes.polar_routes import router as polar_router
 from routes.auth_routes import router as auth_router
 from routes.webhook_routes import router as webhook_router
 from routes.license_routes import router as license_router
@@ -184,7 +190,7 @@ from routes.build_routes import router as build_router
 from routes.cloud_build_routes import router as cloud_build_router
 from routes.system_routes import router as system_router
 
-app.include_router(stripe_router)
+app.include_router(polar_router)
 app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(license_router)
@@ -195,18 +201,17 @@ app.include_router(build_router)
 app.include_router(cloud_build_router)
 app.include_router(system_router)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
     from email_service import email_service
     from storage_service import storage_service
 
-    separator = '=' * 60
-    print(f'\n{separator}\n  License-Wrapper API Server ({ENVIRONMENT})\n{separator}')
-    print('  Database: PostgreSQL')
-    storage_type = 'Cloudflare R2' if storage_service.is_cloud_enabled() else 'Local'
-    print(f'  Storage: {storage_type}')
-    email_status = 'Enabled' if email_service.is_configured() else 'Disabled'
-    print(f'  Email: {email_status}')
-    print(f'  API Docs: http://localhost:8000/docs\n{separator}\n')
-    uvicorn.run(app, host='0.0.0.0', port=8000)
-
+    separator = "=" * 60
+    print(f"\n{separator}\n  License-Wrapper API Server ({ENVIRONMENT})\n{separator}")
+    print("  Database: PostgreSQL")
+    storage_type = "Cloudflare R2" if storage_service.is_cloud_enabled() else "Local"
+    print(f"  Storage: {storage_type}")
+    email_status = "Enabled" if email_service.is_configured() else "Disabled"
+    print(f"  Email: {email_status}")
+    print(f"  API Docs: http://localhost:8000/docs\n{separator}\n")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,5 +1,5 @@
 import React, { useState, memo } from 'react';
-import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key, Play } from 'lucide-react';
+import { Hammer, FileCode, Terminal, Shield, CheckCircle, Loader2, AlertCircle, FolderOpen, Download, Square, XCircle, Copy, Check, ExternalLink, Package, Key, Play } from 'lucide-react';
 import { CloudBuildButton } from '../../CloudBuildButton';
 import PlatformSelector from '../PlatformSelector';
 import BuildHistory from '../BuildHistory';
@@ -67,14 +67,22 @@ const Step5Build = ({
         }
     };
 
+    // Pre-computed Tailwind class maps (dynamic template literals don't work with JIT)
+    const statusColorClasses = {
+        emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        red: 'bg-red-500/10 text-red-400 border-red-500/20',
+        amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+        indigo: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+        slate: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+    };
+
     const isNodeJS = project?.language === 'nodejs';
     const projectId = project?.id || '<project-id>';
 
-    // CLI Commands - using local path since not published to PyPI yet
-    const installStep1 = 'cd CodeVaultV1\\cli';
-    const installStep2 = 'pip install -e .';
-    const loginCmd = 'python lw_compiler.py login';
-    const buildCmd = `python lw_compiler.py build ${projectId}`;
+    // CLI Commands
+    const installStep1 = 'pip install codevault-cli';
+    const loginCmd = 'codevault login';
+    const buildCmd = `codevault build ${projectId}`;
 
     // Render CLI Setup Guide for Web Mode (non-Tauri)
     const renderWebModeGuide = () => (
@@ -152,7 +160,7 @@ const Step5Build = ({
                     <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-white mb-1">Install the CLI Tool</h3>
                         <p className="text-sm text-slate-400 mb-3">
-                            Open your terminal and navigate to the CLI folder, then install:
+                            Open your terminal and install the CodeVault CLI:
                         </p>
                         <div className="space-y-2">
                             <div className="relative">
@@ -171,25 +179,9 @@ const Step5Build = ({
                                     )}
                                 </button>
                             </div>
-                            <div className="relative">
-                                <div className="bg-black/40 rounded-lg p-3 font-mono text-sm text-emerald-400 pr-12">
-                                    {installStep2}
-                                </div>
-                                <button
-                                    onClick={() => copyToClipboard(installStep2, 'install2')}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg transition-colors"
-                                    title="Copy command"
-                                >
-                                    {copiedStep === 'install2' ? (
-                                        <Check size={18} className="text-emerald-400" />
-                                    ) : (
-                                        <Copy size={18} className="text-slate-400" />
-                                    )}
-                                </button>
-                            </div>
                         </div>
                         <p className="text-xs text-slate-500 mt-2">
-                            ⚡ This only needs to be done once. Stay in the cli folder for the next steps.
+                            This only needs to be done once.
                         </p>
                     </div>
                 </div>
@@ -413,7 +405,7 @@ const Step5Build = ({
                         >
                             {isBuilding ? (
                                 <>
-                                    <Loader size={24} className="animate-spin" />
+                                    <Loader2 size={24} className="animate-spin" />
                                     Compiling...
                                 </>
                             ) : (
@@ -438,8 +430,8 @@ const Step5Build = ({
                     </h3>
                     <div className="flex items-center gap-3">
                          {buildStatus && buildStatus !== 'idle' && (
-                            <span className={`flex items-center gap-2 text-xs font-bold px-2 py-1 rounded bg-${getStatusColor()}-500/10 text-${getStatusColor()}-400 border border-${getStatusColor()}-500/20 uppercase`}>
-                                {buildStatus === 'running' && <Loader size={12} className="animate-spin" />}
+                            <span className={`flex items-center gap-2 text-xs font-bold px-2 py-1 rounded ${statusColorClasses[getStatusColor()]} uppercase`}>
+                                {buildStatus === 'running' && <Loader2 size={12} className="animate-spin" />}
                                 {buildStatus}
                             </span>
                          )}
@@ -451,7 +443,7 @@ const Step5Build = ({
                     <div className="mx-4 mt-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-start gap-3">
                             <div className="p-2 bg-indigo-500/20 rounded-lg shrink-0">
-                                <Loader size={20} className="text-indigo-400 animate-spin" />
+                                <Loader2 size={20} className="text-indigo-400 animate-spin" />
                             </div>
                             <div>
                                 <h4 className="font-bold text-white mb-1">Build in Progress</h4>

@@ -274,7 +274,7 @@ const Step4License = memo(({
                      <div className="flex items-center gap-4 text-sm text-slate-400">
                         <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">!</div>
                         <p>
-                            Users will enjoy <span className="text-white font-bold">{demoDuration < 60 ? `${demoDuration} minutes` : `${demoDuration/60} hours`}</span> of full access. 
+                            Users will enjoy <span className="text-white font-bold">{demoDuration < 60 ? `${demoDuration} minutes` : demoDuration < 1440 ? `${Math.round(demoDuration/60)} hours` : `${Math.round(demoDuration/1440)} days`}</span> of full access. 
                             When the timer hits zero, the app locks instantly and requests a purchased license key.
                         </p>
                      </div>

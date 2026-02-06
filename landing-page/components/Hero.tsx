@@ -2,15 +2,15 @@ import React from 'react';
 import { ArrowRight, Terminal } from 'lucide-react';
 
 const Hero: React.FC = () => {
-  const APP_URL = "https://codevault.parth7.me";
+  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-[#0B0C10]">
+    <div className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-background">
       
       {/* Optimized Background - CSS Radial Gradients (Cheap on GPU) */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[80%] h-[60%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-[#0B0C10]/0 to-[#0B0C10]/0 opacity-70"></div>
-        <div className="absolute bottom-[-10%] left-1/2 -translate-x-1/2 w-[60%] h-[40%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/20 via-[#0B0C10]/0 to-[#0B0C10]/0 opacity-50"></div>
+        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[80%] h-[60%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent opacity-70"></div>
+        <div className="absolute bottom-[-10%] left-1/2 -translate-x-1/2 w-[60%] h-[40%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/20 via-transparent to-transparent opacity-50"></div>
         {/* Grid Pattern Overlay */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
       </div>
@@ -31,8 +31,8 @@ const Hero: React.FC = () => {
 
         {/* Subheading */}
         <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed animate-slide-up [animation-delay:100ms]">
-          Transform your scripts into native machine code via Nuitka. 
-          Implement bank-grade security, HWID locking, and offline leases in minutes.
+          Compile to native machine code via Nuitka. Add HWID locking, offline leases, and license management.
+          Build once, distribute unlimited times with unique license keys.
         </p>
 
         {/* CTA Buttons */}
@@ -42,14 +42,14 @@ const Hero: React.FC = () => {
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </a>
           
-          <button className="group inline-flex h-12 items-center justify-center rounded-full border border-white/10 bg-white/5 px-8 font-medium text-white transition-all hover:bg-white/10 backdrop-blur-sm">
+          <a href="#how-it-works" className="group inline-flex h-12 items-center justify-center rounded-full border border-white/10 bg-white/5 px-8 font-medium text-white transition-all hover:bg-white/10 backdrop-blur-sm">
             <Terminal className="mr-2 w-4 h-4 text-gray-400" />
-            <span>Read Documentation</span>
-          </button>
+            <span>See How It Works</span>
+          </a>
         </div>
 
         {/* Code/Terminal Preview */}
-        <div className="relative w-full max-w-4xl mx-auto mt-10 rounded-xl overflow-hidden border border-white/10 shadow-2xl bg-[#0F1115] animate-slide-up [animation-delay:300ms]">
+        <div className="relative w-full max-w-4xl mx-auto mt-10 rounded-xl overflow-hidden border border-white/10 shadow-2xl bg-surface animate-slide-up [animation-delay:300ms]">
            <div className="flex items-center px-4 py-3 bg-[#16181D] border-b border-white/5">
               <div className="flex gap-2">
                  <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50"></div>
@@ -80,7 +80,7 @@ const Hero: React.FC = () => {
            </div>
            
            {/* Overlay Gradient for Fade */}
-           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-[#0B0C10]/20 to-transparent"></div>
+           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/20 to-transparent"></div>
         </div>
 
       </div>

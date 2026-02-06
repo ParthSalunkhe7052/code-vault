@@ -299,7 +299,8 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         branding_status = "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
-        wrapper = get_python_wrapper(license_key, server_url, lease_enabled, show_branding)
+        secret_key = config.get("signing_secret") or "dev-secret-key"
+        wrapper = get_python_wrapper(license_key, server_url, secret_key, lease_enabled, show_branding)
         entry_file.write_text(wrapper + original_code, encoding="utf-8")
         print(f"[BUILD] Injected wrapper into: {entry_file.name}", flush=True)
         return True

@@ -240,13 +240,11 @@ export const admin = {
     banUser: (userId) => api.post(`/admin/users/${userId}/ban`).then(res => res.data),
 };
 
-// Stripe/Subscription API
+// Polar/Subscription API
 export const subscription = {
     getStatus: () => api.get('/subscription/status').then(res => res.data),
-    createCheckoutSession: (priceId, successUrl, cancelUrl) =>
-        api.post('/stripe/create-checkout-session', { price_id: priceId, success_url: successUrl, cancel_url: cancelUrl }).then(res => res.data),
-    createCustomerPortal: (returnUrl) =>
-        api.post('/stripe/create-customer-portal', { return_url: returnUrl }).then(res => res.data),
+    createCheckout: (productId) =>
+        api.post('/polar/create-checkout', { product_id: productId }).then(res => res.data),
 };
 
 // Public Store API (no auth required) - uses different base URL

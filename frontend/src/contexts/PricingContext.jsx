@@ -1,12 +1,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { auth } from '../services/api';
+import { auth, subscription } from '../services/api';
 
 const PricingContext = createContext();
 
 export const TIERS = {
   FREE: 'free',
   PRO: 'pro',
-  ENTERPRISE: 'enterprise'
+  BUSINESS: 'business'
+};
+
+// Polar product IDs (must match backend config)
+export const POLAR_PRODUCTS = {
+  [TIERS.PRO]: 'ea01dbfb-e163-4a4a-9c6d-bb9e0892bcb5',
+  [TIERS.BUSINESS]: 'd5781651-cff8-44ed-8a3c-7cf42a6512f5',
 };
 
 // Default limits (fallback only - real limits come from backend)
@@ -20,15 +26,15 @@ const DEFAULT_LIMITS = {
   },
   [TIERS.PRO]: {
     maxProjects: Infinity,
-    maxLicenses: 200,
-    buildCredits: 10,
+    maxLicenses: 500,
+    buildCredits: 25,
     canCloudBuild: true,
     offlineLease: true
   },
-  [TIERS.ENTERPRISE]: {
+  [TIERS.BUSINESS]: {
     maxProjects: Infinity,
-    maxLicenses: Infinity,
-    buildCredits: Infinity,
+    maxLicenses: 5000,
+    buildCredits: 100,
     canCloudBuild: true,
     offlineLease: true
   }
@@ -106,6 +112,49 @@ export const PricingProvider = ({ children }) => {
     setTier(TIERS.FREE);
   };
 
+  /**
+   * Create a Polar checkout session and redirect the user.
+   * @param {string} targetTier - TIERS.PRO or TIERS.BUSINESS
+   * @returns {Promise<string>} checkout URL
+   */
+  const createCheckout = async (targetTier) => {
+    const productId = POLAR_PRODUCTS[targetTier];
+    if (!productId) throw new Error(`No product ID for tier: ${targetTier}`);
+
+    const data = await subscription.createCheckout(productId);
+    if (data.checkout_url) {
+      window.location.href = data.checkout_url;
+    }
+    return data.checkout_url;
+  };
+
+  /**
+   * Refresh pricing data from backend (e.g. after returning from checkout).
+   */
+  const refreshPricing = async () => {
+    try {
+      const status = await subscription.getStatus();
+      if (status) {
+        setTier(status.tier || TIERS.FREE);
+        setBuildCredits(status.usage?.build_credits_remaining ?? 0);
+        if (status.limits) {
+          setLimits({
+            maxProjects: status.limits.max_projects === -1 ? Infinity : status.limits.max_projects,
+            maxLicenses: status.limits.max_licenses === -1 ? Infinity : status.limits.max_licenses,
+            buildCredits: status.limits.cloud_builds_per_month === -1 ? Infinity : status.limits.cloud_builds_per_month,
+            canCloudBuild: status.limits.can_cloud_build ?? (status.tier !== TIERS.FREE),
+            offlineLease: status.tier !== TIERS.FREE,
+            analytics: status.limits.analytics,
+            webhooks: status.limits.webhooks,
+            nodeSupport: status.limits.node_support,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Pricing] Failed to refresh pricing data', err);
+    }
+  };
+
   const canCreateProject = (currentCount) => {
     return currentCount < limits.maxProjects;
   };
@@ -138,6 +187,8 @@ export const PricingProvider = ({ children }) => {
       loading,
       upgradeToPro,
       downgradeToFree,
+      createCheckout,
+      refreshPricing,
       canCreateProject,
       canCreateLicense,
       hasBuildCredits,

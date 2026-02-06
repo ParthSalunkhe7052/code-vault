@@ -23,8 +23,8 @@ resend>=0.7.0
 # Environment
 python-dotenv>=1.0.0
 
-# Payments (Stripe)
-stripe>=7.0.0
+# Payments (Polar)
+polar-sdk>=0.1.0
 
 # Geolocation (Mission Control Map)
 geoip2>=4.8.0

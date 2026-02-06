@@ -91,10 +91,8 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
         active_machines_rows = await conn.fetch(
             """
             SELECT DISTINCT ON (hb.hwid)
-                hb.hwid, hb.machine_name, hb.last_seen_at,
-                l.license_key, l.client_name,
-                (SELECT vl.ip_address FROM validation_logs vl 
-                 WHERE vl.license_id = l.id ORDER BY vl.created_at DESC LIMIT 1) as ip_address
+                hb.hwid, hb.machine_name, hb.last_seen_at, hb.ip_address,
+                l.license_key, l.client_name
             FROM hardware_bindings hb
             JOIN licenses l ON hb.license_id = l.id 
             JOIN projects p ON l.project_id = p.id
