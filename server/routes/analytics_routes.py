@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends
 
 from utils import get_current_user, utc_now
 from database import get_db, release_db
-from middleware.tier_enforcement import requires_feature
 
 router = APIRouter(prefix="/api/v1", tags=["Analytics"])
 

@@ -12,7 +12,6 @@ from typing import Optional, List, Dict
 import logging
 import os
 import json
-import httpx
 import hmac
 import hashlib
 import secrets
@@ -23,10 +22,8 @@ from datetime import datetime, timezone
 
 from database import get_db, release_db
 from storage_service import storage_service
-from utils import get_current_user, get_user_tier_limits, get_user_tier
+from utils import get_current_user, get_user_tier
 from config import (
-    GITHUB_TOKEN,
-    GITHUB_REPO,
     BUILD_CALLBACK_SECRET,
     ENVIRONMENT,
     GCP_PROJECT_ID,
@@ -177,10 +174,6 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
     Cache invalidation ensures new files are always used.
     """
     import shutil
-
-    # Get project_id from source_dir path
-    # source_dir = /uploads/{project_id}/source
-    project_id = source_dir.parent.name
 
     # Create new zip (always fresh, no caching to avoid stale files)
     zip_path = source_dir.parent / f"source_{build_id}.zip"
@@ -1222,7 +1215,7 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
                 )
 
                 return {
-                    "message": f"Status synced from Cloud Build",
+                    "message": "Status synced from Cloud Build",
                     "previous_status": build["status"],
                     "current_status": db_status,
                     "cloud_status": real_gcp_status,

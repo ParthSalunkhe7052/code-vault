@@ -342,7 +342,6 @@ def create_validation_response(
     server_time = timestamp  # Current server time for offline lease validation
 
     # Use provided secret or fallback to global
-    from config import SECRET_KEY
 
     active_secret = secret or SECRET_KEY
 

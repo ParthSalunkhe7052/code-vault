@@ -11,7 +11,6 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
-from starlette.concurrency import run_in_threadpool
 
 from models import (
     LicenseValidationRequest,

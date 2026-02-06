@@ -753,8 +753,6 @@ async def handle_subscription_canceled(event_data: dict, conn):
         )
         return
 
-    polar_subscription_id = event_data.get("id")
-
     # Mark as canceled but keep the current tier until period ends
     await conn.execute(
         """

@@ -216,7 +216,6 @@ async def regenerate_api_key_endpoint(
 async def get_user_limits(user: dict = Depends(get_current_user)):
     """Get current user's tier limits from the backend (single source of truth)."""
     from utils import get_user_tier_limits
-    from config import TIER_LIMITS
 
     conn = await get_db()
     try:
