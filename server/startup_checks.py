@@ -23,14 +23,11 @@ def run_startup_checks():
                 "POLAR_ACCESS_TOKEN is missing. Payment processing will not work."
             )
 
-    # 2. Polar Webhook Secret (Critical for security)
+    # 2. Polar Webhook Secret (needed for webhook verification)
     if not os.getenv("POLAR_WEBHOOK_SECRET"):
-        if ENVIRONMENT == "production":
-            missing.append("POLAR_WEBHOOK_SECRET")
-        else:
-            logger.warning(
-                "POLAR_WEBHOOK_SECRET is missing. Webhook signatures will not be verified in dev mode."
-            )
+        logger.warning(
+            "POLAR_WEBHOOK_SECRET is missing. Polar webhook endpoints will reject incoming webhooks."
+        )
 
     # 3. Polar Product IDs
     if not os.getenv("POLAR_PRODUCT_PRO"):
