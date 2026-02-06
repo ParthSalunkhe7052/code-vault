@@ -6,7 +6,7 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { cloudBuild } from '../services/api';
+import { cloudBuild, auth } from '../services/api';
 
 const BuildContext = createContext(null);
 const STORAGE_KEY = 'cv_active_builds';
@@ -32,8 +32,7 @@ export function BuildProvider({ children }) {
 
             try {
                 // Check if user is authenticated - skip sync if not logged in
-                const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-                if (!token) {
+                if (!auth.isAuthenticated()) {
                     console.log('[BuildContext] User not authenticated, skipping build sync');
                     return;
                 }
@@ -129,10 +128,11 @@ export function BuildProvider({ children }) {
         if (import.meta.env.VITE_API_URL) {
              const apiUrl = new URL(import.meta.env.VITE_API_URL);
              wsUrl = `${apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${apiUrl.host}/api/v1/cloud-build/ws/${buildId}`;
-        } else {
-             // Fallback default
-             wsUrl = `wss://api.codevault.parth7.me/api/v1/cloud-build/ws/${buildId}`;
-        }
+         } else {
+              // Fallback: use current page host (works in both dev and prod)
+              const fallbackProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+              wsUrl = `${fallbackProtocol}//${window.location.host}/api/v1/cloud-build/ws/${buildId}`;
+         }
 
         console.log(`[BuildWS] Connecting to ${wsUrl}`);
         const ws = new WebSocket(wsUrl);

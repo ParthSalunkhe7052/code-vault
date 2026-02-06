@@ -30,6 +30,9 @@ if not _env_loaded:
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Heroku uses postgres:// but asyncpg requires postgresql://
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")

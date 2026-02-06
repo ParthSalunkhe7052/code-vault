@@ -14,9 +14,9 @@ const Layout = () => {
     const isDarkMatter = settings.theme === 'dark-matter';
 
     const userPlan = user?.plan || 'free';
-    const PlanIcon = userPlan === 'enterprise' ? Crown : userPlan === 'pro' ? Zap : Sparkles;
-    const planColor = userPlan === 'enterprise' ? 'text-amber-400' : userPlan === 'pro' ? 'text-violet-400' : 'text-slate-400';
-    const planBg = userPlan === 'enterprise' ? 'bg-amber-500/10 border-amber-500/20' : userPlan === 'pro' ? 'bg-violet-500/10 border-violet-500/20' : 'bg-slate-800 border-white/10';
+    const PlanIcon = userPlan === 'business' ? Crown : userPlan === 'pro' ? Zap : Sparkles;
+    const planColor = userPlan === 'business' ? 'text-amber-400' : userPlan === 'pro' ? 'text-violet-400' : 'text-slate-400';
+    const planBg = userPlan === 'business' ? 'bg-amber-500/10 border-amber-500/20' : userPlan === 'pro' ? 'bg-violet-500/10 border-violet-500/20' : 'bg-slate-800 border-white/10';
 
     const handleLogout = async () => {
         await logout();

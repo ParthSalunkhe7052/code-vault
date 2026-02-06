@@ -14,27 +14,31 @@ def run_startup_checks():
 
     missing = []
 
-    # 1. Stripe Secrets
-    if not os.getenv("STRIPE_SECRET_KEY"):
-        missing.append("STRIPE_SECRET_KEY")
-
-    # 2. Webhook Secret (Critical for security)
-    if not os.getenv("STRIPE_WEBHOOK_SECRET"):
+    # 1. Polar Access Token (required for payment processing)
+    if not os.getenv("POLAR_ACCESS_TOKEN"):
         if ENVIRONMENT == "production":
-            missing.append("STRIPE_WEBHOOK_SECRET")
+            missing.append("POLAR_ACCESS_TOKEN")
         else:
             logger.warning(
-                "STRIPE_WEBHOOK_SECRET is missing. Webhooks signatures might not be verified properly in dev mode."
+                "POLAR_ACCESS_TOKEN is missing. Payment processing will not work."
             )
 
-    # 3. Price IDs
-    if not os.getenv("STRIPE_PRICE_PRO"):
-        # Warning only, might not have Pro plan
-        logger.warning("STRIPE_PRICE_PRO is not set. Pro plan might not work.")
+    # 2. Polar Webhook Secret (Critical for security)
+    if not os.getenv("POLAR_WEBHOOK_SECRET"):
+        if ENVIRONMENT == "production":
+            missing.append("POLAR_WEBHOOK_SECRET")
+        else:
+            logger.warning(
+                "POLAR_WEBHOOK_SECRET is missing. Webhook signatures will not be verified in dev mode."
+            )
 
-    if not os.getenv("STRIPE_PRICE_ENTERPRISE"):
+    # 3. Polar Product IDs
+    if not os.getenv("POLAR_PRODUCT_PRO"):
+        logger.warning("POLAR_PRODUCT_PRO is not set. Pro plan checkout will not work.")
+
+    if not os.getenv("POLAR_PRODUCT_BUSINESS"):
         logger.warning(
-            "STRIPE_PRICE_ENTERPRISE is not set. Enterprise plan might not work."
+            "POLAR_PRODUCT_BUSINESS is not set. Business plan checkout will not work."
         )
 
     if missing:

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { auth, subscription } from '../services/api';
+import api, { auth, subscription } from '../services/api';
 
 const PricingContext = createContext();
 
@@ -57,15 +57,11 @@ export const PricingProvider = ({ children }) => {
           const userPlan = user.plan || TIERS.FREE;
           setTier(userPlan);
           
-          // Fetch actual limits from backend
+          // Fetch actual limits from backend (uses api instance which auto-attaches auth header)
           try {
-            const response = await fetch('/api/v1/auth/limits', {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-              }
-            });
-            if (response.ok) {
-              const backendLimits = await response.json();
+            const response = await api.get('/auth/limits');
+            if (response.status === 200) {
+              const backendLimits = response.data;
               setLimits({
                 maxProjects: backendLimits.max_projects === -1 ? Infinity : backendLimits.max_projects,
                 maxLicenses: backendLimits.max_licenses_per_project === -1 ? Infinity : backendLimits.max_licenses_per_project,

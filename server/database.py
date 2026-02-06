@@ -36,15 +36,31 @@ async def init_database():
         raise Exception("DATABASE_URL not set")
 
     # Configure connection pool
-    # Increased max_size for better concurrency under Enterprise load
+    # Pool sizes configurable via env vars for different deployment targets
+    # Heroku basic Postgres allows 20 connections; Neon free tier allows 100
+    pool_min = int(os.getenv("DB_POOL_MIN_SIZE", "3"))
+    pool_max = int(os.getenv("DB_POOL_MAX_SIZE", "20"))
+
+    # Heroku Postgres requires SSL
+    ssl_mode = os.getenv("DB_SSL", "")
+    pool_kwargs = {}
+    if ssl_mode == "require" or "sslmode=require" in DATABASE_URL:
+        import ssl as ssl_module
+
+        ssl_ctx = ssl_module.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl_module.CERT_NONE
+        pool_kwargs["ssl"] = ssl_ctx
+
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=5,
-        max_size=50,
+        min_size=pool_min,
+        max_size=pool_max,
         timeout=30,
-        command_timeout=60
+        command_timeout=60,
+        **pool_kwargs,
     )
-    print(f"[Database] Pool initialized (min_size=5, max_size=50)")
+    print(f"[Database] Pool initialized (min_size={pool_min}, max_size={pool_max})")
 
 
 async def close_database():

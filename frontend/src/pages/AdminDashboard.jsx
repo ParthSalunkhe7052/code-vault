@@ -142,7 +142,7 @@ const AdminDashboard = () => {
     const PLAN_COLORS = {
         free: '#64748b',
         pro: '#8b5cf6',
-        enterprise: '#f59e0b',
+        business: '#f59e0b',
     };
 
     if (loading) return (
@@ -334,14 +334,14 @@ const AdminDashboard = () => {
                             value={revenue?.pro_subscribers || 0}
                             icon={Zap}
                             color="from-violet-500 to-violet-600"
-                            subtitle="$20/month each"
+                            subtitle="$15/month each"
                         />
                         <StatCard
-                            title="Enterprise Subscribers"
-                            value={revenue?.enterprise_subscribers || 0}
+                            title="Business Subscribers"
+                            value={revenue?.business_subscribers || 0}
                             icon={Crown}
                             color="from-amber-500 to-amber-600"
-                            subtitle="$50/month each"
+                            subtitle="$39/month each"
                         />
                     </div>
 
@@ -457,13 +457,13 @@ const AdminDashboard = () => {
                                                 onChange={(e) => handleUpdatePlan(user.id, e.target.value)}
                                                 disabled={actionLoading === user.id || user.role === 'banned'}
                                                 className={`px-2 py-1 text-xs font-medium rounded bg-slate-700 border border-slate-600 cursor-pointer ${
-                                                    user.plan === 'enterprise' ? 'text-amber-400' :
+                                                    user.plan === 'business' ? 'text-amber-400' :
                                                     user.plan === 'pro' ? 'text-violet-400' : 'text-slate-300'
                                                 } disabled:opacity-50`}
                                             >
                                                 <option value="free">Free</option>
                                                 <option value="pro">Pro</option>
-                                                <option value="enterprise">Enterprise</option>
+                                                <option value="business">Business</option>
                                             </select>
                                         </td>
                                         <td className="p-4 text-sm text-slate-300">{user.project_count}</td>
