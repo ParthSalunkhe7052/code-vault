@@ -34,4 +34,17 @@ def test_no_hardcoded_secrets_in_env_example():
         with open(env_example, "r") as f:
             content = f.read()
             # Simple heuristic: if it looks like a real key, fail
-            assert "sk_live_" not in content, "Found potential live Stripe key in .env.example"
+            assert "sk_live_" not in content, "Found potential live key in .env.example"
+            assert "polar_live_" not in content, "Found potential live Polar key in .env.example"
+
+
+def test_frontend_has_signup_route():
+    """
+    Ensure /signup is routed in the frontend app.
+    """
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    app_file = os.path.join(base_dir, "frontend", "src", "App.jsx")
+    assert os.path.exists(app_file), "Missing frontend App.jsx"
+    with open(app_file, "r") as f:
+        content = f.read()
+        assert 'path="/signup"' in content or "path='/signup'" in content

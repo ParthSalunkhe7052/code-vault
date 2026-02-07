@@ -131,6 +131,14 @@ if ENVIRONMENT == "production":
             "[Config] WARNING: POLAR_WEBHOOK_SECRET is not set. Polar webhooks will be rejected until configured."
         )
 
+    # Validate Redis is configured in production for rate limiting
+    if not REDIS_URL:
+        config_issues.append(
+            "REDIS_URL not configured. Rate limiting and webhook retries will not work in production!"
+        )
+        print("[Config] CRITICAL: Redis not configured in production environment!")
+        print("[Config] Rate limiting and webhook retry functionality are DISABLED.")
+
     # Additional production security checks
     if CORS_ALLOW_ALL:
         config_issues.append(

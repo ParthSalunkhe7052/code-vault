@@ -64,7 +64,7 @@ END $$;
 -- =============================================================================
 UPDATE tier_limits SET cloud_builds_per_month = 0 WHERE tier = 'free';
 UPDATE tier_limits SET cloud_builds_per_month = 10 WHERE tier = 'pro';
-UPDATE tier_limits SET cloud_builds_per_month = -1 WHERE tier = 'enterprise';  -- unlimited
+UPDATE tier_limits SET cloud_builds_per_month = -1 WHERE tier = 'business';  -- unlimited
 
 -- =============================================================================
 -- 5. Add cloud_compilation boolean to tier_limits if missing
@@ -81,7 +81,7 @@ END $$;
 
 UPDATE tier_limits SET cloud_compilation = FALSE WHERE tier = 'free';
 UPDATE tier_limits SET cloud_compilation = TRUE WHERE tier = 'pro';
-UPDATE tier_limits SET cloud_compilation = TRUE WHERE tier = 'enterprise';
+UPDATE tier_limits SET cloud_compilation = TRUE WHERE tier = 'business';
 
 -- =============================================================================
 -- Migration complete

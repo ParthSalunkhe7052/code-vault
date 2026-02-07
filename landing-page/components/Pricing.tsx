@@ -106,13 +106,16 @@ const Pricing: React.FC = () => {
             ctaLink={`${APP_URL}/signup`}
             ctaLabel="Subscribe"
             features={[
-              { text: "Everything in Pro", included: true },
+              { text: "Unlimited Projects", included: true },
               { text: "5,000 Licenses", included: true },
               { text: "100 Cloud Builds/mo", included: true },
               { text: "10 Team Seats", included: true },
+              { text: "All Pro Features", included: true },
+              { text: "Node.js Support", included: true },
+              { text: "Offline Crypto Leases", included: true },
+              { text: "Advanced Nuitka Compilation", included: true },
+              { text: "Analytics & Webhooks", included: true },
               { text: "White-labeling (Custom Splash)", included: true },
-              { text: "Dedicated Build Runners", included: true },
-              { text: "SLA Agreement", included: true },
               { text: "Priority Support", included: true },
             ]}
           />
@@ -125,7 +128,7 @@ const Pricing: React.FC = () => {
             <div>
               <h4 className="text-white font-medium mb-2">What are cloud builds?</h4>
               <p className="text-sm text-gray-400 leading-relaxed">
-                Cloud builds let you compile your application for Windows, macOS, and Linux from the dashboard without needing each OS locally. Each compilation counts as one build credit.
+                Cloud builds let you compile your application for Windows and Linux from the dashboard without needing each OS locally. Each compilation counts as one build credit.
               </p>
             </div>
             <div>
@@ -138,6 +141,35 @@ const Pricing: React.FC = () => {
               <h4 className="text-white font-medium mb-2">Can I cancel anytime?</h4>
               <p className="text-sm text-gray-400 leading-relaxed">
                 Yes. You can cancel your subscription at any time. Your plan will remain active until the end of the current billing period, then downgrade to Free.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-white font-medium mb-2">How does hardware locking work?</h4>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Hardware locking binds licenses to specific devices using unique hardware identifiers (CPU, motherboard, disk serial numbers). 
+                Each license can be bound to a limited number of machines. Users can request license resets if they change hardware.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-white font-medium mb-2">Is my data safe?</h4>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Yes. We use industry-standard encryption for data at rest and in transit. Your source code is never stored on our servers - 
+                only compiled binaries. All data is backed up daily and stored in secure, SOC 2 compliant data centers.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-white font-medium mb-2">Do you offer refunds?</h4>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Yes. We offer a 14-day money-back guarantee for all paid plans. If you're not satisfied with CodeVault for any reason, 
+                contact support within 14 days of your purchase for a full refund, no questions asked.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-white font-medium mb-2">What happens when a license expires?</h4>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                When a license expires, the application will no longer run. Users will see a license expired message. 
+                You can set up grace periods and renewal reminders. Offline leases continue to work until their configured 
+                expiration date (up to 30 days after the main license expires).
               </p>
             </div>
           </div>

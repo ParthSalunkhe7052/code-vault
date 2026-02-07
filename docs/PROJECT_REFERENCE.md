@@ -1,4 +1,4 @@
-# CodeVault - Project Reference
+﻿# CodeVault - Project Reference
 
 > **Last Updated:** December 24, 2025  
 > **Purpose:** Single source of truth for AI agents and developers  
@@ -6,23 +6,23 @@
 
 ---
 
-## 📋 Quick Reference
+##  Quick Reference
 
 ### Project Status
 
 | Component | Status | Completion |
 |-----------|--------|------------|
-| License Core Module | ✅ Complete | 100% |
-| CLI Tool | ✅ Complete | 100% |
-| Backend API Server | ✅ Complete | 100% |
-| Frontend Dashboard | ✅ Complete | 95% |
-| Nuitka Compilation (Python) | ✅ Complete | 100% |
-| Node.js Compilation (pkg) | ✅ Complete | 90% |
-| Security Features | ✅ Complete | 95% |
-| Email Notifications | ✅ Complete | 100% |
-| Cloud Storage (R2) | ✅ Complete | 100% |
-| Tauri Desktop App | ✅ Complete | 90% |
-| Docker Infrastructure | ❌ Not Implemented | 0% |
+| License Core Module |  Complete | 100% |
+| CLI Tool |  Complete | 100% |
+| Backend API Server |  Complete | 100% |
+| Frontend Dashboard |  Complete | 95% |
+| Nuitka Compilation (Python) |  Complete | 100% |
+| Node.js Compilation (pkg) |  Complete | 90% |
+| Security Features |  Complete | 95% |
+| Email Notifications |  Complete | 100% |
+| Cloud Storage (R2/GCS) |  Complete | 100% |
+| Tauri Desktop App |  Complete | 90% |
+| Docker Infrastructure |  Not Implemented | 0% |
 
 ### Tech Stack
 
@@ -34,12 +34,12 @@
 | **UI Icons** | Custom PNG icons |
 | **Database** | SQLite (dev) / PostgreSQL (prod) |
 | **Cache** | Redis (optional) |
-| **Storage** | Local uploads (dev) / Cloudflare R2 (prod) |
+| **Storage** | Local uploads (dev) / Cloudflare R2 (source uploads) / GCS (build artifacts) |
 | **Email** | Resend / SMTP |
 
 ---
 
-## 🚀 How to Run
+##  How to Run
 
 ### Quick Start (Windows)
 
@@ -74,77 +74,77 @@ npm run dev
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 Code Vault/                         # YOUR ROOT DIRECTORY
-├── .agent/                         # AI workflows (NOT pushed to git)
-│   ├── memory/                     # Agent context files
-│   │   ├── activeContext.md        # Current task state
-│   │   └── techContext.md          # Tech stack constraints
-│   └── workflows/
-│       ├── architect.md            # Feature planning agent
-│       ├── builder.md              # ⭐ Main building agent
-│       ├── doctor.md               # Bug fixing agent
-│       ├── inspector.md            # Code review agent
-│       └── reality-check.md        # Market research agent
-│
-├── artifacts/                      # Task tracking (NOT pushed to git)
-│   ├── bugs/                       # Bug tracking files
-│   ├── features/                   # Feature implementation plans
-│   └── inspections/                # Code review reports
-│
-├── docs/                           # Documentation
-│   ├── PROJECT_DOCUMENTATION.md    # Full documentation
-│   ├── PROJECT_REFERENCE.md        # This file
-│   └── inspections/                # Inspection reports
-│
-├── CodeVaultV1/                    # ⭐ MAIN PROJECT (PUSH THIS TO GIT)
-│   ├── cli/                        # CLI compiler tool
-│   │   ├── lw_compiler.py          # Main CLI (Python + Node.js builds)
-│   │   ├── lw-compiler.bat         # Windows launcher
-│   │   ├── wrappers.py             # License wrapper code generators
-│   │   └── README.md
-│   ├── frontend/                   # React dashboard
-│   │   └── src/
-│   │       ├── components/         # UI components
-│   │       ├── pages/              # Page components
-│   │       └── services/           # API client
-│   ├── server/                     # FastAPI backend
-│   │   ├── main.py                 # Core endpoints
-│   │   ├── routes/                 # Route modules (auth, license, etc.)
-│   │   ├── compilers/              # Build orchestrator, Node.js compiler
-│   │   ├── email_service.py
-│   │   ├── storage_service.py
-│   │   └── uploads/                # Uploaded project files
-│   ├── src-tauri/                  # Tauri desktop app (Rust)
-│   ├── tests/                      # Pytest tests
-│   ├── pyproject.toml
-│   ├── requirements.txt
-│   └── make_admin.py
-│
-├── .env                            # Environment variables (NOT in git)
-├── .env.example                    # Template for .env
-├── venv/                           # Python venv (NOT pushed to git)
-├── Make Admin.bat                  # Helper scripts
-├── Reset Password.bat
-└── Run Desktop App.bat             # ⭐ Main launcher
+ .agent/                         # AI workflows (NOT pushed to git)
+    memory/                     # Agent context files
+       activeContext.md        # Current task state
+       techContext.md          # Tech stack constraints
+    workflows/
+        architect.md            # Feature planning agent
+        builder.md              #  Main building agent
+        doctor.md               # Bug fixing agent
+        inspector.md            # Code review agent
+        reality-check.md        # Market research agent
+
+ artifacts/                      # Task tracking (NOT pushed to git)
+    bugs/                       # Bug tracking files
+    features/                   # Feature implementation plans
+    inspections/                # Code review reports
+
+ docs/                           # Documentation
+    PROJECT_DOCUMENTATION.md    # Full documentation
+    PROJECT_REFERENCE.md        # This file
+    inspections/                # Inspection reports
+
+ CodeVaultV1/                    #  MAIN PROJECT (PUSH THIS TO GIT)
+    cli/                        # CLI compiler tool
+       lw_compiler.py          # Main CLI (Python + Node.js builds)
+       lw-compiler.bat         # Windows launcher
+       wrappers.py             # License wrapper code generators
+       README.md
+    frontend/                   # React dashboard
+       src/
+           components/         # UI components
+           pages/              # Page components
+           services/           # API client
+    server/                     # FastAPI backend
+       main.py                 # Core endpoints
+       routes/                 # Route modules (auth, license, etc.)
+       compilers/              # Build orchestrator, Node.js compiler
+       email_service.py
+       storage_service.py
+       uploads/                # Uploaded project files
+    src-tauri/                  # Tauri desktop app (Rust)
+    tests/                      # Pytest tests
+    pyproject.toml
+    requirements.txt
+    make_admin.py
+
+ .env                            # Environment variables (NOT in git)
+ .env.example                    # Template for .env
+ venv/                           # Python venv (NOT pushed to git)
+ Make Admin.bat                  # Helper scripts
+ Reset Password.bat
+ Run Desktop App.bat             #  Main launcher
 ```
 
-## 🔐 Security: Sensitive Data Location
+##  Security: Sensitive Data Location
 
 All sensitive data is stored at root level:
 
 | Data | Location | In Git? |
 |------|----------|---------|
-| API Keys | `.env` | ❌ NO |
-| Template | `.env.example` | ✅ YES |
-| Database | `data/codevault.db` | ❌ NO |
-| venv | `venv/` | ❌ NO |
+| API Keys | `.env` |  NO |
+| Template | `.env.example` |  YES |
+| Database | `data/codevault.db` |  NO |
+| venv | `venv/` |  NO |
 
 ---
 
-## 🎨 Frontend Details
+##  Frontend Details
 
 ### Sidebar Navigation
 
@@ -155,7 +155,7 @@ All sensitive data is stored at root level:
 | `/licenses` | Access Keys | `icon_keys.png` |
 | `/webhooks` | Webhooks | `icon_webhooks.png` |
 | `/settings` | Settings | `icon_settings.png` |
-| `/billing` | Billing | (Stripe integration) |
+| `/billing` | Billing | (Polar integration) |
 
 ### Color Palette
 
@@ -169,7 +169,7 @@ All sensitive data is stored at root level:
 
 ---
 
-## 🔐 API Endpoints
+##  API Endpoints
 
 ### Authentication
 
@@ -207,7 +207,7 @@ All sensitive data is stored at root level:
 
 ---
 
-## ⚙️ Environment Variables
+##  Environment Variables
 
 Copy `.env.example` to `.env` and configure:
 
@@ -232,19 +232,21 @@ R2_SECRET_ACCESS_KEY=...
 R2_BUCKET_NAME=...
 R2_ENDPOINT=...
 
-# Billing (Stripe)
-STRIPE_SECRET_KEY=sk_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+Note: Cloud Build artifacts are stored in GCS (bucket: `codevault-builds`) as configured in `cloudbuild.yaml`.
+
+# Billing (Polar)
+Polar_SECRET_KEY=sk_...
+Polar_WEBHOOK_SECRET=whsec_...
 ```
 
 ---
 
-## 🤖 AI Agent Workflows
+##  AI Agent Workflows
 
 | Command | Agent | Purpose |
 |---------|-------|---------|
 | `/architect` | Feature Architect | Plans features before coding |
-| `/builder` | ⭐ **The Builder** | Main agent for implementation |
+| `/builder` |  **The Builder** | Main agent for implementation |
 | `/doctor` | Code Doctor | Fixes bugs, optimizes code |
 | `/inspector` | Code Inspector | Reviews code, creates reports |
 | `/reality-check` | Reality Check | Market fit and tech debt analysis |
@@ -252,7 +254,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 ---
 
-## 📞 Quick Commands
+##  Quick Commands
 
 ```powershell
 # Start everything (recommended)
@@ -279,7 +281,7 @@ python -m pytest tests/ -v
 
 ---
 
-## 🚀 Git Workflow
+##  Git Workflow
 
 ```powershell
 cd CodeVaultV1

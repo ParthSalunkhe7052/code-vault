@@ -24,7 +24,7 @@ Code Vault is pivoting from a Marketplace to a dedicated Licensing Tool. The cur
 2.  **Core Stabilization**: Verification and hardening of HWID Locking and Heartbeat systems.
 3.  **UI/UX Cleanup**: Removal of "Seller" tabs, marketplace listings, and "Buy" buttons.
 4.  **Database Migration**: creating a migration script to drop unused tables/columns.
-5.  **Revenue Readiness**: Verification of the "Licensing-only" Stripe checkout flow.
+5.  **Revenue Readiness**: Verification of the "Licensing-only" Polar checkout flow.
 
 ### Not-in-scope
 -   Adding new features beyond the core licensing scope.
@@ -35,7 +35,7 @@ Code Vault is pivoting from a Marketplace to a dedicated Licensing Tool. The cur
 ### Critical User Journeys (CUJs)
 1.  **The Developer Journey**: A user logs in, creates a project (not a product), generates a license key, and views active sessions (Heartbeats) without seeing any "Seller" options.
 2.  **The End-User Journey**: An end-user runs a Python/Node.js app protected by Code Vault. The app validates the HWID and Heartbeat against the server. The server responds instantly without checking "Purchase" history.
-3.  **The Subscription Journey**: A user upgrades their Code Vault account to a "Pro" tier via Stripe to unlock more licenses/projects.
+3.  **The Subscription Journey**: A user upgrades their Code Vault account to a "Pro" tier via Polar to unlock more licenses/projects.
 
 ### Functional Requirements
 
@@ -57,3 +57,4 @@ Code Vault is pivoting from a Marketplace to a dedicated Licensing Tool. The cur
 -   **Zero** "Marketplace" related strings in the codebase (excluding historical migrations).
 -   **100%** Success rate on License Validation tests.
 -   **<100ms** Response time on `/api/validate`.
+

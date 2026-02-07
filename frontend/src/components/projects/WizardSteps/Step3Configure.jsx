@@ -264,7 +264,6 @@ const Step3Configure = memo(({
                                 <option value="node18-win-x64">Windows x64 (Node 18)</option>
                                 <option value="node20-win-x64">Windows x64 (Node 20)</option>
                                 <option value="node18-linux-x64">Linux x64 (Node 18)</option>
-                                <option value="node18-macos-x64">macOS x64 (Node 18)</option>
                             </select>
                         </div>
                     )}

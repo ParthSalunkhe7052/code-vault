@@ -18,10 +18,11 @@ const PLATFORMS = [
     id: 'macos',
     name: 'macOS',
     icon: null,
-    emoji: '🍎',
+    emoji: null,
     description: 'macOS 11+ (Intel x64)',
     extension: '.app',
     free: false,
+    unavailable: true,
   },
   {
     id: 'linux',
@@ -52,6 +53,7 @@ const PlatformSelector = ({
     if (disabled) return;
     
     const platform = PLATFORMS.find((p) => p.id === platformId);
+    if (!platform || platform.unavailable) return;
 
     // Check if Pro required but user is not Pro
     if (!platform.free && !isPro) {
@@ -81,7 +83,7 @@ const PlatformSelector = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {PLATFORMS.map((platform) => {
           const isSelected = selectedPlatforms.includes(platform.id);
-          const isLocked = !platform.free && !isPro;
+          const isLocked = platform.unavailable || (!platform.free && !isPro);
           const IconComponent = platform.icon;
 
           return (
@@ -143,7 +145,9 @@ const PlatformSelector = ({
                 <span className="text-xs text-slate-500 font-mono">
                   {platform.extension}
                 </span>
-                {isLocked ? (
+                {platform.unavailable ? (
+                  <span className="text-xs text-slate-400">Unavailable</span>
+                ) : isLocked ? (
                   <span className="text-xs text-amber-400 flex items-center gap-1">
                     <Lock size={10} />
                     Pro
@@ -167,11 +171,9 @@ const PlatformSelector = ({
               <Lock size={16} className="text-amber-400" />
             </div>
             <div className="flex-1">
-              <h4 className="font-medium text-amber-300 mb-1">
-                Unlock Cross-Platform Builds
-              </h4>
+              <h4 className="font-medium text-amber-300 mb-1">Unlock Linux Cloud Builds</h4>
               <p className="text-sm text-slate-400 mb-3">
-                Compile to macOS and Linux with a Pro subscription. Reach 40% more users!
+                Pro unlocks Linux cloud builds. macOS cloud builds are temporarily unavailable.
               </p>
               <a
                 href="/pricing"

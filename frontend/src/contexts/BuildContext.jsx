@@ -203,7 +203,7 @@ export function BuildProvider({ children }) {
         if (!('Notification' in window)) return;
         
         if (Notification.permission === 'granted') {
-            const title = status === 'completed' ? 'Build Successful 🚀' : 'Build Failed ❌';
+            const title = status === 'completed' ? 'Build Successful' : 'Build Failed';
             const body = `Project build has ${status}. Click to view details.`;
             new Notification(title, { body });
         }

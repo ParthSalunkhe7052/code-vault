@@ -213,7 +213,7 @@ async def get_revenue_analytics(user: dict = Depends(get_current_admin_user)):
         return {
             "mrr": mrr_result["mrr"] if mrr_result else 0,
             "pro_subscribers": mrr_result["pro_count"] if mrr_result else 0,
-            "enterprise_subscribers": mrr_result["enterprise_count"]
+            "business_subscribers": mrr_result["business_count"]
             if mrr_result
             else 0,
             "tier_breakdown": [dict(r) for r in tier_breakdown],
@@ -302,7 +302,7 @@ async def get_system_health(user: dict = Depends(get_current_admin_user)):
 
 # Pydantic models for user management
 class UpdateUserPlanRequest(BaseModel):
-    plan: str  # 'free', 'pro', 'enterprise'
+    plan: str  # 'free', 'pro', 'business'
 
 
 class UpdateUserRoleRequest(BaseModel):
@@ -316,10 +316,10 @@ async def update_user_plan(
     admin: dict = Depends(get_current_admin_user),
 ):
     """Admin: Change a user's subscription tier."""
-    if data.plan not in ["free", "pro", "enterprise"]:
+    if data.plan not in ["free", "pro", "business"]:
         raise HTTPException(
             status_code=400,
-            detail="Invalid plan tier. Must be 'free', 'pro', or 'enterprise'",
+            detail="Invalid plan tier. Must be 'free', 'pro', or 'business'",
         )
 
     conn = await get_db()

@@ -223,8 +223,8 @@ async def _deliver_webhook(
         success = 200 <= response.status_code < 300
         await conn.execute(
             """
-            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at, is_retry)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
         """,
             delivery_id,
             webhook_id,
@@ -234,6 +234,7 @@ async def _deliver_webhook(
             response.text[:1000] if response.text else None,
             delivery_time_ms,
             success,
+            False,
         )
 
         if success:
@@ -246,21 +247,33 @@ async def _deliver_webhook(
                 "UPDATE webhooks SET last_triggered_at = NOW(), failure_count = failure_count + 1 WHERE id = $1",
                 webhook_id,
             )
+            # Schedule retry for non-2xx responses
+            from webhook_retry import WebhookRetryQueue
+
+            await WebhookRetryQueue.add_to_retry_queue(
+                webhook_id=webhook_id,
+                event=event,
+                payload=payload,
+                attempt=1,
+                last_error=f"HTTP {response.status_code}",
+            )
 
     except Exception as e:
         delivery_time_ms = int((time.time() - start_time) * 1000)
+        error_str = str(e)
         await conn.execute(
             """
-            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, response_status, response_body, delivery_time_ms, success, created_at, is_retry)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
         """,
             delivery_id,
             webhook_id,
             event,
             json.dumps(webhook_payload),
             0,
-            str(e)[:1000],
+            error_str[:1000],
             delivery_time_ms,
+            False,
             False,
         )
 
@@ -269,8 +282,19 @@ async def _deliver_webhook(
             webhook_id,
         )
         safe_url = sanitize_log_message(url)
-        safe_error = sanitize_log_message(str(e))
+        safe_error = sanitize_log_message(error_str)
         logger.error(f"[Webhook] Failed to deliver {event} to {safe_url}: {safe_error}")
+
+        # Schedule retry for failed deliveries
+        from webhook_retry import WebhookRetryQueue
+
+        await WebhookRetryQueue.add_to_retry_queue(
+            webhook_id=webhook_id,
+            event=event,
+            payload=payload,
+            attempt=1,
+            last_error=error_str,
+        )
 
 
 async def trigger_webhook(user_id: str, event: str, payload: dict):
@@ -328,7 +352,8 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
     try:
         rows = await conn.fetch(
             """
-            SELECT id, name, url, events, is_active, last_triggered_at, failure_count, created_at
+            SELECT id, name, url, events, is_active, last_triggered_at, failure_count, created_at,
+                   disabled_at, disabled_reason
             FROM webhooks WHERE user_id = $1 ORDER BY created_at DESC
         """,
             user["id"],
@@ -356,6 +381,10 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
                     "created_at": w["created_at"].isoformat()
                     if w["created_at"]
                     else None,
+                    "disabled_at": w["disabled_at"].isoformat()
+                    if w["disabled_at"]
+                    else None,
+                    "disabled_reason": w["disabled_reason"],
                 }
             )
         return result

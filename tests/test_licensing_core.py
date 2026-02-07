@@ -30,22 +30,39 @@ class MockDB:
         if "select id, name from projects" in q:
             pid = args[0]
             if pid in self.projects:
-                return self.projects[pid]
+                return {"id": self.projects[pid]["id"], "name": self.projects[pid]["name"]}
             return None
             
         # Get User Tier Limits
         if "select plan_tier from subscriptions" in q:
             return None # Default to free
         if "select plan from users" in q:
-            return {"plan": "enterprise"} # Admin is enterprise
+            return {"plan": "business"} # Admin is business
             
-        # Get License (Validate)
-        if "select id, license_key, status" in q:
-            key = args[0]
-            for l in self.licenses.values():
-                if l["license_key"] == key:
-                    return l
-            return None
+        # License queries joined with projects
+        if "from licenses l" in q and "join projects p" in q:
+            if "where l.license_key" in q:
+                key = args[0]
+                for l in self.licenses.values():
+                    if l["license_key"] == key:
+                        project = self.projects.get(l["project_id"])
+                        return {
+                            "id": l["id"],
+                            "license_key": l["license_key"],
+                            "status": l["status"],
+                            "expires_at": l["expires_at"],
+                            "max_machines": l["max_machines"],
+                            "features": l["features"],
+                            "signing_secret": project.get("signing_secret") if project else None,
+                        }
+                return None
+            if "where l.id" in q:
+                lid = args[0]
+                if lid in self.licenses:
+                    l = self.licenses[lid]
+                    p = self.projects[l["project_id"]]
+                    return {**l, "project_name": p["name"], "project_id": p["id"]}
+                return None
             
         # Check HWID Binding
         if "select id, is_active from hardware_bindings" in q:
@@ -55,20 +72,11 @@ class MockDB:
                     return b
             return None
             
-        # Get License (Revoke/Reset)
-        if "from licenses l join projects p" in q:
-            lid = args[0]
-            if lid in self.licenses:
-                l = self.licenses[lid]
-                p = self.projects[l["project_id"]]
-                return {**l, "project_name": p["name"], "project_id": p["id"]}
-            return None
-        
         # User auth check (get_current_user)
         if "select id, email, name, plan, role, api_key from users" in q:
             return {
                 "id": args[0], "email": "admin@example.com", "name": "Admin",
-                "plan": "enterprise", "role": "admin", "api_key": "mock_key"
+                "plan": "business", "role": "admin", "api_key": "mock_key"
             }
 
         return None
@@ -102,7 +110,8 @@ class MockDB:
         if "insert into projects" in q:
             self.projects[args[0]] = {
                 "id": args[0], "user_id": args[1], "name": args[2], 
-                "description": args[3], "language": args[4]
+                "description": args[3], "language": args[4],
+                "signing_secret": "test_signing_secret"
             }
             return
             

@@ -1,4 +1,4 @@
-# CodeVault Data Flow Analysis
+﻿# CodeVault Data Flow Analysis
 
 This document outlines the data flow within the CodeVault system, based on the `server/main.py` implementation.
 
@@ -14,7 +14,7 @@ graph TD
     DB[(PostgreSQL)]
     Storage[File Storage / Uploads]
     Compiler[Compilation Engine]
-    ExtStripe[Stripe]
+    ExtPolar[Polar]
     ExtEmail[Email Service]
     GeoIP[GeoIP Database]
 
@@ -41,7 +41,7 @@ graph TD
     API -- "3. Return Signed Response" --> ClientApp
 
     %% External Services
-    API -- Webhooks/Payments --> ExtStripe
+    API -- Webhooks/Payments --> ExtPolar
     API -- Send Notifications --> ExtEmail
 ```
 

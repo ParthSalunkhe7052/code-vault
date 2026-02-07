@@ -4,17 +4,17 @@ CodeVault Cloud Build enables you to compile your Python and Node.js application
 
 ## Overview
 
-Cloud Build leverages isolated containerized environments to securely compile your code. It supports multi-platform targets (Windows, Linux, macOS) and automatically handles license injection, code obfuscation, and artifact storage.
+Cloud Build leverages isolated containerized environments to securely compile your code. It supports multi-platform targets (Windows and Linux) and automatically handles license injection, code obfuscation, and artifact storage. macOS cloud builds are currently unavailable.
 
 ### Key Features
 
 - **Zero Setup**: No need to install Python, Node.js, or C compilers locally.
-- **Cross-Platform**: Build for Windows, Linux, and macOS from a single dashboard.
+- **Cross-Platform**: Build for Windows and Linux from a single dashboard.
 - **Security**: Builds run in isolated ephemeral containers. Source code is encrypted in transit and at rest.
 - **Performance**: 
   - **Standard Mode**: Full optimizations + single-file bundling (~20 mins).
   - **Fast Mode**: Directory output for rapid testing (3-4x faster).
-- **Integration**: Real-time logs via WebSocket and artifacts stored in Cloudflare R2.
+- **Integration**: Real-time logs via WebSocket and artifacts stored in Google Cloud Storage (GCS).
 
 ## How It Works
 
@@ -33,7 +33,7 @@ Cloud Build leverages isolated containerized environments to securely compile yo
 
 1. Navigate to your **Project Dashboard**.
 2. Click **New Build**.
-3. Select your **Target Platform** (Windows, Linux, macOS).
+3. Select your **Target Platform** (Windows or Linux).
 4. Choose **Build Mode**:
    - *Standard*: For production (protected .exe).
    - *Fast*: For internal testing.
@@ -53,17 +53,15 @@ codevault build --cloud --fast --project-id <id>
 
 ## Tiers & Limits
 
-| Feature | Free Tier | Pro Tier | Enterprise |
+| Feature | Free Tier | Pro Tier | Business |
 |---------|-----------|----------|------------|
-| **Builds/Month** | 5 | 100 | Unlimited |
-| **Concurrency** | 1 Job | 3 Concurrent | 10+ Concurrent |
-| **Retention** | 7 Days | 30 Days | 90 Days |
-| **Platforms** | Windows only | All Platforms | All Platforms |
-| **Priority** | Low | High | Dedicated |
+| **Builds/Month** | 0 | 25 | 100 |
+| **Platforms** | Windows only | Windows, Linux | Windows, Linux |
+| **Queue Priority** | Low | Medium | High |
 
 ## Technical details
 
-- **Infrastructure**: GitHub Actions Runners + Docker
-- **Storage**: Cloudflare R2 (Global CDN)
+- **Infrastructure**: Google Cloud Build + Docker
+- **Storage**: Google Cloud Storage (artifacts) and Cloudflare R2 (source uploads)
 - **Queue**: Redis-backed priority queue
 - **Encryption**: AES-256 for source bundles

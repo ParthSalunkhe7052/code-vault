@@ -28,7 +28,7 @@ async def check_feature_access(user_id: str, feature: str, conn):
     if not limits.get(feature, False):
         tier_name = limits.get("_tier_name", "Free")
         raise TierEnforcementException(
-            feature, required_tier="pro" if tier_name == "Free" else "enterprise"
+            feature, required_tier="pro" if tier_name == "Free" else "business"
         )
 
     return True

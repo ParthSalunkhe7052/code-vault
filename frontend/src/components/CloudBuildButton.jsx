@@ -8,7 +8,7 @@ import { useProjectBuild } from '../contexts/BuildContext';
  */
 const PLATFORM_INFO = {
   windows: { name: 'Windows', emoji: null, icon: Monitor, extension: '.exe' },
-  macos: { name: 'macOS', emoji: '🍎', icon: null, extension: '.app' },
+  macos: { name: 'macOS', emoji: null, icon: null, extension: '.app' },
   linux: { name: 'Linux', emoji: null, icon: Terminal, extension: '.bin' },
 };
 
@@ -37,6 +37,7 @@ export function CloudBuildButton({
   const [progress, setProgress] = useState(0);
   const [displayProgress, setDisplayProgress] = useState(0); // Animated progress for smooth transitions
   const [error, setError] = useState(null);
+  const [stage, setStage] = useState('');
   
   // For single-platform builds (legacy/simple mode)
   const [downloadUrl, setDownloadUrl] = useState(null);
@@ -51,23 +52,37 @@ export function CloudBuildButton({
   // Sync with Global Context on Mount/Update
   useEffect(() => {
     if (projectBuild && projectBuild.status) {
-       // If context says running, and we are idle, sync up
-       if (['pending', 'queued', 'running'].includes(projectBuild.status) && status === 'idle') {
+       if (['pending', 'queued', 'running'].includes(projectBuild.status)) {
            setStatus('building');
            setBuildId(projectBuild.jobId);
-           pollStatus(projectBuild.jobId); // Resume polling
-       }
-       // If context says completed, and we are running
-       if (projectBuild.status === 'completed' && status === 'building') {
-           // Let the poller handle the final artifact retrieval, or force a check
-           if (pollIntervalRef.current) {
-               // Poller is running, let it finish
-           } else if (projectBuild.jobId) {
-               pollStatus(projectBuild.jobId);
+           if (typeof projectBuild.progress === 'number') {
+             setProgress(projectBuild.progress);
+           }
+           if (status === 'idle') {
+             pollStatus(projectBuild.jobId); // Resume polling
            }
        }
+       if (projectBuild.status === 'completed') {
+           if (status === 'building') {
+             if (pollIntervalRef.current) {
+                 // Poller is running, let it finish
+             } else if (projectBuild.jobId) {
+                 pollStatus(projectBuild.jobId);
+             }
+           }
+       }
+       if (projectBuild.status === 'failed') {
+           setStatus('failed');
+           if (projectBuild.error) {
+             setError(projectBuild.error);
+           }
+       }
+       if (projectBuild.status === 'cancelled') {
+           setStatus('cancelled');
+           setError('Build was cancelled');
+       }
     }
-  }, [projectBuild.status, projectBuild.jobId]);
+  }, [projectBuild.status, projectBuild.jobId, projectBuild.progress, projectBuild.error, status]);
 
   // Animated progress effect - smoothly animate to target progress
   useEffect(() => {
@@ -150,9 +165,12 @@ export function CloudBuildButton({
         const shouldSync = pollCount % 5 === 0;
         
         if (isMultiPlatform) {
-          // Poll multi-platform artifacts endpoint
-          const response = await api.get(`/cloud-build/${id}/artifacts`);
-          const artifacts = response.data;
+          // Poll unified build status endpoint and read artifacts from response
+          const response = await api.get(`/cloud-build/${id}/status${shouldSync ? '?sync=true' : ''}`);
+          const artifacts = response.data?.artifacts || [];
+          if (response.data?.stage) {
+            setStage(response.data.stage);
+          }
           
           // Update platform artifacts state
           const updatedArtifacts = {};
@@ -216,10 +234,14 @@ export function CloudBuildButton({
             download_key,  // Backward compatibility
             error: buildError,
             artifacts,  // Also check artifacts for error/download
+            stage: buildStage,
             synced
           } = response.data;
           
           setProgress(buildProgress || 0);
+          if (buildStage) {
+            setStage(buildStage);
+          }
           
           // Get download URL from artifacts if not at build level
           let finalDownloadUrl = download_url || download_key;
@@ -380,6 +402,9 @@ export function CloudBuildButton({
             </div>
             <span className="text-sm text-slate-400">{displayProgress}%</span>
           </div>
+          {stage && (
+            <p className="text-xs text-slate-500">{stage}</p>
+          )}
           
           {/* Overall progress bar */}
           <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">

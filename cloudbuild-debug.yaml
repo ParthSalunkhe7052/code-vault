@@ -1,0 +1,123 @@
+# ============================================
+# CodeVault - DEBUG Cloud Build (Windows ONLY)
+# ============================================
+# This is a LITE version for rapid iteration on Wine/Nuitka issues.
+
+substitutions:
+  _BUILD_ID: 'unknown'
+  _PROJECT_ID: 'unknown'
+  _LANGUAGE: 'python'
+  _TARGET_PLATFORMS: 'windows'
+  _SOURCE_URL: ''
+  _CONFIG_URL: ''
+  _CALLBACK_URL: ''
+  _OUTPUT_NAME: 'app'
+  _DEBUG_BUILD: 'false'
+  _NUITKA_CACHE_DIR: '/workspace/.nuitka-cache'
+  _DECODED_CONFIG: ''
+  _SRC_DIR: ''
+  _CALLBACK_SECRET: ''
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+
+steps:
+  # ===== STEP 1: Download Source =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-source'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Use all variables to satisfy API validation
+        echo "Building: ${_BUILD_ID} for ${_PROJECT_ID} (${_LANGUAGE})"
+        echo "Target: ${_TARGET_PLATFORMS}, Output: ${_OUTPUT_NAME}, Debug: ${_DEBUG_BUILD}"
+        echo "Callback: ${_CALLBACK_URL} / ${_CALLBACK_SECRET}"
+        echo "Internal: ${_DECODED_CONFIG} / ${_SRC_DIR}"
+        
+        if [[ "${_SOURCE_URL}" == gs://* ]]; then
+          gsutil cp "${_SOURCE_URL}" source.zip
+        else
+          curl -L -o source.zip "${_SOURCE_URL}"
+        fi
+
+  # ===== STEP 2: Extract Source =====
+  - name: 'ubuntu'
+    id: 'extract-source'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        apt-get update -qq && apt-get install -y -qq unzip > /dev/null 2>&1
+        unzip -q source.zip -d ./project
+        # Normalize
+        if [ -d "./project/.github" ]; then
+          echo "Structure looks correct"
+          mkdir -p ./project/source
+          # Move everything EXCEPT source folder into source folder
+          find ./project -maxdepth 1 ! -name "source" ! -name "." -exec mv {} ./project/source/ \;
+        elif [ -d "./project/source" ]; then
+          echo "Source already in subfolder"
+        else
+          mkdir -p ./project/source
+          mv ./project/* ./project/source/ 2>/dev/null || true
+        fi
+    waitFor: ['download-source']
+
+  # ===== STEP 3: Download Config =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-config'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gsutil cp "${_CONFIG_URL}" /workspace/config.json
+    waitFor: ['extract-source']
+
+  # ===== STEP 4: Build for Windows =====
+  - name: 'docker.io/tobix/pywine:3.11'
+    id: 'build-windows'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "[Cloud Build DEBUG] Starting Windows Build..."
+        
+        # Rick Hack: Bypass depends.exe failure in Wine
+        export NUITKA_CACHE_DIR=${_NUITKA_CACHE_DIR}
+        mkdir -p $$NUITKA_CACHE_DIR
+        
+        # Load config string safely
+        decoded_config=$$(cat /workspace/config.json)
+        
+        # Determine source directory
+        if [ -d "./project/source" ]; then 
+          src_dir="./project/source"
+        else 
+          src_dir="./project"
+        fi
+        
+        # Install deps in Wine
+        wine python -m pip install --upgrade --quiet --disable-pip-version-check \
+          nuitka ordered-set zstandard requests cryptography pefile
+        
+        # Rick Hack: Monkey-patch Nuitka using Base64-encoded Python script
+        nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
+        
+        echo "[Cloud Build DEBUG] Patching Nuitka at: $$nuitka_depends_py"
+        if [ -n "$$nuitka_depends_py" ]; then
+          echo "aW1wb3J0IHN5cwpwYXRoID0gc3lzLmFyZ3ZbMV0Kd2l0aCBvcGVuKHBhdGgsICdyJykgYXMgZjogbGluZXMgPSBmLnJlYWRsaW5lcygpCndpdGggb3BlbihwYXRoLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCd0cnk6XG4gICAgZnJvbSBudWl0a2EudXRpbHMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbmV4Y2VwdCBJbXBvcnRFcnJvcjpcbiAgICB0cnk6XG4gICAgICAgIGZyb20gbnVpdGthLmNvbnRhaW5lcnMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbiAgICBleGNlcHQgSW1wb3J0RXJyb3I6XG4gICAgICAgIGNsYXNzIE9yZGVyZWRTZXQoc2V0KTogcGFzc1xuJykKICAgIHNraXAgPSBGYWxzZQogICAgZm9yIGxpbmUgaW4gbGluZXM6CiAgICAgICAgaWYgJ2RlZiBkZXRlY3RETExzV2l0aERlcGVuZGVuY3lXYWxrZXIoJyBpbiBsaW5lOgogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgICAgIGYud3JpdGUoJyAgICByZXR1cm4gT3JkZXJlZFNldCgpXG4nKQogICAgICAgICAgICBza2lwID0gVHJ1ZQogICAgICAgIGVsaWYgc2tpcCBhbmQgbGluZS5zdGFydHN3aXRoKCdkZWYgJyk6CiAgICAgICAgICAgIHNraXAgPSBGYWxzZQogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgZWxpZiBub3Qgc2tpcDoKICAgICAgICAgICAgZi53cml0ZShsaW5lKQo=" | base64 -d > patcher.py
+          wine python patcher.py "$$nuitka_depends_py"
+          echo "[Cloud Build DEBUG] Patch applied successfully"
+        else
+          echo "[Cloud Build DEBUG] WARNING: Could not find DependsExe.py to patch"
+        fi
+        
+        # Run the runner
+        wine python "./project/source/.github/scripts/cloud_runner.py" \
+          --config "$$decoded_config" \
+          --source "$$(winepath -w $$(realpath $$src_dir))"
+    waitFor: ['download-config']

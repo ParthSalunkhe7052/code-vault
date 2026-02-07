@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
@@ -21,6 +22,38 @@ const BuildSettings = lazy(() => import('./pages/BuildSettings'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
+// Page transition variants
+const pageVariants = {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 }
+};
+
+const pageTransition = {
+    duration: 0.3,
+    ease: [0.4, 0, 0.2, 1]
+};
+
+// Animated page wrapper
+const AnimatedPage = ({ children }) => {
+    const location = useLocation();
+    return (
+        <AnimatePresence mode="wait">
+            <motion.div
+                key={location.pathname}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                variants={pageVariants}
+                transition={pageTransition}
+                className="h-full"
+            >
+                {children}
+            </motion.div>
+        </AnimatePresence>
+    );
+};
+
 // Full page loading spinner
 const FullPageLoader = () => (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--cv-bg, #0a0a0f)' }}>
@@ -31,14 +64,16 @@ const FullPageLoader = () => (
     </div>
 );
 
-// Suspense wrapper for lazy-loaded pages
+// Suspense wrapper for lazy-loaded pages with animation
 const LazyPage = ({ children }) => (
     <Suspense fallback={
         <div className="flex items-center justify-center h-full min-h-[400px]">
             <Spinner size="lg" />
         </div>
     }>
-        {children}
+        <AnimatedPage>
+            {children}
+        </AnimatedPage>
     </Suspense>
 );
 
@@ -92,6 +127,11 @@ function App() {
                                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                                     <Routes>
                                         <Route path="/login" element={
+                                            <PublicRoute>
+                                                <LazyPage><Login /></LazyPage>
+                                            </PublicRoute>
+                                        } />
+                                        <Route path="/signup" element={
                                             <PublicRoute>
                                                 <LazyPage><Login /></LazyPage>
                                             </PublicRoute>

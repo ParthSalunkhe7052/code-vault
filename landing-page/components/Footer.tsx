@@ -34,15 +34,34 @@ const Footer: React.FC = () => {
           </div>
 
           <div>
+            <h5 className="font-semibold text-white mb-4">Legal</h5>
+            <ul className="space-y-2 text-sm text-gray-400">
+              <li><a href={`${APP_URL}/privacy`} className="hover:text-white transition-colors">Privacy Policy</a></li>
+              <li><a href={`${APP_URL}/terms`} className="hover:text-white transition-colors">Terms of Service</a></li>
+              <li><a href={`${APP_URL}/gdpr`} className="hover:text-white transition-colors">GDPR Compliance</a></li>
+              <li><a href={`${APP_URL}/sla`} className="hover:text-white transition-colors">SLA / Uptime</a></li>
+            </ul>
+          </div>
+
+          <div>
             <h5 className="font-semibold text-white mb-4">Social</h5>
             <ul className="space-y-2 text-sm text-gray-400">
               <li><a href="https://github.com/ParthSalunkhe7052/code-vault" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a></li>
+              <li><a href="https://twitter.com/codevault" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Twitter</a></li>
+              <li><a href="https://discord.gg/codevault" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Discord</a></li>
             </ul>
           </div>
         </div>
         
         <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-600">
           <p>&copy; {new Date().getFullYear()} CodeVault Inc. All rights reserved.</p>
+          <div className="flex items-center gap-4">
+            <span className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500"></span>
+              All systems operational
+            </span>
+            <span>99.9% Uptime SLA</span>
+          </div>
         </div>
       </div>
     </footer>

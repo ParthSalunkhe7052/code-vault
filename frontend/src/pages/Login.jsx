@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,6 +14,16 @@ const Login = () => {
     const [error, setError] = useState('');
     const [isRegisterMode, setIsRegisterMode] = useState(false);
     const navigate = useNavigate();
+    const location = useLocation();
+
+    useEffect(() => {
+        const pathWantsSignup = location.pathname === '/signup';
+        const queryWantsSignup = new URLSearchParams(location.search).get('mode') === 'signup';
+        const shouldRegister = pathWantsSignup || queryWantsSignup;
+
+        setIsRegisterMode(shouldRegister);
+        setError('');
+    }, [location.pathname, location.search]);
 
     // Email validation regex
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -234,7 +244,7 @@ const Login = () => {
                                 onClick={toggleMode}
                                 className="text-xs text-slate-400 hover:text-primary transition-colors font-mono uppercase tracking-wider"
                             >
-                                {isRegisterMode ? '← Back to Login' : 'Create New Account →'}
+                                {isRegisterMode ? '<- Back to Login' : 'Create New Account ->'}
                             </button>
 
                             {!isRegisterMode && (

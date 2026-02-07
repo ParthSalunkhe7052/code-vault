@@ -3,6 +3,7 @@ import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import Features from './components/Features';
 import HowItWorks from './components/HowItWorks';
+import Testimonials from './components/Testimonials';
 import Pricing from './components/Pricing';
 import Footer from './components/Footer';
 
@@ -16,6 +17,7 @@ const App: React.FC = () => {
         <Hero />
         <Features />
         <HowItWorks />
+        <Testimonials />
         <Pricing />
         
         {/* Simple CTA Section before footer */}
@@ -24,9 +26,9 @@ const App: React.FC = () => {
            
            <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
              <h2 className="text-4xl font-bold mb-6">Ready to ship confidently?</h2>
-             <p className="text-gray-400 mb-10 text-lg">
-               Join thousands of developers who trust CodeVault to protect their revenue streams.
-             </p>
+              <p className="text-gray-400 mb-10 text-lg">
+                Join developers who trust CodeVault to protect their revenue streams.
+              </p>
              <a href={`${APP_URL}/signup`} className="bg-white text-black px-8 py-3 rounded-full font-medium hover:bg-gray-200 transition-all hover:scale-105 inline-block">
                Start Building Free
              </a>

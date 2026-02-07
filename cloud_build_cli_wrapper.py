@@ -96,7 +96,7 @@ class CloudBuildClient:
             f"_SOURCE_URL={source_url}",
             f"_CONFIG_URL={config_url}",
             f"_CALLBACK_URL={callback_url}",
-            f"_CALLBACK_SECRET={callback_secret}",
+            f"_CALLBACK_SECRET=",  # Provided via Secret Manager in YAML, but needs default for API
             f"_OUTPUT_NAME={config.get('output_name', 'app')}",
         ]
 

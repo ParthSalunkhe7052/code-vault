@@ -121,7 +121,7 @@ def check_cache(cache_dir: Path, cache_key: str) -> Optional[Path]:
 
     cached_exe = cache_dir / f"{cache_key}.exe"
     if cached_exe.exists():
-        age_days = (Path().stat().st_mtime - cached_exe.stat().st_mtime) / 86400
+        age_days = (time.time() - cached_exe.stat().st_mtime) / 86400
         if age_days < 7:  # Cache valid for 7 days
             return cached_exe
     return None

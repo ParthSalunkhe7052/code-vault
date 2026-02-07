@@ -650,7 +650,7 @@ const ProjectWizard = ({
                         setPublisher={setPublisher}
                         licenseId={configData.selected_license_id}
                         // Cross-platform compilation (Pro tier info)
-                        isPro={configData.is_pro || false}
+                        isPro={configData.is_pro || configData.tier === 'business'}
                     />
                 );
             default:

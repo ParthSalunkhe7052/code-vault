@@ -63,7 +63,7 @@ const Features: React.FC = () => {
            <FeatureCard 
              className="md:col-span-1"
              title="Cloud Build Matrix"
-             description="Target Windows, macOS, and Linux from a single dashboard."
+             description="Target Windows and Linux from a single dashboard. macOS cloud builds are currently unavailable."
              icon={<Cloud className="w-6 h-6 text-purple-400" />}
              fullWidthDesc={true}
            >
@@ -79,14 +79,14 @@ const Features: React.FC = () => {
                   </div>
                 </div>
                 
-                {/* Mac Bar */}
+                {/* Linux Bar */}
                 <div className="group/bar">
                   <div className="flex justify-between text-[10px] text-gray-400 mb-1">
-                    <span>macOS (ARM64)</span>
-                    <span className="text-gray-400">Building...</span>
+                    <span>Linux (x64)</span>
+                    <span className="text-emerald-400">Ready</span>
                   </div>
                   <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                     <div className="h-full w-[45%] bg-gray-500 rounded-full animate-pulse"></div>
+                     <div className="h-full w-[80%] bg-emerald-500 rounded-full"></div>
                   </div>
                 </div>
              </div>
@@ -144,10 +144,10 @@ const Features: React.FC = () => {
              fullWidthDesc={true}
            />
 
-           {/* Card 6: Anti-Debug */}
+           {/* Card 6: Webhooks */}
            <FeatureCard 
-             title="Anti-Debug & VM"
-             description="Automatic detection of common debugging tools and virtual machines."
+             title="Webhooks & Events"
+             description="Push license and subscription events to your systems in real time."
              icon={<ShieldCheck className="w-6 h-6 text-red-400" />}
              className="md:col-span-1"
              fullWidthDesc={true}

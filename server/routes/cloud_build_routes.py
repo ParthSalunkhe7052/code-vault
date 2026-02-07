@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 from database import get_db, release_db
 from storage_service import storage_service
-from utils import get_current_user, get_user_tier
+from utils import get_current_user, get_current_admin_user, get_user_tier
 from config import (
     BUILD_CALLBACK_SECRET,
     ENVIRONMENT,
@@ -78,6 +78,13 @@ class CloudBuildResponse(BaseModel):
 async def get_license_key(license_id: str, conn) -> str:
     row = await conn.fetchrow("SELECT key FROM licenses WHERE id = $1", license_id)
     return row["key"] if row else "GENERIC_BUILD"
+
+
+def get_remote_build_id(build_row) -> Optional[str]:
+    """Return the Cloud Build ID from modern or legacy columns."""
+    if not build_row:
+        return None
+    return build_row.get("gcp_build_id") or build_row.get("github_run_id")
 
 
 def generate_gcs_signed_url(download_key: str) -> Optional[str]:
@@ -271,7 +278,7 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
             zip_path.unlink()
 
 
-async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path):
+async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> bool:
     """Trigger a Cloud Build job using gcloud CLI wrapper."""
     # Security: Validate source_dir is within allowed base directory
     # This path is constructed from validated project_id via validate_safe_path
@@ -339,23 +346,27 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path):
         cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
         result = cloud_build.trigger_build(build_config)
 
-        # Store GCP Build ID in database (reuse github_run_id field for now)
+        # Store Cloud Build ID in modern column and legacy fallback column
         gcp_build_id = result["build_id"]
         logs_url = result.get("logs_url", "")
 
         conn = await get_db()
         await conn.execute(
             """UPDATE cloud_builds 
-               SET status = 'queued', progress = 10, started_at = NOW(), github_run_id = $2, logs = $3
+               SET status = 'queued', progress = 10, started_at = NOW(),
+                   gcp_build_id = $2,
+                   github_run_id = COALESCE(github_run_id, $2),
+                   logs = $3
                WHERE id = $1""",
             build_id,
-            gcp_build_id,  # Store GCP build ID in github_run_id field
+            gcp_build_id,
             json.dumps([f"Cloud Build triggered: {gcp_build_id}", f"Logs: {logs_url}"]),
         )
 
         logger.info(
             f"[CloudBuild] Successfully triggered build {build_id} -> GCP Build {gcp_build_id}"
         )
+        return True
 
     except Exception as e:
         logger.error(f"Failed to trigger Cloud Build: {e}")
@@ -366,6 +377,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path):
             str(e),
             build_id,
         )
+        return False
     finally:
         if conn:
             await release_db(conn)
@@ -379,20 +391,20 @@ async def start_cloud_build(
 ):
     """Start a new cloud build process."""
     conn = await get_db()
+    deducted_credits = 0
+    queue_accepted = False
+    build_id = None
     try:
         # 1. Tier Enforcement & Platform Restrictions
         tier = await get_user_tier(user["id"], conn)
         # limits = await get_user_tier_limits(user["id"], conn)  # Unused
 
-        # Platform restrictions based on tier
-        if tier["tier"] == "free":
-            # Free tier: Windows & Linux only (macOS requires native runners)
-            if "macos" in request.target_platforms:
-                raise HTTPException(
-                    403,
-                    "macOS builds require Pro or Business plan. "
-                    "Upgrade or select Windows/Linux only.",
-                )
+        # macOS cloud builds are currently unsupported by the active runner setup.
+        if "macos" in request.target_platforms:
+            raise HTTPException(
+                400,
+                "macOS cloud builds are temporarily unavailable. Select Windows and/or Linux.",
+            )
 
         # Credit System Enforcement
         # Business has unlimited builds (no credit deduction)
@@ -416,12 +428,23 @@ async def start_cloud_build(
                     "Upgrade your plan or wait for your monthly refill.",
                 )
 
-            # Deduct credits
-            await conn.execute(
-                "UPDATE users SET build_credits = build_credits - $1 WHERE id = $2",
+            # Deduct credits atomically
+            updated_credits = await conn.fetchval(
+                """
+                UPDATE users
+                SET build_credits = build_credits - $1
+                WHERE id = $2 AND build_credits >= $1
+                RETURNING build_credits
+                """,
                 cost,
                 user["id"],
             )
+            if updated_credits is None:
+                raise HTTPException(
+                    403,
+                    "Insufficient build credits. Please refresh and try again.",
+                )
+            deducted_credits = cost
 
         # Global concurrency limit (protect Cloud Build quota)
         active_builds = await conn.fetchval("""
@@ -579,6 +602,12 @@ async def start_cloud_build(
         queue_result = await add_to_queue(
             build_id, config, user["id"], priority, request.project_id
         )
+        queue_status = queue_result.get("status")
+        if queue_status not in {"queued", "running"}:
+            raise HTTPException(
+                500, queue_result.get("message", "Failed to enqueue cloud build")
+            )
+        queue_accepted = True
 
         return CloudBuildResponse(
             build_id=build_id,
@@ -586,6 +615,30 @@ async def start_cloud_build(
             message=queue_result.get("message", "Cloud build queued."),
         )
 
+    except Exception:
+        if deducted_credits > 0 and not queue_accepted:
+            try:
+                await conn.execute(
+                    "UPDATE users SET build_credits = build_credits + $1 WHERE id = $2",
+                    deducted_credits,
+                    user["id"],
+                )
+                if build_id:
+                    await conn.execute(
+                        """
+                        UPDATE cloud_builds
+                        SET status = 'failed',
+                            error_message = COALESCE(error_message, 'Build failed before enqueue/trigger. Credit refunded.')
+                        WHERE id = $1
+                        """,
+                        build_id,
+                    )
+                logger.info(
+                    f"[CloudBuild] Refunded {deducted_credits} credit(s) for user {user['id']} after enqueue failure"
+                )
+            except Exception as refund_error:
+                logger.error(f"[CloudBuild] Failed to refund credits: {refund_error}")
+        raise
     finally:
         await release_db(conn)
 
@@ -602,9 +655,7 @@ async def build_webhook(request: Request):
     build_id = payload.get("build_id")
     platform = payload.get("platform")
     status = payload.get("status")
-    github_run_id = payload.get(
-        "github_run_id"
-    )  # Optional: update run ID from workflow
+    remote_build_id = payload.get("cloud_build_id") or payload.get("github_run_id")
 
     if not build_id:
         raise HTTPException(400, "Missing build_id")
@@ -618,11 +669,16 @@ async def build_webhook(request: Request):
         try:
             conn = await get_db()
 
-            # Update GitHub run ID if provided
-            if github_run_id:
+            # Update Cloud Build ID if provided
+            if remote_build_id:
                 await conn.execute(
-                    "UPDATE cloud_builds SET github_run_id = $1 WHERE id = $2 AND github_run_id IS NULL",
-                    str(github_run_id),
+                    """
+                    UPDATE cloud_builds
+                    SET gcp_build_id = COALESCE(gcp_build_id, $1),
+                        github_run_id = COALESCE(github_run_id, $1)
+                    WHERE id = $2
+                    """,
+                    str(remote_build_id),
                     build_id,
                 )
 
@@ -643,6 +699,27 @@ async def build_webhook(request: Request):
                     platform,
                 )
 
+            # Overall callbacks may omit per-platform statuses (for unsupported targets),
+            # so mark remaining in-flight artifacts terminal based on overall result.
+            if not platform and status in ["completed", "failed", "cancelled"]:
+                fallback_status = "cancelled" if status == "cancelled" else "failed"
+                fallback_error = None
+                if fallback_status == "failed":
+                    fallback_error = payload.get("error") or "No platform artifact callback received"
+
+                await conn.execute(
+                    """
+                    UPDATE cloud_build_artifacts
+                    SET status = $1,
+                        error_message = COALESCE(error_message, $2),
+                        completed_at = NOW()
+                    WHERE build_id = $3 AND status IN ('pending', 'running')
+                    """,
+                    fallback_status,
+                    fallback_error,
+                    build_id,
+                )
+
             # Check if all artifacts are done
             artifacts = await conn.fetch(
                 "SELECT status FROM cloud_build_artifacts WHERE build_id = $1", build_id
@@ -650,7 +727,12 @@ async def build_webhook(request: Request):
 
             all_statuses = [a["status"] for a in artifacts]
             if all(s in ["completed", "failed", "cancelled"] for s in all_statuses):
-                final_status = "completed" if "completed" in all_statuses else "failed"
+                if all_statuses and all(s == "cancelled" for s in all_statuses):
+                    final_status = "cancelled"
+                elif "completed" in all_statuses:
+                    final_status = "completed"
+                else:
+                    final_status = "failed"
 
                 # If we only have one artifact, sync its download key to the main table for backward compatibility
                 download_key = None
@@ -1029,10 +1111,12 @@ async def get_build_status(
         if not build:
             raise HTTPException(404, "Build not found")
 
+        remote_build_id = get_remote_build_id(build)
+
         # Sync with Cloud Build if requested and build has GCP ID
         if (
             sync
-            and build["github_run_id"]
+            and remote_build_id
             and build["status"] in ["pending", "queued", "running"]
         ):
             try:
@@ -1049,7 +1133,7 @@ async def get_build_status(
                     from cloud_build_cli_wrapper import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-                gcp_status = cloud_build.get_build_status(build["github_run_id"])
+                gcp_status = cloud_build.get_build_status(remote_build_id)
 
                 # Map GCP status to our status
                 real_gcp_status = gcp_status.get("status", "")
@@ -1097,15 +1181,7 @@ async def get_build_status(
         for art in artifacts:
             download_url = None
             if art["status"] == "completed" and art["download_key"]:
-                if storage_service.is_cloud_enabled() and storage_service.client:
-                    download_url = storage_service.client.generate_presigned_url(
-                        "get_object",
-                        Params={
-                            "Bucket": storage_service.bucket,
-                            "Key": art["download_key"],
-                        },
-                        ExpiresIn=3600,
-                    )
+                download_url = generate_gcs_signed_url(art["download_key"])
 
             artifact_list.append(
                 {
@@ -1180,7 +1256,8 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
         if not build:
             raise HTTPException(404, "Build not found")
 
-        if not build["github_run_id"]:
+        remote_build_id = get_remote_build_id(build)
+        if not remote_build_id:
             return {
                 "message": "Build not yet submitted to Cloud Build",
                 "status": build["status"],
@@ -1201,7 +1278,7 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
                 from cloud_build_cli_wrapper import CloudBuildClient
 
             cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-            gcp_status = cloud_build.get_build_status(build["github_run_id"])
+            gcp_status = cloud_build.get_build_status(remote_build_id)
 
             real_gcp_status = gcp_status.get("status", "")
 
@@ -1272,15 +1349,17 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
     try:
         # Get build and verify ownership
         build = await conn.fetchrow(
-            "SELECT id, status, github_run_id FROM cloud_builds WHERE id = $1 AND user_id = $2",
+            "SELECT id, status, gcp_build_id, github_run_id FROM cloud_builds WHERE id = $1 AND user_id = $2",
             build_id,
             user["id"],
         )
         if not build:
             raise HTTPException(404, "Build not found")
 
+        remote_build_id = get_remote_build_id(build)
+
         # First, sync with Cloud Build to get real status
-        if build["github_run_id"]:
+        if remote_build_id:
             try:
                 import sys
                 from pathlib import Path as PathLib
@@ -1295,7 +1374,7 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
                     from cloud_build_cli_wrapper import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-                gcp_status = cloud_build.get_build_status(build["github_run_id"])
+                gcp_status = cloud_build.get_build_status(remote_build_id)
 
                 # If build already completed/failed in GCP, update DB to match
                 real_status = gcp_status.get("status", build["status"])
@@ -1335,8 +1414,10 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
 
         # Check current status (after potential sync)
         build = await conn.fetchrow(
-            "SELECT status FROM cloud_builds WHERE id = $1", build_id
+            "SELECT status, gcp_build_id, github_run_id FROM cloud_builds WHERE id = $1",
+            build_id,
         )
+        remote_build_id = get_remote_build_id(build)
 
         if build["status"] not in ["pending", "queued", "running", "cancelling"]:
             return {
@@ -1350,7 +1431,7 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
         )
 
         # Cancel Cloud Build job if running
-        if build.get("github_run_id"):
+        if remote_build_id:
             try:
                 import sys
                 from pathlib import Path as PathLib
@@ -1365,9 +1446,9 @@ async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_use
                     from cloud_build_cli_wrapper import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-                cloud_build.cancel_build(build["github_run_id"])
+                cloud_build.cancel_build(remote_build_id)
                 logger.info(
-                    f"[CloudBuild] Successfully cancelled GCP Build {build['github_run_id']}"
+                    f"[CloudBuild] Successfully cancelled GCP Build {remote_build_id}"
                 )
             except Exception as e:
                 logger.error(f"[CloudBuild] Failed to cancel Cloud Build: {e}")
@@ -1594,28 +1675,29 @@ async def progress_webhook(request: Request):
     platform = body.get("platform")
     progress = body.get("progress", 0)
     stage = body.get("stage", "")
-    github_run_id = body.get("github_run_id")  # Capture from first progress update
+    remote_build_id = body.get("cloud_build_id") or body.get("github_run_id")
 
     if not build_id:
         raise HTTPException(400, "Missing build_id")
 
     conn = await get_db()
     try:
-        # Update overall progress and github_run_id if provided
+        # Update overall progress and Cloud Build ID if provided
         log_entry = f"{stage}: {progress}%"
-        if github_run_id:
+        if remote_build_id:
             await conn.execute(
                 """
                 UPDATE cloud_builds 
                 SET progress = $1, 
                     logs = COALESCE(logs, '[]'::jsonb) || $2::jsonb,
+                    gcp_build_id = COALESCE(gcp_build_id, $4),
                     github_run_id = COALESCE(github_run_id, $4)
                 WHERE id = $3
             """,
                 progress,
                 json.dumps([log_entry]),
                 build_id,
-                str(github_run_id),
+                str(remote_build_id),
             )
         else:
             await conn.execute(
@@ -1825,7 +1907,9 @@ async def trigger_build_directly(build_id: str, config: dict, project_id: str):
                 if not str(source_dir).startswith(str(projects_base.resolve())):
                     raise HTTPException(400, "Invalid source directory path")
 
-        await trigger_cloud_build(build_id, config, source_dir)
+        started = await trigger_cloud_build(build_id, config, source_dir)
+        if not started:
+            return {"status": "error", "message": "Failed to start cloud build"}
         return {"status": "running", "message": "Build started immediately"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1864,7 +1948,7 @@ async def get_queue_status(build_id: str, user: dict = Depends(get_current_user)
 
 
 @router.get("/queue-info")
-async def get_queue_info(user: dict = Depends(get_current_user)):
+async def get_queue_info(user: dict = Depends(get_current_admin_user)):
     """Get overall queue information."""
     redis_client = await get_redis_client()
     if not redis_client:

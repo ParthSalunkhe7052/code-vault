@@ -220,9 +220,6 @@ export const webhooks = {
 
 export const stats = {
     getDashboard: () => api.get('/stats/dashboard').then(res => res.data),
-    getValidations: (days = 7) => api.get('/stats/validations', { params: { days } }).then(res => res.data),
-    getGeographic: (days = 30) => api.get('/stats/geographic', { params: { days } }).then(res => res.data),
-    getRecentGeographic: (limit = 20) => api.get('/stats/geographic/recent', { params: { limit } }).then(res => res.data),
     // Mission Control Live Map
     getMapData: () => api.get('/analytics/map-data').then(res => res.data),
 };

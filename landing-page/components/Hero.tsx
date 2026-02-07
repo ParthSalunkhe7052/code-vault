@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { ArrowRight, Terminal } from 'lucide-react';
 
 const Hero: React.FC = () => {
@@ -56,24 +56,24 @@ const Hero: React.FC = () => {
                  <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50"></div>
                  <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50"></div>
               </div>
-              <div className="ml-4 text-xs text-gray-500 font-mono">codevault-cli — bash</div>
+              <div className="ml-4 text-xs text-gray-500 font-mono">codevault-cli - bash</div>
            </div>
            <div className="p-6 text-left font-mono text-sm md:text-base leading-relaxed overflow-x-auto">
               <div className="flex">
-                  <span className="text-green-400 mr-2">➜</span>
+                  <span className="text-green-400 mr-2">></span>
                   <span className="text-blue-400">~</span>
                   <span className="text-gray-400 ml-2">codevault build ./server.js --target node18-win-x64</span>
               </div>
               <div className="mt-2 text-slate-400">
-                  <span className="text-blue-500">ℹ</span> Detecting runtime... <span className="text-green-500">Node.js v18.16.0</span><br/>
-                  <span className="text-blue-500">ℹ</span> Encrypting bytecode (snapshot)... <span className="text-green-500">Done</span><br/>
-                  <span className="text-blue-500">ℹ</span> Injecting HWID validation module... <span className="text-green-500">Done</span><br/>
-                  <span className="text-blue-500">ℹ</span> Packaging native binary with pkg... <span className="text-green-500">Done</span><br/>
+                  <span className="text-blue-500">i</span> Detecting runtime... <span className="text-green-500">Node.js v18.16.0</span><br/>
+                  <span className="text-blue-500">i</span> Encrypting bytecode (snapshot)... <span className="text-green-500">Done</span><br/>
+                  <span className="text-blue-500">i</span> Injecting HWID validation module... <span className="text-green-500">Done</span><br/>
+                  <span className="text-blue-500">i</span> Packaging native binary with pkg... <span className="text-green-500">Done</span><br/>
                   <br/>
-                  <span className="text-green-400">✔ Build complete!</span> <span className="text-slate-500">./dist/server.exe (35 MB)</span>
+                  <span className="text-green-400">Build complete.</span> <span className="text-slate-500">./dist/server.exe (35 MB)</span>
               </div>
               <div className="mt-4 flex animate-pulse">
-                  <span className="text-green-400 mr-2">➜</span>
+                  <span className="text-green-400 mr-2">></span>
                   <span className="text-blue-400">~</span>
                   <span className="w-2 h-5 bg-gray-500 ml-2"></span>
               </div>

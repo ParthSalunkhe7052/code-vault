@@ -6,6 +6,7 @@ from storage_service import storage_service
 
 router = APIRouter(tags=["system"])
 
+
 @router.get("/api/health")
 async def health_check():
     """Health check endpoint for Tauri desktop app."""
@@ -18,10 +19,12 @@ async def health_check():
         "compilers": {"nodejs": nodejs_available, "python": nuitka_available},
     }
 
+
 @router.get("/api/v1/config/pricing")
 async def get_pricing_config():
     """Get pricing configuration for the frontend."""
     return PRICING_CONFIG
+
 
 @router.get("/")
 async def root():
@@ -32,6 +35,7 @@ async def root():
         "docs": "/docs",
         "health": "/health",
     }
+
 
 @router.get("/health")
 @router.get("/api/v1/health")
@@ -53,3 +57,11 @@ async def health():
         "storage": "cloud" if storage_service.is_cloud_enabled() else "local",
         "email": "configured" if email_service.is_configured() else "disabled",
     }
+
+
+@router.get("/api/v1/health/detailed")
+async def detailed_health():
+    """Detailed health check with all system components."""
+    from monitoring import get_health_status
+
+    return await get_health_status()

@@ -686,11 +686,10 @@ class CloudRunner:
             "nuitka",
             "--standalone",
             # "--onefile", # Moved to logic below
-            "--remove-output",
+            # "--remove-output", # Removed: causes race conditions with scons-report.txt
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--disable-dll-dependency-cache",  # Disable depends.exe which fails in Wine/Cloud Build
-            # "--ccache", # Removed: not supported in all Nuitka versions
+            "--disable-ccache", # Disable ccache to reduce external process calls
             # "--show-progress", # Disabled to reduce CI log spam
         ]
 
@@ -700,9 +699,12 @@ class CloudRunner:
 
         # Fast Build Logic (Skip compression)
         fast_build = self.config.get("fast_build", False)
-        if fast_build:
-            logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
-            # In fast build, we output to a directory
+        if fast_build or sys.platform == "win32":
+            if sys.platform == "win32":
+                logger.warning("Windows detected: Disabling --onefile for stability in Wine")
+            else:
+                logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
+            # In fast build or Windows/Wine, we output to a directory
             # The packaging step in CI will zip this directory
         else:
             cmd.append("--onefile")
@@ -712,18 +714,17 @@ class CloudRunner:
         )
 
         # Parallel jobs
-        # Cloud Build E2_HIGHCPU_8 has 8 vCPUs and 8GB RAM
-        # Use 75% of CPUs for optimal performance while leaving headroom
-        # GitHub Actions runners (7GB RAM) use fewer cores to prevent OOM
+        # Detect if running in Cloud Build (8+ CPUs) vs GitHub Actions (2 CPUs)
         available_cpus = multiprocessing.cpu_count()
 
-        # Detect if running in Cloud Build (8+ CPUs) vs GitHub Actions (2 CPUs)
-        if available_cpus >= 8:
-            # Cloud Build: Use up to 6 cores (75% of 8, leaves headroom)
-            job_count = max(2, min(int(available_cpus * 0.75), 8))
+        if sys.platform == "win32":
+            # Windows/Wine is unstable with multiple jobs
+            job_count = 1
+            logger.warning("Windows detected: Forcing job count to 1 for stability in Wine")
         else:
-            # GitHub Actions: Conservative setting
-            job_count = min(available_cpus, 2)
+            # Linux: Force job count to 1 to avoid Scons race conditions with @@link_input.txt
+            job_count = 1
+            logger.warning("Forcing job count to 1 to avoid Scons link race conditions")
 
         cmd.append(f"--jobs={job_count}")
         logger.info(
@@ -769,6 +770,24 @@ class CloudRunner:
             "PIL",
             "matplotlib",
             "certifi",
+            "_ssl",
+            "_uuid",
+            "_zoneinfo",
+            "_cffi_backend",
+            "_hashlib",
+            "_lzma",
+            "_bz2",
+            "_socket",
+            "_sqlite3",
+            "_asyncio",
+            "_overlapped",
+            "_queue",
+            "_multiprocessing",
+            "_decimal",
+            "_elementtree",
+            "_ctypes",
+            "cryptography",
+            "cffi",
         ]
 
         compatibility_mode = self.config.get("compatibility_mode", False)
@@ -826,7 +845,16 @@ class CloudRunner:
         # Log the full command for debugging
         logger.info(f"Nuitka command (first 500 chars): {' '.join(cmd)[:500]}...")
 
-        subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
+        if sys.platform == "win32":
+            # Use os.system on Windows/Wine to avoid subprocess handle bugs
+            # Set WINEDEBUG=-all to reduce handle usage and chatter
+            cmd_str = "set WINEDEBUG=-all && " + " ".join([f'"{c}"' if " " in c else c for c in cmd])
+            logger.info(f"Nuitka command (Windows): {cmd_str[:500]}...")
+            exit_code = os.system(cmd_str)
+            if exit_code != 0:
+                raise RuntimeError(f"Nuitka failed with exit code {exit_code}")
+        else:
+            subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
 
         final_path = self.output_dir / output_exe
         if not final_path.exists():

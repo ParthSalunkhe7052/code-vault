@@ -6,18 +6,18 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-1. [Project Overview](#-project-overview)
-2. [Core Features](#-core-features)
-3. [Architecture](#-architecture)
-4. [Security](#-security-&--license-protection)
-5. [CLI Tool](#-cli-tool)
-6. [API Reference](#-api-reference)
+1. [Project Overview](#project-overview)
+2. [Core Features](#core-features)
+3. [Architecture](#architecture)
+4. [Security](#security--license-protection)
+5. [CLI Tool](#cli-tool)
+6. [API Reference](#api-reference)
 
 ---
 
-## 🎯 Project Overview
+## Project Overview
 
 **CodeVault** is a software monetization platform for Python and Node.js developers. It transforms raw scripts into secure, licensed executables that can be sold to customers.
 
@@ -33,29 +33,29 @@
 
 ---
 
-## ✨ Core Features
+## Core Features
 
-### 🔐 License Protection
+### License Protection
 - **Hardware ID (HWID) Locking**: Binds license to CPU, Disk, and Motherboard serials.
 - **Heartbeat Checks**: Periodic validation while the app is running.
 - **Tamper Detection**: Verifies integrity of the license wrapper.
 
-### 🛡️ Offline Security (New in v1.2)
+### Offline Security (New in v1.2)
 - **Offline Leases**: The server issues a cryptographically signed "lease" valid for a configurable period (default 7 days).
 - **No Internet Required**: Once activated, the app can run offline until the lease expires.
 - **HMAC Signatures**: The wrapper verifies the lease signature locally using a secret key embedded during compilation.
 
-### 🕵️ Code Obfuscation (New in v1.2)
+### Code Obfuscation (New in v1.2)
 - **JavaScript**: Automatically applies control-flow flattening, string encryption, and dead code injection using `javascript-obfuscator`.
 - **Python**: Compiled to native machine code via Nuitka, making decompilation extremely difficult.
 
-### 🎨 White-Labeling (New in v1.2)
+### White-Labeling (New in v1.2)
 - **Splash Screen**: Professional "Protected by CodeVault" loading screen on startup.
 - **Activation Dialog**: Branded GUI for entering license keys if missing or invalid.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 CodeVault uses a **Web + CLI** hybrid architecture.
 
@@ -63,7 +63,7 @@ CodeVault uses a **Web + CLI** hybrid architecture.
 - **FastAPI**: High-performance async Python framework.
 - **PostgreSQL**: Robust relational database for licenses and users.
 - **Redis**: Caching layer for high-speed validation.
-- **Stripe**: Payment processing for monetization.
+- **Polar**: Payment processing for monetization.
 - **Resend**: Email delivery service.
 
 ### 2. Web Dashboard (`frontend/`)
@@ -78,7 +78,7 @@ CodeVault uses a **Web + CLI** hybrid architecture.
 
 ---
 
-## 🔐 Security & License Protection
+## Security & License Protection
 
 ### Validation Process
 1.  **Startup**: Wrapper reads local license key.
@@ -95,7 +95,7 @@ CodeVault uses a **Web + CLI** hybrid architecture.
 
 ---
 
-## 🛠️ CLI Tool
+## CLI Tool
 
 The `lw-compiler` is the heart of the build process. It supports:
 - **Local Compilation**: builds `.exe` files on your machine.
@@ -123,7 +123,7 @@ The CLI reads from `config.json` inside project folders, but can be overridden b
 
 ---
 
-## 📡 API Reference
+## API Reference
 
 Base URL: `http://localhost:8000/api/v1`
 
@@ -142,3 +142,4 @@ Base URL: `http://localhost:8000/api/v1`
 - **GET** `/projects`: List projects
 - **POST** `/licenses`: Create license
 - **DELETE** `/licenses/{id}`: Revoke license
+

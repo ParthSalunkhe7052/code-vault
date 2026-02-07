@@ -67,7 +67,7 @@ def mock_user() -> Dict[str, Any]:
         "name": "Test User",
         "role": "user",
         "tier": "free",
-        "stripe_customer_id": None,
+        "polar_customer_id": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "api_key": secrets.token_hex(32),
     }
@@ -81,8 +81,8 @@ def mock_admin_user() -> Dict[str, Any]:
         "email": f"admin_{secrets.token_hex(4)}@example.com",
         "name": "Admin User",
         "role": "admin",
-        "tier": "enterprise",
-        "stripe_customer_id": f"cus_{secrets.token_hex(14)}",
+        "tier": "business",
+        "polar_customer_id": f"cus_{secrets.token_hex(14)}",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "api_key": secrets.token_hex(32),
     }
@@ -321,51 +321,49 @@ def ssrf_payloads() -> list:
 
 
 # =============================================================================
-# Stripe Mock Fixtures
+# Polar Mock Fixtures
 # =============================================================================
 
 @pytest.fixture
-def mock_stripe_event() -> Dict[str, Any]:
-    """Generate a mock Stripe webhook event."""
+def mock_polar_event() -> Dict[str, Any]:
+    """Generate a mock Polar webhook event."""
     return {
         "id": f"evt_{secrets.token_hex(12)}",
-        "object": "event",
-        "type": "checkout.session.completed",
-        "created": int(datetime.now(timezone.utc).timestamp()),
+        "type": "subscription.created",
         "data": {
-            "object": {
-                "id": f"cs_{secrets.token_hex(12)}",
-                "object": "checkout.session",
-                "customer": f"cus_{secrets.token_hex(14)}",
-                "customer_email": "customer@example.com",
-                "metadata": {
-                    "user_id": secrets.token_hex(16),
-                    "tier": "pro",
-                },
-                "payment_status": "paid",
-                "status": "complete",
-            }
+            "id": f"sub_{secrets.token_hex(12)}",
+            "status": "active",
+            "metadata": {
+                "user_id": secrets.token_hex(16),
+            },
+            "customer": {
+                "id": f"cus_{secrets.token_hex(14)}",
+                "email": "customer@example.com",
+                "external_id": secrets.token_hex(16),
+            },
+            "product": {
+                "id": "prod_test_pro",
+            },
         },
-        "livemode": False,
     }
 
 
 @pytest.fixture
-def mock_stripe_signature():
-    """Generate a mock Stripe webhook signature for testing."""
+def mock_polar_signature():
+    """Generate a mock Polar Standard Webhooks signature for testing."""
+    import base64
     import hmac
     import hashlib
-    import time
 
-    def generate_signature(payload: str, secret: str) -> str:
-        timestamp = int(time.time())
-        payload_to_sign = f"{timestamp}.{payload}"
-        signature = hmac.new(
-            secret.encode("utf-8"),
-            payload_to_sign.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
-        return f"t={timestamp},v1={signature}"
+    def generate_signature(payload: str, secret: str, webhook_id: str, webhook_timestamp: str) -> str:
+        # Secret is base64 encoded, with optional whsec_ prefix.
+        secret_str = secret[6:] if secret.startswith("whsec_") else secret
+        secret_bytes = base64.b64decode(secret_str)
+        signed_content = f"{webhook_id}.{webhook_timestamp}.{payload}"
+        signature = base64.b64encode(
+            hmac.new(secret_bytes, signed_content.encode("utf-8"), hashlib.sha256).digest()
+        ).decode("utf-8")
+        return f"v1,{signature}"
 
     return generate_signature
 

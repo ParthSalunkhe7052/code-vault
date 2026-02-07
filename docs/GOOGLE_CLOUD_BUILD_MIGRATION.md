@@ -4,9 +4,11 @@
 
 This document explains how the Google Cloud Build configuration works and how to migrate from GitHub Actions to Google Cloud Build for production builds in CodeVault.
 
+Note: macOS cloud builds are currently unavailable in Cloud Build and should be disabled or routed to dedicated macOS runners.
+
 **Last Updated:** February 4, 2026  
 **Status:** Ready for Migration  
-**Current Build System:** GitHub Actions (`.github/workflows/cloud-compile.yml`)  
+**Current Build System:** Google Cloud Build (`cloudbuild.yaml`)
 **Target Build System:** Google Cloud Build (`cloudbuild.yaml`)
 
 ---
@@ -26,10 +28,10 @@ This document explains how the Google Cloud Build configuration works and how to
 
 ## Architecture Overview
 
-### Current Architecture (GitHub Actions)
+### Current Architecture (Google Cloud Build)
 
 ```
-User Request → Backend API → GitHub Actions Workflow Dispatch → cloud_runner.py → Build Artifacts → GCS/Webhook
+User Request → Backend API → Cloud Build Trigger → cloud_runner.py → Build Artifacts → GCS/Webhook
 ```
 
 **Issues:**
@@ -59,7 +61,7 @@ User Request → Backend API → Cloud Build API → cloudbuild.yaml → cloud_r
 **Location:** Root of repository  
 **Purpose:** Defines the build pipeline for Google Cloud Build  
 **Key Features:**
-- Multi-platform builds (Linux, Windows, macOS)
+- Multi-platform builds (Linux, Windows)
 - Parallel build execution
 - Automatic artifact upload to GCS
 - Webhook callbacks on completion
@@ -152,7 +154,7 @@ result = cloud_build.trigger_build({
 - Compiles to `.exe` using Nuitka
 - Packages output as `.zip`
 
-#### Step 5: Build for macOS (Cross-compilation)
+#### Step 5: macOS (Not Supported)
 ```yaml
 - name: 'gcr.io/cloud-builders/docker'
   entrypoint: 'bash'
@@ -166,7 +168,7 @@ result = cloud_build.trigger_build({
 - name: 'gcr.io/cloud-builders/gsutil'
 ```
 - Uploads all artifacts to `gs://codevault-builds/builds/${BUILD_ID}/`
-- Organized by platform: `linux/`, `windows/`, `macos/`
+- Organized by platform: `linux/`, `windows/`
 
 #### Step 7: Send Webhook Callback
 ```yaml
@@ -271,13 +273,13 @@ All builds accept these parameters via the Cloud Build API:
 | `_BUILD_ID` | Unique build identifier | `build-abc123` |
 | `_PROJECT_ID` | User's project ID | `user-project-xyz` |
 | `_LANGUAGE` | Programming language | `python`, `nodejs` |
-| `_TARGET_PLATFORMS` | Comma-separated platforms | `windows,linux,macos` |
+| `_TARGET_PLATFORMS` | Comma-separated platforms | `windows,linux` |
 | `_SOURCE_URL` | Presigned URL to source ZIP | `https://s3.amazonaws.com/...` |
 | `_CONFIG_JSON_B64` | Base64-encoded JSON build configuration | `eyJlbnRyeV9maWxl...` |
 | `_CALLBACK_URL` | Webhook endpoint | `https://api.codevault.com/webhook` |
 | `_ENTRY_FILE` | Entry point file | `main.py`, `index.js` |
 | `_OUTPUT_NAME` | Output executable name | `my-app` |
-| `_PLAN_TIER` | User's pricing plan | `free`, `pro`, `enterprise` |
+| `_PLAN_TIER` | User's pricing plan | `free`, `pro`, `business` |
 
 ### Secret Manager Configuration
 
@@ -298,8 +300,6 @@ gs://codevault-builds/
         │   └── {output_name}-linux.tar.gz
         ├── windows/
         │   └── {output_name}-windows.zip
-        └── macos/
-            └── {output_name}-macos.zip
 ```
 
 ### Build Machine Configuration
@@ -394,8 +394,8 @@ If you need to revert to GitHub Actions:
    - Store in Google Container Registry
 
 3. **macOS Support**
-   - Set up osxcross for macOS cross-compilation
-   - Or integrate with dedicated Mac cloud builders
+   - Currently unavailable in Cloud Build
+   - Future option: integrate with dedicated Mac cloud builders
    - Complete feature parity with GitHub Actions
 
 ### Long-term (3-6 months)

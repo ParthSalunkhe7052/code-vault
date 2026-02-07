@@ -105,10 +105,38 @@ def safe_join(base: Path, *parts: str) -> Path:
             continue
         # Convert to string and clean
         part_str = str(part)
-        # Reject obvious traversal attempts
-        if ".." in part_str or part_str.startswith("/") or part_str.startswith("\\"):
+
+        # Decode percent-encoded sequences to catch traversal attempts
+        try:
+            from urllib.parse import unquote
+            decoded = part_str
+            for _ in range(3):
+                new_decoded = unquote(decoded)
+                if new_decoded == decoded:
+                    break
+                decoded = new_decoded
+        except Exception:
+            decoded = part_str
+
+        # Reject overlong UTF-8 encodings for dot segments (e.g. %c0%ae)
+        if re.search(r"%c0%ae", part_str, flags=re.IGNORECASE):
             raise SecurityError(f"Path traversal detected in: {part_str}")
-        cleaned_parts.append(part_str)
+
+        if "\x00" in decoded:
+            raise SecurityError("Null byte detected in path component")
+
+        part_path = Path(decoded)
+
+        # Reject absolute paths or drive-letter paths
+        if "://" in decoded or part_path.is_absolute() or re.match(r"^[a-zA-Z]:", decoded):
+            raise SecurityError(f"Absolute path detected in: {decoded}")
+
+        # Reject traversal components
+        for segment in part_path.parts:
+            if segment in ("..", ".", "") or ".." in segment:
+                raise SecurityError(f"Path traversal detected in: {decoded}")
+
+        cleaned_parts.append(decoded)
 
     # Join and resolve the full path
     if cleaned_parts:
@@ -167,8 +195,14 @@ def sanitize_filename(filename: str) -> str:
     if not filename:
         return "unnamed"
 
-    # Remove path separators and null bytes
+    # Remove path separators, null bytes, and control characters
     filename = filename.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    filename = re.sub(r"[\x00-\x1f]", "", filename)
+    filename = re.sub(r"[<>:\"|?*]", "_", filename)
+
+    # Remove traversal sequences
+    while ".." in filename:
+        filename = filename.replace("..", "_")
 
     # Remove leading dots (hidden files) and parent references
     while filename.startswith("."):
@@ -422,10 +456,10 @@ async def get_user_tier(user_id: str, conn) -> dict:
 
     Returns:
         dict with:
-            - tier: string ('free', 'pro', 'enterprise')
-            - is_pro: bool (True if pro or enterprise)
-            - can_remove_branding: bool (True if pro or enterprise)
-            - can_custom_branding: bool (True only for enterprise)
+            - tier: string ('free', 'pro', 'business')
+            - is_pro: bool (True if pro or business)
+            - can_remove_branding: bool (True if pro or business)
+            - can_custom_branding: bool (True only for business)
     """
     sub = await conn.fetchrow(
         """

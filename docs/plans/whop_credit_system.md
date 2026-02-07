@@ -6,7 +6,7 @@ This plan addresses two critical monetization features:
 2.  **Cloud Build Credits**: Enforce a "usage-based" model for the expensive Cloud Build feature (e.g., 15 credits/month for Pro), replacing the current unlimited/tier-based loose check.
 
 ## Current State Analysis
-- **Billing**: Currently `stripe_routes.py` handles subscriptions and direct license purchases. There is no infrastructure for 3rd party marketplaces like Whop.
+- **Billing**: Currently `polar_routes.py` handles subscriptions and direct license purchases. There is no infrastructure for 3rd party marketplaces like Whop.
 - **Cloud Build**: `cloud_build_routes.py` exists but does not appear to have granular credit deduction logic, only basic tier checks via `get_user_tier_limits`.
 - **Database**: The `users` table likely lacks a `build_credits` column.
 
@@ -80,12 +80,12 @@ BUILD_COST_FAST = 0  # Maybe free for dev? Or 0.5?
   3. **Transaction**: Deduct 1 credit AND create build job.
   4. If fail, rollback.
 
-#### 3. `CodeVaultV1/server/routes/stripe_routes.py`
+#### 3. `CodeVaultV1/server/routes/polar_routes.py`
 **Goal**: Reset/Top-up credits on subscription renewal.
 **Changes**:
-- In `handle_invoice_paid`:
+- In `handle_order_paid`:
   - `UPDATE users SET build_credits = 15 WHERE id = ...` (For Pro)
-  - `UPDATE users SET build_credits = 50 WHERE id = ...` (For Agency)
+  - `UPDATE users SET build_credits = 50 WHERE id = ...` (For Business)
 
 ### Success Criteria:
 - [x] User with 0 credits receives 403 when trying to build.

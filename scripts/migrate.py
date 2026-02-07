@@ -10,25 +10,28 @@ import asyncpg
 from dotenv import load_dotenv
 
 # Add server directory to path so we can import config
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'server'))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "server"))
+
 
 async def run_migrations():
     # Try to load from server/.env if not in root
-    load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'server', '.env'))
-    load_dotenv() # Fallback to root
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "server", ".env"))
+    load_dotenv()  # Fallback to root
     database_url = os.getenv("DATABASE_URL")
     admin_email = os.getenv("ADMIN_EMAIL")
 
     if not database_url:
-        print("❌ Error: DATABASE_URL not set in .env")
+        print("[Migration] ERROR: DATABASE_URL not set in .env")
         return
 
-    print(f"🚀 Connecting to database...")
-    conn = await asyncpg.connect(database_url)
-    
+    print("[Migration] Connecting to database...")
+    conn = None
+
     try:
-        print("📦 Creating tables...")
-        
+        conn = await asyncpg.connect(database_url)
+        print("[Migration] Connected to database successfully")
+        print("[Migration] Creating tables...")
+
         # User Table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -188,35 +191,111 @@ async def run_migrations():
         """)
 
         # Indexes
-        print("🔍 Creating indexes...")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_validation_logs_created ON validation_logs(created_at)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_license_variables_license ON license_variables(license_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_validation_logs_geo ON validation_logs(latitude, longitude) WHERE latitude IS NOT NULL")
+        print("[Migration] Creating indexes...")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_logs_created ON validation_logs(created_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_license_variables_license ON license_variables(license_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_logs_geo ON validation_logs(latitude, longitude) WHERE latitude IS NOT NULL"
+        )
+
+        # Webhook Retry Queue Table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS webhook_retries (
+                id TEXT PRIMARY KEY,
+                webhook_id TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+                event TEXT NOT NULL,
+                payload JSONB NOT NULL,
+                attempt INTEGER DEFAULT 1,
+                next_retry_at TIMESTAMPTZ NOT NULL,
+                last_error TEXT,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                UNIQUE(webhook_id, event, payload)
+            )
+        """)
+
+        # Webhook deliveries table - add is_retry column
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id TEXT PRIMARY KEY,
+                webhook_id TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                payload JSONB NOT NULL,
+                response_status INTEGER,
+                response_body TEXT,
+                delivery_time_ms INTEGER,
+                success BOOLEAN DEFAULT FALSE,
+                is_retry BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
 
         # Column Migrations (Ensure existing tables have new columns)
-        print("🛠️ Running column migrations...")
+        print("[Migration] Running column migrations...")
         try:
-            await conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS signing_secret TEXT")
+            await conn.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS signing_secret TEXT"
+            )
+            await conn.execute(
+                "ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ"
+            )
+            await conn.execute(
+                "ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS disabled_reason TEXT"
+            )
             print("  - Added 'signing_secret' to projects")
         except Exception as e:
             print(f"  - Note: projects.signing_secret check: {e}")
 
         # Ensure all existing projects HAVE a signing secret
-        await conn.execute("UPDATE projects SET signing_secret = md5(random()::text) WHERE signing_secret IS NULL")
+        await conn.execute(
+            "UPDATE projects SET signing_secret = md5(random()::text) WHERE signing_secret IS NULL"
+        )
         print("  - Backfilled missing signing_secrets")
+
+        # Additional indexes for webhook tables
+        print("[Migration] Creating webhook indexes...")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_retries_pending ON webhook_retries(status, next_retry_at) WHERE status = 'pending'"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_retries_webhook ON webhook_retries(webhook_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook ON webhook_deliveries(webhook_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_created ON webhook_deliveries(created_at)"
+        )
 
         # Admin Setup
         if admin_email:
-            print(f"👑 Setting up admin: {admin_email}")
-            await conn.execute("UPDATE users SET role = 'admin', plan = 'enterprise' WHERE email = $1", admin_email)
+            print(f"[Migration] Setting up admin: {admin_email}")
+            await conn.execute(
+                "UPDATE users SET role = 'admin', plan = 'enterprise' WHERE email = $1",
+                admin_email,
+            )
 
-        print("✅ Migrations complete!")
+        print("[Migration] Migrations complete!")
 
     except Exception as e:
-        print(f"❌ Error during migration: {e}")
+        print(f"[Migration] ERROR during migration: {e}")
+        import traceback
+
+        traceback.print_exc()
     finally:
-        await conn.close()
+        if conn:
+            await conn.close()
+
 
 if __name__ == "__main__":
     asyncio.run(run_migrations())

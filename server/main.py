@@ -124,10 +124,16 @@ async def app_lifespan(app: FastAPI):
     async with lifespan(app):
         import asyncio
         from routes.cloud_build_routes import scheduled_cloud_build_cleanup
+        from webhook_retry import start_retry_processor
+        from monitoring import start_health_monitoring
 
         asyncio.create_task(cleanup_compile_cache())
         asyncio.create_task(scheduled_cloud_build_cleanup())
+        asyncio.create_task(start_retry_processor(interval_seconds=60))
+        asyncio.create_task(start_health_monitoring(interval_seconds=60))
         logging.getLogger(__name__).info("[Startup] Background cleanup tasks started")
+        logging.getLogger(__name__).info("[Startup] Webhook retry processor started")
+        logging.getLogger(__name__).info("[Startup] Health monitoring started")
         yield
 
     # Cleanup on shutdown

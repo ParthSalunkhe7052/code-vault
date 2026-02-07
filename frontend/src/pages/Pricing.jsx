@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Check, X, Sparkles, Zap, Crown, ArrowRight, Loader2 } from 'lucide-react';
 import { usePricing, TIERS } from '../contexts/PricingContext';
+import { useToast } from '../components/Toast';
 import { auth } from '../services/api';
 
 const PricingTier = ({
@@ -91,7 +92,9 @@ const PricingTier = ({
 
 const Pricing = () => {
     const navigate = useNavigate();
-    const { tier: currentPlan, createCheckout } = usePricing();
+    const location = useLocation();
+    const toast = useToast();
+    const { tier: currentPlan, createCheckout, refreshPricing } = usePricing();
     const [loading, setLoading] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
 
@@ -104,7 +107,7 @@ const Pricing = () => {
         }
 
         if (targetTier === TIERS.FREE) {
-            // Can't "subscribe" to free — they'd need to cancel via Polar portal
+            // Free tier is managed by downgrading via the Polar portal
             return;
         }
 
@@ -121,6 +124,17 @@ const Pricing = () => {
             setLoading('');
         }
     };
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('success') === 'true') {
+            refreshPricing();
+            toast.success('Subscription updated. Your plan is now active.');
+            params.delete('success');
+            const next = params.toString();
+            navigate(next ? `/pricing?${next}` : '/pricing', { replace: true });
+        }
+    }, [location.search, navigate, refreshPricing, toast]);
 
     const tiers = [
         {

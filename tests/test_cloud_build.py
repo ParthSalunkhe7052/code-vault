@@ -159,22 +159,22 @@ class TestTierLimits:
         """Pro tier should have cloud_compilation = True."""
         pro_tier_limits = {
             "cloud_compilation": True,
-            "cloud_builds_per_month": 10,
+            "cloud_builds_per_month": 25,
             "max_projects": 10,
         }
         
         assert pro_tier_limits["cloud_compilation"] is True
         assert pro_tier_limits["cloud_builds_per_month"] == 10
 
-    def test_enterprise_has_unlimited_builds(self):
-        """Enterprise tier should have unlimited (-1) cloud builds."""
-        enterprise_limits = {
+    def test_business_has_builds(self):
+        """Business tier should have higher cloud build limits."""
+        business_limits = {
             "cloud_compilation": True,
-            "cloud_builds_per_month": -1,  # unlimited
+            "cloud_builds_per_month": 100,
             "max_projects": -1,
         }
         
-        assert enterprise_limits["cloud_builds_per_month"] == -1
+        assert business_limits["cloud_builds_per_month"] == 100
 
     def test_monthly_limit_enforcement(self):
         """Monthly build limit should be enforced correctly."""
@@ -205,7 +205,7 @@ class TestBuildRequestValidation:
         }
         
         assert len(request["project_id"]) == 32
-        assert request["target_platform"] in ["windows", "macos", "linux"]
+        assert request["target_platform"] in ["windows", "linux"]
 
     def test_missing_project_id_fails(self):
         """Missing project_id should fail validation."""
@@ -218,8 +218,8 @@ class TestBuildRequestValidation:
 
     def test_invalid_platform_rejected(self):
         """Invalid target platform should be rejected."""
-        valid_platforms = ["windows", "macos", "linux"]
-        invalid_platform = "android"
+        valid_platforms = ["windows", "linux"]
+        invalid_platform = "macos"
         
         assert invalid_platform not in valid_platforms
 
