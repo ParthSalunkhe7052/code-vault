@@ -9,23 +9,8 @@ import { admin } from '../services/api';
 import { useToast } from '../components/Toast';
 import { SkeletonCard, SkeletonChart } from '../components/Skeleton';
 import ConfirmDialog from '../components/ConfirmDialog';
+import StatCard from '../components/dashboard/StatCard';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
-
-// StatCard component
-const StatCard = ({ title, value, icon: Icon, color, subtitle }) => (
-    <div className="glass-card p-6 hover:scale-[1.02] transition-transform cursor-default">
-        <div className="flex items-start justify-between">
-            <div>
-                <p className="text-slate-400 text-sm font-medium">{title}</p>
-                <p className="text-3xl font-bold text-white mt-1">{value}</p>
-                {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
-            </div>
-            <div className={`p-3 rounded-xl bg-gradient-to-br ${color} shadow-lg`}>
-                <Icon size={24} className="text-white" />
-            </div>
-        </div>
-    </div>
-);
 
 // Status indicator component
 const StatusIndicator = ({ status, size = 'md' }) => {

@@ -1,86 +1,112 @@
 import React from 'react';
-import { ArrowRight, Terminal } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { APP_URL } from '../lib/config';
+import TerminalDemo from './TerminalDemo';
+import { motion } from 'framer-motion';
 
 const Hero: React.FC = () => {
   return (
-    <section className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-background">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background pt-20">
       
-      {/* Optimized Background - CSS Radial Gradients (Cheap on GPU) */}
+      {/* Background Ambience */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[80%] h-[60%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent opacity-70"></div>
-        <div className="absolute bottom-[-10%] left-1/2 -translate-x-1/2 w-[60%] h-[40%] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-900/20 via-transparent to-transparent opacity-50"></div>
-        {/* Grid Pattern Overlay */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] animate-pulse-slow" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] animate-pulse-slow [animation-delay:2s]" />
+        {/* Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_80%_80%_at_50%_50%,black,transparent)]" />
       </div>
 
-      <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
+      <div className="relative z-10 max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
         
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 mb-8 backdrop-blur-sm animate-fade-in">
-          <span className="flex h-2 w-2 rounded-full bg-green-400"></span>
-          <span className="text-xs font-medium text-green-200">New: Full Node.js & Pkg Support</span>
-        </div>
+        {/* Left Column: Copy */}
+        <div className="text-left">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 mb-6 backdrop-blur-md"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-mono text-emerald-200">v2.0: Node.js Support Live</span>
+          </motion.div>
 
-        {/* Heading */}
-        <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-8 animate-slide-up">
-          Secure your Python &<br />
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">Node.js Applications.</span>
-        </h1>
+          <motion.h1 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-5xl md:text-7xl font-bold tracking-tight mb-6 leading-tight"
+          >
+            Ship <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400">
+              Uncrackable Apps.
+            </span>
+          </motion.h1>
 
-        {/* Subheading */}
-        <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed animate-slide-up [animation-delay:100ms]">
-          Compile to native machine code via Nuitka. Add HWID locking, offline leases, and license management.
-          Build once, distribute unlimited times with unique license keys.
-        </p>
+          <motion.p 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="text-lg text-slate-400 mb-8 max-w-lg leading-relaxed"
+          >
+            Turn your Python & Node.js scripts into hardware-locked, native executables. 
+            No interpreters. No leaks. Just revenue.
+          </motion.p>
 
-        {/* CTA Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16 animate-slide-up [animation-delay:200ms]">
-          <a href={`${APP_URL}/signup`} className="group relative inline-flex h-12 items-center justify-center overflow-hidden rounded-full bg-white px-8 font-medium text-black transition-all duration-300 hover:bg-gray-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
-            <span className="mr-2">Start Building Free</span>
-            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-          </a>
-          
-          <a href="#how-it-works" className="group inline-flex h-12 items-center justify-center rounded-full border border-white/10 bg-white/5 px-8 font-medium text-white transition-all hover:bg-white/10 backdrop-blur-sm">
-            <Terminal className="mr-2 w-4 h-4 text-gray-400" />
-            <span>See How It Works</span>
-          </a>
-        </div>
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="flex flex-wrap gap-4"
+          >
+            <a href={`${APP_URL}/signup`} className="group relative inline-flex h-12 items-center justify-center overflow-hidden rounded-lg bg-white px-8 font-medium text-black transition-all hover:bg-gray-200 hover:scale-[1.02]">
+              <span>Get API Keys</span>
+              <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
+            </a>
+            <a href="#features" className="inline-flex h-12 items-center justify-center rounded-lg border border-white/10 bg-white/5 px-8 font-medium text-white transition-all hover:bg-white/10 backdrop-blur-sm">
+              View Documentation
+            </a>
+          </motion.div>
 
-        {/* Code/Terminal Preview (decorative) */}
-        <div aria-hidden="true" className="relative w-full max-w-4xl mx-auto mt-10 rounded-xl overflow-hidden border border-white/10 shadow-2xl bg-surface animate-slide-up [animation-delay:300ms]">
-           <div className="flex items-center px-4 py-3 bg-[#16181D] border-b border-white/5">
-              <div className="flex gap-2">
-                 <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50"></div>
-                 <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50"></div>
-                 <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50"></div>
-              </div>
-              <div className="ml-4 text-xs text-gray-500 font-mono">codevault-cli - bash</div>
-           </div>
-           <div className="p-6 text-left font-mono text-sm md:text-base leading-relaxed overflow-x-auto">
-               <div className="flex">
-                   <span className="text-green-400 mr-2">&gt;</span>
-                  <span className="text-blue-400">~</span>
-                  <span className="text-gray-400 ml-2">codevault build ./server.js --target node18-win-x64</span>
-              </div>
-              <div className="mt-2 text-slate-400">
-                  <span className="text-blue-500">i</span> Detecting runtime... <span className="text-green-500">Node.js v18.16.0</span><br/>
-                  <span className="text-blue-500">i</span> Encrypting bytecode (snapshot)... <span className="text-green-500">Done</span><br/>
-                  <span className="text-blue-500">i</span> Injecting HWID validation module... <span className="text-green-500">Done</span><br/>
-                  <span className="text-blue-500">i</span> Packaging native binary with pkg... <span className="text-green-500">Done</span><br/>
-                  <br/>
-                  <span className="text-green-400">Build complete.</span> <span className="text-slate-500">./dist/server.exe (35 MB)</span>
-              </div>
-               <div className="mt-4 flex animate-pulse">
-                   <span className="text-green-400 mr-2">&gt;</span>
-                  <span className="text-blue-400">~</span>
-                   <span className="w-2 h-5 bg-gray-500 ml-2"></span>
+          {/* Social Proof / Ecosystem */}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            className="mt-12 pt-8 border-t border-white/5"
+          >
+            <p className="text-xs text-slate-500 font-mono mb-4">WORKS SEAMLESSLY WITH</p>
+            <div className="flex gap-6 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
+               {/* Simple SVG Placeholders for logos to save GPU/Bandwidth */}
+               <div className="text-xs font-bold text-white flex gap-6">
+                  <span>PYTHON</span>
+                  <span>NODE.JS</span>
+                  <span>ELECTRON</span>
+                  <span>DOCKER</span>
                </div>
             </div>
-           
-            {/* Overlay Gradient for Fade */}
-            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/20 to-transparent"></div>
-         </div>
+          </motion.div>
+        </div>
+
+        {/* Right Column: Visuals */}
+        <div className="relative">
+          {/* Floating Element - Placeholder for Nano Banana Asset */}
+          <motion.div
+            animate={{ y: [0, -20, 0] }}
+            transition={{ repeat: Infinity, duration: 6, ease: "easeInOut" }}
+            className="absolute -top-20 -right-20 w-64 h-64 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-3xl blur-3xl z-0"
+          />
+          
+          <div className="relative z-10">
+             <TerminalDemo />
+          </div>
+
+          {/* Decorative Cube (CSS-only replacement for 3D asset if generation fails) */}
+          <div className="absolute -bottom-10 -right-10 w-32 h-32 border border-white/10 rounded-xl bg-white/5 backdrop-blur-md z-20 flex items-center justify-center shadow-2xl animate-float">
+             <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-400">100%</div>
+                <div className="text-xs text-slate-400">Secure</div>
+             </div>
+          </div>
+        </div>
 
       </div>
     </section>

@@ -25,6 +25,7 @@ export default {
         'float': 'float 6s ease-in-out infinite',
         'glow': 'glow 3s ease-in-out infinite',
         'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'loading-bar': 'loadingBar 2s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -42,6 +43,10 @@ export default {
         glow: {
           '0%, 100%': { opacity: '0.5' },
           '50%': { opacity: '1' },
+        },
+        loadingBar: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(200%)' },
         },
       },
     },
