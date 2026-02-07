@@ -15,6 +15,23 @@ from google.api_core import exceptions
 from google.protobuf import duration_pb2
 
 
+# Tier-based timeout configuration (in seconds)
+TIER_TIMEOUTS = {
+    "free": 1800,  # 30 minutes
+    "pro": 3600,  # 60 minutes
+    "business": 7200,  # 120 minutes
+}
+
+# Tier-based machine type configuration
+# Note: These are string representations for reference/testing
+# The actual values use cloudbuild_v1.BuildOptions.MachineType enum
+TIER_MACHINES = {
+    "business": "N1_HIGHCPU_8",  # Faster, more expensive (~7-8 min builds)
+    "pro": "E2_HIGHCPU_8",  # Balanced (~8-9 min builds)
+    "free": "E2_MEDIUM",  # Budget (free tier) (~12-15 min builds)
+}
+
+
 class CloudBuildClient:
     """Client for triggering and managing Google Cloud Build jobs"""
 
@@ -122,21 +139,18 @@ class CloudBuildClient:
 
         # Set timeout based on plan tier - use duration_pb2.Duration
         tier = build_config.get("plan_tier", "free")
-        timeout_seconds = {
-            "free": 1800,  # 30 minutes
-            "pro": 3600,  # 60 minutes
-            "business": 7200,  # 120 minutes
-        }.get(tier, 3600)
+        timeout_seconds = TIER_TIMEOUTS.get(tier, 3600)
         build.timeout = duration_pb2.Duration(seconds=timeout_seconds)
 
         # Set machine type based on plan tier
         # Access MachineType via BuildOptions to avoid import errors
+        # Maps to TIER_MACHINES: business->N1_HIGHCPU_8, pro->E2_HIGHCPU_8, free->E2_MEDIUM
         MachineType = cloudbuild_v1.BuildOptions.MachineType
 
         machine_types = {
-            "business": MachineType.N1_HIGHCPU_8,  # Faster, more expensive (~7-8 min builds)
-            "pro": MachineType.E2_HIGHCPU_8,  # Balanced (~8-9 min builds)
-            "free": MachineType.E2_MEDIUM,  # Budget (free tier) (~12-15 min builds)
+            "business": MachineType.N1_HIGHCPU_8,
+            "pro": MachineType.E2_HIGHCPU_8,
+            "free": MachineType.E2_MEDIUM,
         }
         machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
         build.options.machine_type = machine_type

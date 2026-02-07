@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { ArrowRight, Terminal } from 'lucide-react';
 
 const Hero: React.FC = () => {
@@ -59,8 +59,8 @@ const Hero: React.FC = () => {
               <div className="ml-4 text-xs text-gray-500 font-mono">codevault-cli - bash</div>
            </div>
            <div className="p-6 text-left font-mono text-sm md:text-base leading-relaxed overflow-x-auto">
-              <div className="flex">
-                  <span className="text-green-400 mr-2">></span>
+               <div className="flex">
+                   <span className="text-green-400 mr-2">&gt;</span>
                   <span className="text-blue-400">~</span>
                   <span className="text-gray-400 ml-2">codevault build ./server.js --target node18-win-x64</span>
               </div>
@@ -72,8 +72,8 @@ const Hero: React.FC = () => {
                   <br/>
                   <span className="text-green-400">Build complete.</span> <span className="text-slate-500">./dist/server.exe (35 MB)</span>
               </div>
-              <div className="mt-4 flex animate-pulse">
-                  <span className="text-green-400 mr-2">></span>
+               <div className="mt-4 flex animate-pulse">
+                   <span className="text-green-400 mr-2">&gt;</span>
                   <span className="text-blue-400">~</span>
                   <span className="w-2 h-5 bg-gray-500 ml-2"></span>
               </div>

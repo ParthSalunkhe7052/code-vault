@@ -689,7 +689,7 @@ class CloudRunner:
             # "--remove-output", # Removed: causes race conditions with scons-report.txt
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--disable-ccache", # Disable ccache to reduce external process calls
+            "--disable-ccache",  # Disable ccache to reduce external process calls
             # "--show-progress", # Disabled to reduce CI log spam
         ]
 
@@ -701,7 +701,9 @@ class CloudRunner:
         fast_build = self.config.get("fast_build", False)
         if fast_build or sys.platform == "win32":
             if sys.platform == "win32":
-                logger.warning("Windows detected: Disabling --onefile for stability in Wine")
+                logger.warning(
+                    "Windows detected: Disabling --onefile for stability in Wine"
+                )
             else:
                 logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
             # In fast build or Windows/Wine, we output to a directory
@@ -720,7 +722,9 @@ class CloudRunner:
         if sys.platform == "win32":
             # Windows/Wine is unstable with multiple jobs
             job_count = 1
-            logger.warning("Windows detected: Forcing job count to 1 for stability in Wine")
+            logger.warning(
+                "Windows detected: Forcing job count to 1 for stability in Wine"
+            )
         else:
             # Linux: Force job count to 1 to avoid Scons race conditions with @@link_input.txt
             job_count = 1
@@ -770,11 +774,9 @@ class CloudRunner:
             "PIL",
             "matplotlib",
             "certifi",
-            "_ssl",
             "_uuid",
             "_zoneinfo",
             "_cffi_backend",
-            "_hashlib",
             "_lzma",
             "_bz2",
             "_socket",
@@ -848,7 +850,9 @@ class CloudRunner:
         if sys.platform == "win32":
             # Use os.system on Windows/Wine to avoid subprocess handle bugs
             # Set WINEDEBUG=-all to reduce handle usage and chatter
-            cmd_str = "set WINEDEBUG=-all && " + " ".join([f'"{c}"' if " " in c else c for c in cmd])
+            cmd_str = "set WINEDEBUG=-all && " + " ".join(
+                [f'"{c}"' if " " in c else c for c in cmd]
+            )
             logger.info(f"Nuitka command (Windows): {cmd_str[:500]}...")
             exit_code = os.system(cmd_str)
             if exit_code != 0:
@@ -886,7 +890,15 @@ def main():
     try:
         config = json.loads(args.config)
         source_dir = Path(args.source).resolve()
-        output_dir = source_dir / "build_output"
+        
+        # Use platform-specific output dir to avoid collisions in parallel Cloud Build steps
+        platform_suffix = sys.platform
+        if platform_suffix == "linux":
+            # Check if we are in Wine
+            if os.environ.get("WINEPREFIX"):
+                platform_suffix = "windows_wine"
+        
+        output_dir = source_dir / f"build_output_{platform_suffix}"
         output_dir.mkdir(exist_ok=True)
 
         runner = CloudRunner(source_dir, output_dir, config)

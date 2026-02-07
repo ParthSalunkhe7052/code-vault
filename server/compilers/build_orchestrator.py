@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import os
 import hashlib
+import time
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Literal
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Utility Functions
 # =============================================================================
 
+
 def atomic_write_text(path: Path, content: str) -> None:
     """
     Atomically write text to a file.
@@ -32,10 +34,11 @@ def atomic_write_text(path: Path, content: str) -> None:
     Prevents race conditions and file corruption by using temp file + atomic rename.
     """
     import tempfile
+
     # Create temp file in same directory for atomic rename
-    fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix='.tmp_', text=True)
+    fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", text=True)
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         # Atomic operation on same filesystem
         os.replace(temp_path, str(path))
@@ -67,12 +70,12 @@ def check_disk_space(path: Path, required_gb: float = 2.0) -> bool:
         raise BuildError(
             f"Insufficient disk space: {available_gb:.1f}GB available, "
             f"{required_gb}GB required",
-            "resource_error"
+            "resource_error",
         )
     return True
 
 
-def get_build_cache_key(source_dir: Path, config: 'BuildConfig') -> str:
+def get_build_cache_key(source_dir: Path, config: "BuildConfig") -> str:
     """
     Generate cache key based on source code and configuration.
 
@@ -155,7 +158,9 @@ class BuildError(Exception):
         retryable: Whether the build can be retried
     """
 
-    def __init__(self, message: str, error_type: str = "general", retryable: bool = False):
+    def __init__(
+        self, message: str, error_type: str = "general", retryable: bool = False
+    ):
         self.message = message
         self.error_type = error_type
         self.retryable = retryable
@@ -274,7 +279,7 @@ class BuildOrchestrator:
                 raise BuildError(
                     "Python compilation failed - no executable produced",
                     "compile_error",
-                    retryable=True
+                    retryable=True,
                 )
 
             await self.log(f"✓ Compilation complete: {exe_path.name}", log_callback)
@@ -395,7 +400,7 @@ class BuildOrchestrator:
                 raise BuildError(
                     "Node.js compilation failed - no executable produced",
                     "compile_error",
-                    retryable=True
+                    retryable=True,
                 )
 
             await self.log(f"✓ Compilation complete: {exe_path.name}", log_callback)
@@ -454,8 +459,7 @@ class BuildOrchestrator:
         async def build_with_limit(config: BuildConfig) -> Path:
             async with semaphore:
                 await self.log(
-                    f"🚀 Starting parallel build: {config.project_name}",
-                    log_callback
+                    f"🚀 Starting parallel build: {config.project_name}", log_callback
                 )
                 return await self.build(config, log_callback)
 

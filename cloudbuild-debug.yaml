@@ -34,8 +34,8 @@ steps:
         # Use all variables to satisfy API validation
         echo "Building: ${_BUILD_ID} for ${_PROJECT_ID} (${_LANGUAGE})"
         echo "Target: ${_TARGET_PLATFORMS}, Output: ${_OUTPUT_NAME}, Debug: ${_DEBUG_BUILD}"
-        echo "Callback: ${_CALLBACK_URL} / ${_CALLBACK_SECRET}"
-        echo "Internal: ${_DECODED_CONFIG} / ${_SRC_DIR}"
+        echo "Callback: ${_CALLBACK_URL} / Callback secret set"
+        echo "Internal: Decoded config present / ${_SRC_DIR}"
         
         if [[ "${_SOURCE_URL}" == gs://* ]]; then
           gsutil cp "${_SOURCE_URL}" source.zip
@@ -57,7 +57,7 @@ steps:
           echo "Structure looks correct"
           mkdir -p ./project/source
           # Move everything EXCEPT source folder into source folder
-          find ./project -maxdepth 1 ! -name "source" ! -name "." -exec mv {} ./project/source/ \;
+          find ./project -mindepth 1 -maxdepth 1 ! -name "source" ! -name "." -exec mv {} ./project/source/ \;
         elif [ -d "./project/source" ]; then
           echo "Source already in subfolder"
         else

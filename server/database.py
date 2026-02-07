@@ -130,7 +130,7 @@ async def check_database_health() -> dict:
 
             # Get pool stats
             size = db_pool.get_size()
-            free = db_pool.get_free_size()
+            free = db_pool.get_idle_size()
 
             return {
                 "status": "healthy",

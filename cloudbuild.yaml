@@ -58,18 +58,22 @@ steps:
         apt-get update -qq && apt-get install -y -qq unzip > /dev/null 2>&1
         
         echo "[Cloud Build] Extracting source..."
-        unzip -q source.zip -d ./project || exit 1
+        unzip -q source.zip -d ./extracted
+        
+        mkdir -p ./project/source
         
         # Normalize directory structure
-        if [ -d "./project/.github" ]; then
+        if [ -d "./extracted/.github" ]; then
           echo "[Cloud Build] Structure looks correct"
-          mkdir -p ./project/source
-          find ./project -maxdepth 1 ! -name "source" ! -name "." -exec mv {} ./project/source/ \;
-        elif [ -d "./project/source" ]; then
+          # Move EVERYTHING including hidden files
+          cp -r ./extracted/. ./project/source/
+        elif [ -d "./extracted/source" ]; then
           echo "[Cloud Build] Source already in subfolder"
+          cp -r ./extracted/source/. ./project/source/
+          if [ -d "./extracted/.github" ]; then cp -r ./extracted/.github ./project/source/ 2>/dev/null || true; fi
         else
-          mkdir -p ./project/source
-          mv ./project/* ./project/source/ 2>/dev/null || true
+          echo "[Cloud Build] Flattening structure"
+          cp -r ./extracted/. ./project/source/ 2>/dev/null || true
         fi
         
         echo "[Cloud Build] Source prepared successfully"
@@ -102,7 +106,7 @@ steps:
     args:
       - '-c'
       - |
-        set -e
+        # set -e removed to allow partial success
         
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"linux"* || "${_LANGUAGE}" != "python" ]]; then
@@ -124,7 +128,7 @@ steps:
         # Run runner
         python3 "./project/source/.github/scripts/cloud_runner.py" \
           --config "$$decoded_config" \
-          --source "./project/source"
+          --source "./project/source" || echo "Linux build failed (continuing)"
         
         # Package output
         cd "./project/source"
@@ -148,7 +152,7 @@ steps:
     args:
       - '-c'
       - |
-        set -e
+        # set -e removed to allow partial success
         
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"windows"* || "${_LANGUAGE}" != "python" ]]; then
@@ -234,8 +238,15 @@ steps:
         linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
         windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
         
+        # Compute overall status
+        if [ "$$linux_status" != "success" ] && [ "$$linux_status" != "completed" ] || [ "$$windows_status" != "success" ] && [ "$$windows_status" != "completed" ]; then
+          overall_status="failed"
+        else
+          overall_status="completed"
+        fi
+        
         # Overall HMAC
-        payload='{"build_id":"'"${_BUILD_ID}"'","status":"completed","timestamp":'"$$(date +%s)"'}'
+        payload='{"build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","timestamp":'"$$(date +%s)"'}'
         sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $$2}')
         
         curl -sf -X POST "${_CALLBACK_URL}" \

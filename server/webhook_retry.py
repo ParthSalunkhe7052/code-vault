@@ -17,7 +17,7 @@ import httpx
 
 from database import get_db, release_db
 from utils import utc_now, sanitize_log_message
-from webhook_routes import validate_webhook_url
+from routes.webhook_routes import validate_webhook_url
 
 logger = logging.getLogger(__name__)
 
@@ -175,14 +175,18 @@ class WebhookRetryQueue:
     @staticmethod
     async def cleanup_old_retries(days: int = 7):
         """Clean up old completed/failed retry records."""
+        # Validate days is an integer
+        days = int(days)
+
         conn = await get_db()
         try:
             result = await conn.execute(
                 """
                 DELETE FROM webhook_retries 
                 WHERE status IN ('completed', 'failed') 
-                AND updated_at < NOW() - INTERVAL '{} days'
-            """.format(days)
+                AND updated_at < NOW() - ($1 * INTERVAL '1 day')
+            """,
+                days,
             )
             logger.info(f"[WebhookRetry] Cleaned up old retry records")
         finally:

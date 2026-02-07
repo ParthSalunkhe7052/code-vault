@@ -204,30 +204,22 @@ class TestCloudBuildIntegration:
 
     def test_tier_based_timeout_configuration(self):
         """Test that different tiers get different timeouts"""
-        # Test the timeout configuration logic
-        tier_timeouts = {
-            "free": 1800,  # 30 minutes
-            "pro": 3600,  # 60 minutes
-            "business": 7200,  # 120 minutes
-        }
+        from cloud_build_integration import TIER_TIMEOUTS
 
-        # Verify expected values
-        assert tier_timeouts["free"] == 1800
-        assert tier_timeouts["pro"] == 3600
-        assert tier_timeouts["business"] == 7200
-        assert tier_timeouts.get("unknown", 3600) == 3600  # Default
+        # Verify expected values from canonical configuration
+        assert TIER_TIMEOUTS["free"] == 1800
+        assert TIER_TIMEOUTS["pro"] == 3600
+        assert TIER_TIMEOUTS["business"] == 7200
+        assert TIER_TIMEOUTS.get("unknown", 3600) == 3600  # Default
 
     def test_tier_based_machine_types(self):
         """Test that different tiers get different machine types"""
-        tier_machines = {
-            "business": "N2_HIGHCPU_8",
-            "pro": "E2_HIGHCPU_8",
-            "free": "E2_HIGHCPU_4",
-        }
+        from cloud_build_integration import TIER_MACHINES
 
-        assert tier_machines["business"] == "N2_HIGHCPU_8"
-        assert tier_machines["pro"] == "E2_HIGHCPU_8"
-        assert tier_machines["free"] == "E2_HIGHCPU_4"
+        # Verify expected values from canonical configuration
+        assert TIER_MACHINES["business"] == "N1_HIGHCPU_8"
+        assert TIER_MACHINES["pro"] == "E2_HIGHCPU_8"
+        assert TIER_MACHINES["free"] == "E2_MEDIUM"
 
 
 class TestDatabaseMigration:

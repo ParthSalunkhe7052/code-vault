@@ -35,12 +35,12 @@ def validate_safe_path(base_dir: Path, user_input: str) -> Path:
     candidate = base_dir / os.path.basename(user_input)
 
     try:
-        resolved = candidate.resolve()
         base_resolved = base_dir.resolve()
-        if not str(resolved).startswith(str(base_resolved)):
-            raise HTTPException(400, "Invalid path component")
-        return resolved
-    except (OSError, ValueError):
+        candidate_resolved = candidate.resolve()
+        # Check if candidate is within base_dir using relative_to
+        candidate_resolved.relative_to(base_resolved)
+        return candidate_resolved
+    except (ValueError, OSError):
         raise HTTPException(400, "Invalid path component")
 
 
@@ -88,7 +88,6 @@ async def invalidate_cached_source(project_id: str) -> None:
     """Invalidate any cached source files for a project"""
     try:
         # Delete cached source archive if it exists
-        cache_key = f"source:{project_id}"
         # Implementation depends on your cache system (Redis, etc.)
         logger.info(f"[CloudBuild] Invalidated cache for project {project_id}")
     except Exception as e:

@@ -5,6 +5,7 @@ Provides health checks, metrics collection, and alerting capabilities.
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Callable, List
@@ -217,17 +218,22 @@ async def log_alert_handler(alert_data: Dict):
 
 async def webhook_alert_handler(alert_data: Dict):
     """Send alerts to configured webhook."""
-    from config import ADMIN_EMAIL
+    webhook_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
 
-    # Only send if ADMIN_EMAIL is configured (as a proxy for "production mode")
-    if not ADMIN_EMAIL:
+    if not webhook_url:
+        logger.warning(
+            "[ALERT] ALERT_WEBHOOK_URL not configured, skipping webhook alert"
+        )
+        return
+
+    if not webhook_url.startswith("http"):
+        logger.warning(
+            f"[ALERT] Invalid webhook URL (must start with http): {webhook_url[:20]}..."
+        )
         return
 
     try:
         import httpx
-
-        # This could be a Slack webhook, PagerDuty, etc.
-        webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.post(
