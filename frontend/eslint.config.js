@@ -27,16 +27,14 @@ export default [
                 'warn',
                 { allowConstantExport: true },
             ],
-            // Relaxed rules for production use - false positives are common in React
-            'no-unused-vars': ['warn', {
+            'no-unused-vars': ['error', {
                 'argsIgnorePattern': '^_',
                 'varsIgnorePattern': '^_',
                 'caughtErrorsIgnorePattern': '^_'
             }],
             'no-console': 'off',
-            // Keep as warnings, not errors
-            'no-undef': 'warn',
-            'no-empty': 'warn',
+            'no-undef': 'error',
+            'no-empty': 'error',
             'no-constant-condition': 'warn',
             // Security: These should be warnings but not break builds
             'no-prototype-builtins': 'warn',

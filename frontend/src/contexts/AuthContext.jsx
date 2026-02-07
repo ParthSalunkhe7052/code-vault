@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { auth } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [sessionExpired, setSessionExpired] = useState(false);
 
     const refreshUser = useCallback(async () => {
         try {
@@ -19,20 +20,48 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     const logout = useCallback(async () => {
-        await auth.logout();
-        setUser(null);
+        try {
+            await auth.logout();
+        } catch (error) {
+            console.error('[AuthContext] Logout cleanup failed:', error);
+        } finally {
+            // Always clear user state regardless of storage cleanup success
+            setUser(null);
+            setSessionExpired(false);
+        }
     }, []);
 
     const login = useCallback(async (email, password) => {
         const userData = await auth.login(email, password);
         setUser(userData);
+        setSessionExpired(false);
         return userData;
     }, []);
 
     const register = useCallback(async (email, password, name) => {
         const userData = await auth.register(email, password, name);
         setUser(userData);
+        setSessionExpired(false);
         return userData;
+    }, []);
+
+    /**
+     * Acknowledge session expiry -- clears the flag and user state.
+     * Call this when the user clicks "Log in again" in the SessionExpiredModal.
+     */
+    const acknowledgeSessionExpired = useCallback(() => {
+        setUser(null);
+        setSessionExpired(false);
+    }, []);
+
+    // Listen for session-expired events dispatched by the API interceptor
+    useEffect(() => {
+        const handleSessionExpired = () => {
+            setSessionExpired(true);
+        };
+
+        window.addEventListener('session-expired', handleSessionExpired);
+        return () => window.removeEventListener('session-expired', handleSessionExpired);
     }, []);
 
     useEffect(() => {
@@ -45,16 +74,21 @@ export const AuthProvider = ({ children }) => {
         initAuth();
     }, [refreshUser]);
 
-    const value = {
+    const isAuthenticated = !!user;
+    const isAdmin = user?.role === 'admin';
+
+    const value = useMemo(() => ({
         user,
         loading,
-        isAuthenticated: !!user,
-        isAdmin: user?.role === 'admin',
+        isAuthenticated,
+        isAdmin,
+        sessionExpired,
         refreshUser,
         logout,
         login,
-        register
-    };
+        register,
+        acknowledgeSessionExpired
+    }), [user, loading, isAuthenticated, isAdmin, sessionExpired, refreshUser, logout, login, register, acknowledgeSessionExpired]);
 
     return (
         <AuthContext.Provider value={value}>

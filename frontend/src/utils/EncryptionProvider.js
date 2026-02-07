@@ -193,8 +193,7 @@ export const SENSITIVE_KEYS = [
     'license_wrapper_token',
     'license_wrapper_user',
     'auth_token',
-    'api_key',
-    'codevault_settings'
+    'api_key'
 ];
 
 /**

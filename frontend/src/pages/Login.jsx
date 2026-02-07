@@ -4,6 +4,9 @@ import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail } from 'lucide-react
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 
+// Email validation regex (module-level constant — no need to recreate per render)
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const Login = () => {
     const toast = useToast();
     const { login, register } = useAuth();
@@ -25,10 +28,7 @@ const Login = () => {
         setError('');
     }, [location.pathname, location.search]);
 
-    // Email validation regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    // Validate inputs
+    // Validate inputs (real-time feedback)
     const validation = useMemo(() => {
         const errors = [];
 
@@ -51,35 +51,15 @@ const Login = () => {
         };
     }, [email, password, name, isRegisterMode, loading]);
 
-    const validateInputs = () => {
-        if (!emailRegex.test(email)) {
-            setError('Please enter a valid email address');
-            toast.error('Invalid email format');
-            return false;
-        }
-
-        if (password.length < 8) {
-            setError('Password must be at least 8 characters');
-            toast.error('Password too short');
-            return false;
-        }
-
-        if (isRegisterMode && name.trim().length < 2) {
-            setError('Name must be at least 2 characters');
-            toast.error('Name too short');
-            return false;
-        }
-
-        return true;
-    };
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError('');
 
-        // Additional validation before API call
-        if (!validateInputs()) {
+        if (!validation.isValid) {
+            const firstError = validation.errors[0];
+            setError(firstError);
+            toast.error(firstError);
             setLoading(false);
             return;
         }

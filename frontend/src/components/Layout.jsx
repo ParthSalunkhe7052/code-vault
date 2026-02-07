@@ -38,6 +38,12 @@ const Layout = () => {
 
     return (
         <div className="flex h-screen w-full text-slate-200 overflow-hidden font-sans selection:bg-primary/30 selection:text-primary-light" style={{ backgroundColor: 'var(--cv-bg)' }}>
+            <a
+                href="#main-content"
+                className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-indigo-600 focus:text-white focus:font-semibold focus:text-sm focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            >
+                Skip to content
+            </a>
             <div className="fixed inset-0 bg-black pointer-events-none z-0" />
             <img src={backgroundMain} alt="Background" className={`fixed inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen z-0 ${isDarkMatter ? 'opacity-20' : 'opacity-40'}`} />
             <div className="fixed inset-0 bg-grid-pattern opacity-10 pointer-events-none z-0" />
@@ -56,7 +62,7 @@ const Layout = () => {
                     </div>
                 </div>
 
-                <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+                <nav aria-label="Main navigation" className="flex-1 p-4 space-y-2 overflow-y-auto">
                     <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--cv-text-muted)' }}>
                         Mission Control
                     </div>
@@ -170,7 +176,7 @@ const Layout = () => {
                 </div>
             </aside>
 
-            <main className="flex-1 overflow-hidden relative z-10">
+            <main id="main-content" className="flex-1 overflow-hidden relative z-10">
                 <div className="h-full overflow-y-auto p-8 scroll-smooth">
                     <Outlet />
                 </div>

@@ -76,7 +76,8 @@ export function CloudBuildButton({
   const startBuild = async () => {
     setStatus('starting');
     setError(null);
-    setProgress(0);
+    setProgress(5); // Start at 5% for immediate feedback
+    setDisplayProgress(5);
     setDownloadUrl(null);
     setPlatformArtifacts({});
     
@@ -508,16 +509,26 @@ export function CloudBuildButton({
           </div>
           
           {/* Single platform download */}
-          {!isMultiPlatform && downloadUrl && (
-            <a
-              href={downloadUrl}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors w-full"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Download className="w-4 h-4" />
-              Download Executable
-            </a>
+          {!isMultiPlatform && (
+            downloadUrl ? (
+              <a
+                href={downloadUrl}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors w-full"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="w-4 h-4" />
+                Download Executable
+              </a>
+            ) : (
+              <div className="text-center p-2">
+                 <p className="text-sm text-emerald-400 mb-2">Build Successful</p>
+                 <span className="text-xs text-slate-400 flex items-center justify-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Finalizing download...
+                 </span>
+              </div>
+            )
           )}
           
           {/* Multi-platform downloads */}

@@ -7,6 +7,7 @@ import { Step1Upload, Step2Review, Step3Configure, Step4License, Step5Build } fr
 import PrerequisitesCheck from '../PrerequisitesCheck';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useProjectBuild } from '../../contexts/BuildContext';
+import api from '../../services/api';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -526,13 +527,8 @@ const ProjectWizard = ({
         }
 
         try {
-            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/build/installer/${currentJobId}/cancel`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                projectBuild.cancel();
-            }
+            await api.delete(`/build/installer/${currentJobId}/cancel`);
+            projectBuild.cancel();
         } catch (error) {
             projectBuild.cancel();
         }

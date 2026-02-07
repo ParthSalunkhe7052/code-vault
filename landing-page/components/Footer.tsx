@@ -1,7 +1,7 @@
 import React from 'react';
+import { APP_URL } from '../lib/config';
 
 const Footer: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
 
   return (
     <footer className="border-t border-white/5 bg-background pt-20 pb-10">
@@ -11,7 +11,7 @@ const Footer: React.FC = () => {
             <h4 className="font-bold text-white mb-4 flex items-center gap-2">
               CodeVault
             </h4>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-400">
               Protecting intellectual property for developers worldwide.
             </p>
           </div>
@@ -53,7 +53,7 @@ const Footer: React.FC = () => {
           </div>
         </div>
         
-        <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-600">
+        <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500">
           <p>&copy; {new Date().getFullYear()} CodeVault Inc. All rights reserved.</p>
         </div>
       </div>

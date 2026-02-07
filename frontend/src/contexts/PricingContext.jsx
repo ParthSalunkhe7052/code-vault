@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import api, { auth, subscription } from '../services/api';
+import { useAuth } from './AuthContext';
 
 const PricingContext = createContext();
 
@@ -49,79 +50,83 @@ const DEFAULT_LIMITS = {
 };
 
 export const PricingProvider = ({ children }) => {
+  const { user: authUser } = useAuth();
   const [tier, setTier] = useState(TIERS.FREE);
   const [buildCredits, setBuildCredits] = useState(0);
   const [limits, setLimits] = useState(DEFAULT_LIMITS[TIERS.FREE]);
   const [loading, setLoading] = useState(true);
 
-  // Load User Data from Backend (single source of truth)
+  // Sync pricing data whenever the authenticated user changes
   useEffect(() => {
-    const initPricing = async () => {
+    let cancelled = false;
+
+    const syncPricing = async () => {
+      if (!authUser) {
+        // No user = reset to free defaults
+        setTier(TIERS.FREE);
+        setLimits(DEFAULT_LIMITS[TIERS.FREE]);
+        setBuildCredits(0);
+        setLoading(false);
+        return;
+      }
+
       try {
-        const user = await auth.getUser();
-        
-        if (user) {
-          // Use the plan from the database - no client-side overrides
-          const userPlan = user.plan || TIERS.FREE;
-          setTier(userPlan);
-          
-          // Fetch actual limits from backend (uses api instance which auto-attaches auth header)
-          try {
-            const response = await api.get('/auth/limits');
-            if (response.status === 200) {
-              const backendLimits = response.data;
-              setLimits({
-                maxProjects: backendLimits.max_projects === -1 ? Infinity : backendLimits.max_projects,
-                maxLicenses: backendLimits.max_licenses_per_project === -1 ? Infinity : backendLimits.max_licenses_per_project,
-                buildCredits: backendLimits.cloud_builds_per_month === -1 ? Infinity : backendLimits.cloud_builds_per_month,
-                canCloudBuild: backendLimits.can_cloud_build,
-                offlineLease: userPlan !== TIERS.FREE,
-                analytics: backendLimits.analytics,
-                webhooks: backendLimits.webhooks,
-                nodeSupport: backendLimits.node_support
-              });
-              setBuildCredits(backendLimits.build_credits_remaining || 0);
-            } else {
-              // Fallback to default limits if endpoint fails
-              setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
-              setBuildCredits(user.build_credits || 0);
-            }
-          } catch {
-            // Fallback to default limits
+        const userPlan = authUser.plan || TIERS.FREE;
+        if (!cancelled) setTier(userPlan);
+
+        // Fetch actual limits from backend
+        try {
+          const response = await api.get('/auth/limits');
+          if (!cancelled && response.status === 200) {
+            const backendLimits = response.data;
+            setLimits({
+              maxProjects: backendLimits.max_projects === -1 ? Infinity : backendLimits.max_projects,
+              maxLicenses: backendLimits.max_licenses_per_project === -1 ? Infinity : backendLimits.max_licenses_per_project,
+              buildCredits: backendLimits.cloud_builds_per_month === -1 ? Infinity : backendLimits.cloud_builds_per_month,
+              canCloudBuild: backendLimits.can_cloud_build,
+              offlineLease: userPlan !== TIERS.FREE,
+              analytics: backendLimits.analytics,
+              webhooks: backendLimits.webhooks,
+              nodeSupport: backendLimits.node_support
+            });
+            setBuildCredits(backendLimits.build_credits_remaining || 0);
+          } else if (!cancelled) {
             setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
-            setBuildCredits(user.build_credits || 0);
+            setBuildCredits(authUser.build_credits || 0);
+          }
+        } catch {
+          if (!cancelled) {
+            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setBuildCredits(authUser.build_credits || 0);
           }
         }
       } catch (err) {
         console.error('[Pricing] Failed to load user pricing data', err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    initPricing();
-    
-    // Listen for updates (optional, if other components update user)
-    window.addEventListener('user-updated', initPricing);
-    return () => window.removeEventListener('user-updated', initPricing);
-  }, []);
+    syncPricing();
+    return () => { cancelled = true; };
+  }, [authUser]);
 
-  const upgradeToPro = () => {
+  const upgradeToPro = useCallback(() => {
     // This is just for optimistic UI in the mock flow.
     // In reality, this should trigger a backend sync.
     setTier(TIERS.PRO);
-  };
+  }, []);
 
-  const downgradeToFree = () => {
+  const downgradeToFree = useCallback(() => {
     setTier(TIERS.FREE);
-  };
+  }, []);
 
   /**
    * Create a Polar checkout session and redirect the user.
    * @param {string} targetTier - TIERS.PRO or TIERS.BUSINESS
    * @returns {Promise<string>} checkout URL
    */
-  const createCheckout = async (targetTier) => {
+  const createCheckout = useCallback(async (targetTier) => {
     const productId = POLAR_PRODUCTS[targetTier];
     if (!productId) throw new Error(`No product ID for tier: ${targetTier}`);
 
@@ -130,12 +135,12 @@ export const PricingProvider = ({ children }) => {
       window.location.href = data.checkout_url;
     }
     return data.checkout_url;
-  };
+  }, []);
 
   /**
    * Refresh pricing data from backend (e.g. after returning from checkout).
    */
-  const refreshPricing = async () => {
+  const refreshPricing = useCallback(async () => {
     try {
       const status = await subscription.getStatus();
       if (status) {
@@ -157,48 +162,54 @@ export const PricingProvider = ({ children }) => {
     } catch (err) {
       console.error('[Pricing] Failed to refresh pricing data', err);
     }
-  };
+  }, []);
 
-  const canCreateProject = (currentCount) => {
+  const canCreateProject = useCallback((currentCount) => {
     return currentCount < limits.maxProjects;
-  };
+  }, [limits.maxProjects]);
 
-  const canCreateLicense = (currentCount) => {
+  const canCreateLicense = useCallback((currentCount) => {
     return currentCount < limits.maxLicenses;
-  };
+  }, [limits.maxLicenses]);
 
-  const hasBuildCredits = () => {
+  const hasBuildCredits = useCallback(() => {
     if (tier === TIERS.FREE) return false; 
     return buildCredits > 0 || limits.buildCredits === Infinity;
-  };
+  }, [tier, buildCredits, limits.buildCredits]);
 
-  const consumeBuildCredit = () => {
+  const consumeBuildCredit = useCallback(() => {
     if (limits.buildCredits === Infinity) return true;
     if (buildCredits > 0) {
+      // Optimistic decrement for immediate UI feedback
       setBuildCredits(prev => prev - 1);
+      // Sync with server in the background to get the real count
+      // (the backend deducts on /cloud-build/start, so this re-fetches the truth)
+      refreshPricing().catch(() => { /* silent - optimistic value is still valid */ });
       return true;
     }
     return false;
-  };
+  }, [limits.buildCredits, buildCredits, refreshPricing]);
 
-  const getLimits = () => limits;
+  const getLimits = useCallback(() => limits, [limits]);
+
+  const value = useMemo(() => ({
+    tier,
+    buildCredits,
+    limits,
+    loading,
+    upgradeToPro,
+    downgradeToFree,
+    createCheckout,
+    refreshPricing,
+    canCreateProject,
+    canCreateLicense,
+    hasBuildCredits,
+    consumeBuildCredit,
+    getLimits
+  }), [tier, buildCredits, limits, loading, upgradeToPro, downgradeToFree, createCheckout, refreshPricing, canCreateProject, canCreateLicense, hasBuildCredits, consumeBuildCredit, getLimits]);
 
   return (
-    <PricingContext.Provider value={{
-      tier,
-      buildCredits,
-      limits,
-      loading,
-      upgradeToPro,
-      downgradeToFree,
-      createCheckout,
-      refreshPricing,
-      canCreateProject,
-      canCreateLicense,
-      hasBuildCredits,
-      consumeBuildCredit,
-      getLimits
-    }}>
+    <PricingContext.Provider value={value}>
       {children}
     </PricingContext.Provider>
   );

@@ -1,11 +1,10 @@
 import React from 'react';
 import { ArrowRight, Terminal } from 'lucide-react';
+import { APP_URL } from '../lib/config';
 
 const Hero: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
-
   return (
-    <div className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-background">
+    <section className="relative min-h-screen flex flex-col justify-center items-center pt-24 overflow-hidden bg-background">
       
       {/* Optimized Background - CSS Radial Gradients (Cheap on GPU) */}
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -48,8 +47,8 @@ const Hero: React.FC = () => {
           </a>
         </div>
 
-        {/* Code/Terminal Preview */}
-        <div className="relative w-full max-w-4xl mx-auto mt-10 rounded-xl overflow-hidden border border-white/10 shadow-2xl bg-surface animate-slide-up [animation-delay:300ms]">
+        {/* Code/Terminal Preview (decorative) */}
+        <div aria-hidden="true" className="relative w-full max-w-4xl mx-auto mt-10 rounded-xl overflow-hidden border border-white/10 shadow-2xl bg-surface animate-slide-up [animation-delay:300ms]">
            <div className="flex items-center px-4 py-3 bg-[#16181D] border-b border-white/5">
               <div className="flex gap-2">
                  <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50"></div>
@@ -75,16 +74,16 @@ const Hero: React.FC = () => {
                <div className="mt-4 flex animate-pulse">
                    <span className="text-green-400 mr-2">&gt;</span>
                   <span className="text-blue-400">~</span>
-                  <span className="w-2 h-5 bg-gray-500 ml-2"></span>
-              </div>
-           </div>
+                   <span className="w-2 h-5 bg-gray-500 ml-2"></span>
+               </div>
+            </div>
            
-           {/* Overlay Gradient for Fade */}
-           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/20 to-transparent"></div>
-        </div>
+            {/* Overlay Gradient for Fade */}
+            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/20 to-transparent"></div>
+         </div>
 
       </div>
-    </div>
+    </section>
   );
 };
 

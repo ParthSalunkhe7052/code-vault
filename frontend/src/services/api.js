@@ -86,9 +86,15 @@ api.interceptors.response.use(
         if (error.response?.status === 401) {
             // Clear cached token and encrypted storage
             cachedToken = null;
-            await secureLocalStorage.removeItem(TOKEN_KEY);
-            await secureLocalStorage.removeItem(USER_KEY);
-            window.location.href = '/login';
+            try {
+                await secureLocalStorage.removeItem(TOKEN_KEY);
+                await secureLocalStorage.removeItem(USER_KEY);
+            } catch (cleanupError) {
+                console.error('Failed to clean up auth storage:', cleanupError);
+            }
+            // Dispatch session-expired event instead of hard navigation
+            // This allows React components to handle it gracefully (show modal, preserve state)
+            window.dispatchEvent(new Event('session-expired'));
         }
         return Promise.reject(error);
     }
@@ -132,8 +138,6 @@ export const auth = {
         const response = await api.get('/auth/me');
         const user = response.data;
         await secureLocalStorage.setItem(USER_KEY, user);
-        // Dispatch event for components listening for user updates (e.g., Layout sidebar)
-        window.dispatchEvent(new Event('user-updated'));
         return user;
     },
     regenerateApiKey: () => api.post('/auth/regenerate-api-key').then(res => res.data),

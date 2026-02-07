@@ -704,6 +704,10 @@ class CloudRunner:
                 logger.warning(
                     "Windows detected: Disabling --onefile for stability in Wine"
                 )
+                # FIX: Use pefile instead of depends.exe to avoid Wine crashes (missing MFC42.dll)
+                # Newer Nuitka uses --dependency-tool=pefile, older uses experimental flag
+                # We add both for compatibility, Nuitka ignores unknown experimental flags usually
+                cmd.append("--experimental=use_pefile_recursion")
             else:
                 logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
             # In fast build or Windows/Wine, we output to a directory
@@ -893,10 +897,11 @@ def main():
         
         # Use platform-specific output dir to avoid collisions in parallel Cloud Build steps
         platform_suffix = sys.platform
-        if platform_suffix == "linux":
-            # Check if we are in Wine
-            if os.environ.get("WINEPREFIX"):
-                platform_suffix = "windows_wine"
+        
+        # Detect Wine environment (sys.platform is 'win32' in Wine)
+        if sys.platform == "win32" or os.environ.get("WINEPREFIX"):
+             # Cloud Build expects 'build_output_windows_wine'
+             platform_suffix = "windows_wine"
         
         output_dir = source_dir / f"build_output_{platform_suffix}"
         output_dir.mkdir(exist_ok=True)

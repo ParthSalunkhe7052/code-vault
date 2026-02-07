@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
@@ -10,6 +10,7 @@ import { PricingProvider } from './contexts/PricingContext';
 import { initializeAuth } from './services/api';
 import Spinner from './components/Spinner';
 import { AnimatedPage, pageVariants, pageTransition } from './components/AnimatedPage';
+import SessionExpiredModal from './components/SessionExpiredModal';
 
 // Lazy-loaded page components
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -21,6 +22,23 @@ const Settings = lazy(() => import('./pages/Settings'));
 const BuildSettings = lazy(() => import('./pages/BuildSettings'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+
+// Renders SessionExpiredModal inside BrowserRouter so useNavigate is available
+const SessionExpiredHandler = () => {
+    const { sessionExpired, acknowledgeSessionExpired } = useAuth();
+    const navigate = useNavigate();
+
+    if (!sessionExpired) return null;
+
+    return (
+        <SessionExpiredModal
+            onAcknowledge={() => {
+                acknowledgeSessionExpired();
+                navigate('/login');
+            }}
+        />
+    );
+};
 
 // Full page loading spinner
 const FullPageLoader = () => (
@@ -139,6 +157,7 @@ function App() {
                                         {/* Catch all - redirect to home */}
                                         <Route path="*" element={<Navigate to="/" replace />} />
                                     </Routes>
+                                    <SessionExpiredHandler />
                                 </BrowserRouter>
                             </ToastProvider>
                         </PricingProvider>

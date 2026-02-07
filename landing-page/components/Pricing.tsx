@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, X } from 'lucide-react';
+import { APP_URL } from '../lib/config';
 
 const PricingCard: React.FC<{
   tier: string;
@@ -22,7 +23,7 @@ const PricingCard: React.FC<{
         <span className="text-4xl font-bold text-white">
           {typeof price === 'string' && price.toLowerCase() === 'custom' ? price : `$${price}`}
         </span>
-        {period && <span className="text-sm text-gray-500">{period}</span>}
+        {period && <span className="text-sm text-gray-400">{period}</span>}
       </div>
     </div>
     
@@ -32,9 +33,9 @@ const PricingCard: React.FC<{
           {feature.included ? (
             <Check className="w-5 h-5 text-indigo-400 shrink-0" />
           ) : (
-            <X className="w-5 h-5 text-gray-600 shrink-0" />
+            <X className="w-5 h-5 text-gray-500 shrink-0" />
           )}
-          <span className={feature.included ? 'text-gray-300' : 'text-gray-600'}>{feature.text}</span>
+          <span className={feature.included ? 'text-gray-300' : 'text-gray-500'}>{feature.text}</span>
         </li>
       ))}
     </ul>
@@ -50,8 +51,6 @@ const PricingCard: React.FC<{
 );
 
 const Pricing: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
-
   return (
     <section id="pricing" className="py-32 relative bg-background">
       {/* Background decoration */}

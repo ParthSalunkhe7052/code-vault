@@ -6,10 +6,9 @@ import HowItWorks from './components/HowItWorks';
 import Testimonials from './components/Testimonials';
 import Pricing from './components/Pricing';
 import Footer from './components/Footer';
+import { APP_URL } from './lib/config';
 
 const App: React.FC = () => {
-  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
-
   return (
     <div className="bg-background min-h-screen text-white selection:bg-indigo-500/30">
       <Navbar />

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 
 /**
  * Settings Context - Global and per-project settings management
@@ -97,18 +97,18 @@ export const SettingsProvider = ({ children }) => {
         }
     }, [settings, loaded]);
 
-    const updateSetting = (key, value) => {
+    const updateSetting = useCallback((key, value) => {
         setSettings(prev => ({ ...prev, [key]: value }));
-    };
+    }, []);
 
-    const updateSettings = (newSettings) => {
+    const updateSettings = useCallback((newSettings) => {
         setSettings(prev => ({ ...prev, ...newSettings }));
-    };
+    }, []);
 
-    const resetSettings = () => {
+    const resetSettings = useCallback(() => {
         setSettings(defaultSettings);
         localStorage.removeItem('codevault_settings');
-    };
+    }, []);
 
     /**
      * Toggle between default dark theme and dark-matter theme
@@ -120,14 +120,16 @@ export const SettingsProvider = ({ children }) => {
         }));
     }, []);
 
+    const value = useMemo(() => ({
+        settings,
+        updateSetting,
+        updateSettings,
+        resetSettings,
+        toggleTheme
+    }), [settings, updateSetting, updateSettings, resetSettings, toggleTheme]);
+
     return (
-        <SettingsContext.Provider value={{
-            settings,
-            updateSetting,
-            updateSettings,
-            resetSettings,
-            toggleTheme
-        }}>
+        <SettingsContext.Provider value={value}>
             {children}
         </SettingsContext.Provider>
     );

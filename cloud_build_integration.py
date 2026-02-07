@@ -230,19 +230,23 @@ class CloudBuildClient:
         """
         try:
             build = self.client.get_build(project_id=self.project_id, id=build_id)
+            
+            # Helper to safely convert timestamps
+            def format_time(ts):
+                if not ts:
+                    return None
+                if hasattr(ts, 'isoformat'):
+                    return ts.isoformat()
+                if hasattr(ts, 'ToJsonString'):
+                    return ts.ToJsonString()
+                return str(ts)
 
             return {
                 "build_id": build.id,
                 "status": build.status.name,  # QUEUED, WORKING, SUCCESS, FAILURE, etc.
-                "create_time": build.create_time.ToJsonString()
-                if build.create_time
-                else None,
-                "start_time": build.start_time.ToJsonString()
-                if build.start_time
-                else None,
-                "finish_time": build.finish_time.ToJsonString()
-                if build.finish_time
-                else None,
+                "create_time": format_time(build.create_time),
+                "start_time": format_time(build.start_time),
+                "finish_time": format_time(build.finish_time),
                 "logs_url": build.log_url,
             }
 

@@ -13,14 +13,6 @@ body {
 }
 
 /* Utility Classes */
-.glass-panel {
-  @apply bg-white/[0.03] backdrop-blur-md border border-white/10 rounded-2xl;
-}
-
-.text-gradient {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-cyan-400;
-}
-
 .text-gradient-primary {
   @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-emerald-400;
 }
@@ -37,4 +29,16 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-white/20;
+}
+
+/* Reduced Motion - Respect user preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,16 +1,31 @@
 import React from 'react';
 import { Shield, Menu, X } from 'lucide-react';
+import { APP_URL } from '../lib/config';
 
 const Navbar: React.FC = () => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const APP_URL = import.meta.env.VITE_APP_URL || "https://app.codevault.parth7.me";
+  const menuId = 'mobile-nav-menu';
+
+  // Close mobile menu on Escape key
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0f1a]/80 backdrop-blur-md">
+    <nav aria-label="Main navigation" className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0f1a]/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg">
-            <Shield className="w-5 h-5 text-white" />
+            <Shield className="w-5 h-5 text-white" aria-hidden="true" />
           </div>
           <span className="font-semibold text-lg tracking-tight text-white">CodeVault</span>
         </div>
@@ -29,14 +44,25 @@ const Navbar: React.FC = () => {
         </div>
 
         {/* Mobile Menu Button */}
-        <button className="md:hidden text-gray-400" onClick={() => setIsOpen(!isOpen)}>
-          {isOpen ? <X /> : <Menu />}
+        <button
+          className="md:hidden text-gray-400"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-label={isOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={isOpen}
+          aria-controls={menuId}
+        >
+          {isOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         </button>
       </div>
 
       {/* Mobile Menu */}
       {isOpen && (
-        <div className="md:hidden absolute top-16 left-0 right-0 bg-[#0a0f1a] border-b border-white/10 p-6 flex flex-col gap-4">
+        <div
+          id={menuId}
+          role="navigation"
+          aria-label="Mobile navigation"
+          className="md:hidden absolute top-16 left-0 right-0 bg-[#0a0f1a] border-b border-white/10 p-6 flex flex-col gap-4"
+        >
           <a href="#features" className="text-gray-400 hover:text-white">Features</a>
           <a href="#how-it-works" className="text-gray-400 hover:text-white">How it works</a>
           <a href="#pricing" className="text-gray-400 hover:text-white">Pricing</a>

@@ -18,8 +18,46 @@ export function BuildProvider({ children }) {
     // Track active WebSocket connections to prevent duplicates
     const activeSockets = useRef(new Map());
 
+    // Track WebSocket reconnect attempts per buildId
+    const wsRetryCount = useRef(new Map());
+
+    // Track active polling intervals (fallback when WS fails)
+    const activePollers = useRef(new Map());
+
+    // Ref to hold the latest connectWebSocket for recursive reconnection
+    const connectWebSocketRef = useRef(null);
+
+    // Max reconnect attempts before falling back to polling
+    const MAX_WS_RETRIES = 3;
+    // Backoff delays in ms: 1s, 2s, 4s
+    const WS_BACKOFF = [1000, 2000, 4000];
+
     // Track if we've already attempted sync to prevent spam
     const hasAttemptedSync = useRef(false);
+
+    /**
+     * Helper to process API status response (defined early as it's used by startPolling)
+     */
+    const handleBuildUpdate = useCallback((projectId, statusData) => {
+        setBuilds(prev => {
+            const current = prev[projectId] || {};
+            const isFinished = ['completed', 'failed', 'cancelled'].includes(statusData.status);
+            
+            return {
+                ...prev,
+                [projectId]: {
+                    ...current,
+                    status: statusData.status,
+                    progress: statusData.progress,
+                    // If we have artifacts, use the first one's filename
+                    outputPath: statusData.artifacts?.[0]?.filename,
+                    isBuilding: !isFinished,
+                    error: statusData.error,
+                    logs: current.logs || [`Status: ${statusData.status} - ${statusData.stage}`]
+                }
+            };
+        });
+    }, []);
 
     // Load initial state from storage
     useEffect(() => {
@@ -103,67 +141,93 @@ export function BuildProvider({ children }) {
         }
 
         return () => {
-            // Cleanup all sockets on unmount
+            // Cleanup all sockets, pollers, and retry state on unmount
             activeSockets.current.forEach(ws => ws.close());
             activeSockets.current.clear();
+            activePollers.current.forEach(interval => clearInterval(interval));
+            activePollers.current.clear();
+            wsRetryCount.current.clear();
         };
     }, []);
 
     /**
-     * Connect to WebSocket for real-time updates
+     * Start polling fallback for a build (used when WebSocket reconnection exhausted)
+     */
+    const startPolling = useCallback((projectId, buildId) => {
+        if (activePollers.current.has(buildId)) return; // Already polling
+
+        console.log(`[BuildPoll] Starting polling fallback for ${buildId}`);
+        const interval = setInterval(async () => {
+            try {
+                const status = await cloudBuild.getStatus(buildId);
+                handleBuildUpdate(projectId, status);
+
+                if (['completed', 'failed', 'cancelled'].includes(status.status)) {
+                    clearInterval(interval);
+                    activePollers.current.delete(buildId);
+                    removePersistedBuild(projectId);
+                    notifyUser(projectId, status.status);
+                }
+            } catch (err) {
+                console.error(`[BuildPoll] Poll failed for ${buildId}:`, err);
+                // On 404, stop polling
+                if (err.response?.status === 404) {
+                    clearInterval(interval);
+                    activePollers.current.delete(buildId);
+                    removePersistedBuild(projectId);
+                }
+            }
+        }, 5000); // Poll every 5 seconds
+
+        activePollers.current.set(buildId, interval);
+    }, [handleBuildUpdate]);
+
+    /**
+     * Connect to WebSocket for real-time updates with exponential backoff reconnection
      */
     const connectWebSocket = useCallback((projectId, buildId) => {
         if (activeSockets.current.has(buildId)) return; // Already connected
 
-        // Determine WS URL
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = import.meta.env.VITE_API_URL 
-            ? new URL(import.meta.env.VITE_API_URL).host 
-            : window.location.host; // Fallback for dev/prod
-            
-        // In dev, VITE_API_URL might be http://localhost:8000
-        // In prod, it might be https://api.codevault.parth7.me
-        // We need to parse it correctly.
+        // Build WebSocket URL
         let wsUrl;
         if (import.meta.env.VITE_API_URL) {
              const apiUrl = new URL(import.meta.env.VITE_API_URL);
              wsUrl = `${apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${apiUrl.host}/api/v1/cloud-build/ws/${buildId}`;
          } else {
-              // Fallback: use current page host (works in both dev and prod)
               const fallbackProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
               wsUrl = `${fallbackProtocol}//${window.location.host}/api/v1/cloud-build/ws/${buildId}`;
          }
 
-        console.log(`[BuildWS] Connecting to ${wsUrl}`);
+        const retries = wsRetryCount.current.get(buildId) || 0;
+        console.log(`[BuildWS] Connecting to ${wsUrl} (attempt ${retries + 1}/${MAX_WS_RETRIES + 1})`);
         const ws = new WebSocket(wsUrl);
 
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                // msg format: { type: 'progress'|'status', data: { ... } }
                 
                 if (msg.type === 'progress' || msg.type === 'status') {
-                    // Map backend status to frontend state
+                    // Reset retry counter on successful message
+                    wsRetryCount.current.set(buildId, 0);
+
                     const data = msg.data;
                     
                     setBuilds(prev => {
                         const current = prev[projectId] || { logs: [] };
                         
-                        // Handle logs
                         let newLogs = current.logs;
                         if (data.stage) {
                             const lastLog = newLogs[newLogs.length - 1];
                             const newLog = `${data.stage} (${data.progress}%)`;
                             if (lastLog !== newLog) {
-                                newLogs = [...newLogs, newLog].slice(-50); // Keep last 50
+                                newLogs = [...newLogs, newLog].slice(-50);
                             }
                         }
 
-                        // Check completion
                         if (['completed', 'failed', 'cancelled'].includes(data.status)) {
-                            // Close WS
                             ws.close();
                             activeSockets.current.delete(buildId);
+                            wsRetryCount.current.delete(buildId);
                             removePersistedBuild(projectId);
                             notifyUser(projectId, data.status);
                         }
@@ -176,7 +240,6 @@ export function BuildProvider({ children }) {
                                 progress: data.progress,
                                 logs: newLogs,
                                 isBuilding: ['pending', 'queued', 'running'].includes(data.status),
-                                // Update artifacts if completed
                                 ...(data.status === 'completed' ? { 
                                     outputPath: data.filename || 'Build Complete' 
                                 } : {})
@@ -189,12 +252,38 @@ export function BuildProvider({ children }) {
             }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             activeSockets.current.delete(buildId);
+
+            // Don't reconnect if this was a clean close (code 1000) or build is done
+            if (event.code === 1000) {
+                wsRetryCount.current.delete(buildId);
+                return;
+            }
+
+            const currentRetries = wsRetryCount.current.get(buildId) || 0;
+            if (currentRetries < MAX_WS_RETRIES) {
+                const delay = WS_BACKOFF[currentRetries] || WS_BACKOFF[WS_BACKOFF.length - 1];
+                wsRetryCount.current.set(buildId, currentRetries + 1);
+                console.log(`[BuildWS] Reconnecting in ${delay}ms (attempt ${currentRetries + 2}/${MAX_WS_RETRIES + 1})`);
+                setTimeout(() => connectWebSocketRef.current?.(projectId, buildId), delay);
+            } else {
+                console.warn(`[BuildWS] Max retries exhausted for ${buildId}, falling back to polling`);
+                wsRetryCount.current.delete(buildId);
+                startPolling(projectId, buildId);
+            }
+        };
+
+        ws.onerror = (err) => {
+            console.error(`[BuildWS] Error for ${buildId}:`, err);
+            // onclose will fire after onerror, handling reconnection
         };
 
         activeSockets.current.set(buildId, ws);
-    }, []);
+    }, [startPolling]);
+
+    // Keep ref in sync so recursive reconnection always uses latest version
+    connectWebSocketRef.current = connectWebSocket;
 
     /**
      * Send Browser Notification
@@ -231,30 +320,6 @@ export function BuildProvider({ children }) {
             console.error("Storage Error", e);
         }
     };
-
-    /**
-     * Helper to process API status response
-     */
-    const handleBuildUpdate = useCallback((projectId, statusData) => {
-        setBuilds(prev => {
-            const current = prev[projectId] || {};
-            const isFinished = ['completed', 'failed', 'cancelled'].includes(statusData.status);
-            
-            return {
-                ...prev,
-                [projectId]: {
-                    ...current,
-                    status: statusData.status,
-                    progress: statusData.progress,
-                    // If we have artifacts, use the first one's filename
-                    outputPath: statusData.artifacts?.[0]?.filename,
-                    isBuilding: !isFinished,
-                    error: statusData.error,
-                    logs: current.logs || [`Status: ${statusData.status} - ${statusData.stage}`]
-                }
-            };
-        });
-    }, []);
 
     /**
      * Public method to update build status (e.g. from polling)
@@ -316,13 +381,13 @@ export function BuildProvider({ children }) {
         };
     }, [builds]);
 
-    const value = {
+    const value = useMemo(() => ({
         builds,
         startBuild,
         getBuild,
         updateBuildStatus,
         // Expose other methods if needed
-    };
+    }), [builds, startBuild, getBuild, updateBuildStatus]);
 
     return (
         <BuildContext.Provider value={value}>
