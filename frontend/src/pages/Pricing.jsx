@@ -18,7 +18,8 @@ const PricingTier = ({
     current,
     onSubscribe,
     loading,
-    buttonText
+    buttonText,
+    isContact
 }) => (
     <div className={`relative glass-card p-6 flex flex-col ${popular ? 'ring-2 ring-violet-500 scale-105' : ''}`}>
         {popular && (
@@ -48,8 +49,10 @@ const PricingTier = ({
         </div>
 
         <div className="mb-6">
-            <span className="text-4xl font-bold text-white">${price}</span>
-            <span className="text-slate-400">/{period}</span>
+            <span className="text-4xl font-bold text-white">
+                {typeof price === 'number' ? `$${price}` : price}
+            </span>
+            {period && <span className="text-slate-400">/{period}</span>}
         </div>
 
         <div className="flex-1 space-y-3 mb-6">
@@ -83,7 +86,7 @@ const PricingTier = ({
             ) : (
                 <>
                     {buttonText}
-                    {!current && <ArrowRight size={18} />}
+                    {!current && !isContact && <ArrowRight size={18} />}
                 </>
             )}
         </button>
@@ -108,6 +111,11 @@ const Pricing = () => {
 
         if (targetTier === TIERS.FREE) {
             // Free tier is managed by downgrading via the Polar portal
+            return;
+        }
+
+        if (targetTier === TIERS.ENTERPRISE) {
+            window.location.href = 'mailto:sales@codevault.com?subject=CodeVault Enterprise';
             return;
         }
 
@@ -169,6 +177,7 @@ const Pricing = () => {
                 'Unlimited Projects',
                 '500 Active Licenses',
                 '25 Cloud Builds / month',
+                'Offline Leases',
                 'Node.js Support',
                 'Analytics & Webhooks',
                 'No Branding / Splash Screen',
@@ -191,6 +200,23 @@ const Pricing = () => {
                 'Priority Support',
             ],
             tier: TIERS.BUSINESS,
+        },
+        {
+            name: 'Enterprise',
+            price: 'Custom',
+            period: '',
+            description: 'For regulated and high-volume deployments',
+            icon: Crown,
+            iconColor: 'from-slate-500 to-slate-700',
+            features: [
+                'Unlimited Projects & Licenses',
+                'Unlimited Cloud Builds',
+                'Unlimited Team Seats',
+                'Dedicated Build Runners',
+                'Custom SLAs & Security Reviews',
+                'Priority Support',
+            ],
+            tier: TIERS.ENTERPRISE,
         },
     ];
 
@@ -225,8 +251,11 @@ const Pricing = () => {
                                     ? 'Current Plan'
                                     : tier.tier === TIERS.FREE
                                         ? 'Free Forever'
+                                        : tier.tier === TIERS.ENTERPRISE
+                                            ? 'Contact Sales'
                                         : 'Upgrade'
                             }
+                            isContact={tier.tier === TIERS.ENTERPRISE}
                         />
                     ))}
                 </div>

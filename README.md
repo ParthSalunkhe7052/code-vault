@@ -28,11 +28,11 @@ CodeVault is an all-in-one platform that turns your script into a commercial pro
 
 | Feature | Description |
 | :--- | :--- |
-| **Native Compilation** | We don't just bundle. We compile Python to C (via Nuitka) and machine code, making reverse engineering prohibitively expensive. |
-| **Enterprise Licensing** | Built-in support for Offline Leases, Floating Licenses, and Hardware ID (HWID) locking (Motherboard + CPU + Disk). |
-| **Cloud Builds** | Compile native binaries for Windows and Linux without needing those OSs locally. |
-| **Polar Integration** | (Beta) Automatically issue licenses upon payment. |
-| **Offline-First** | Apps validate via a cryptographically signed lease. No constant internet connection required. |
+| **🛡️ Native Compilation** | We don't just bundle. We compile Python to C (via Nuitka) and machine code, making reverse engineering prohibitively expensive. |
+| **🔑 Enterprise Licensing** | Built-in support for **Offline Leases**, Floating Licenses, and Hardware ID (HWID) locking (Motherboard + CPU + Disk). |
+| **⚡ Cloud Builds** | Compile native binaries for Windows, MacOS, and Linux without needing those OSs locally. |
+| **💰 Polar Integration** | Automatically issue licenses upon payment. |
+| **🔌 Offline-First** | Apps validate via a cryptographically signed lease. No constant internet connection required. |
 
 ---
 
