@@ -1,17 +1,27 @@
-import axios from 'axios';
+import axios, { AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { secureLocalStorage } from '../utils/EncryptionProvider';
+import {
+    User, AuthResponse,
+    Project, CreateProjectRequest, ProjectConfig,
+    License, CreateLicenseRequest, HardwareBinding,
+    Webhook, CreateWebhookRequest, UpdateWebhookRequest, WebhookDelivery, WebhookEvent,
+    BuildJob, DashboardStats, MapDataPoint,
+    AdminStats, AdminUser, SubscriptionStatus,
+} from '../types/api';
 
 /**
  * Sanitizes a filename to prevent path traversal and other security issues
  * @param {string} filename - The filename to sanitize
  * @returns {string} - Safe filename
  */
-function sanitizeFilename(filename) {
+function sanitizeFilename(filename: string): string {
     if (!filename) return 'download';
 
     // Remove any path components (../, ./, /)
     const parts = filename.split(/[\\/]/);
     let safeName = parts[parts.length - 1];
+
+    if (!safeName) return 'download';
 
     // Remove any remaining dangerous characters
     safeName = safeName.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -35,10 +45,10 @@ const USER_KEY = 'license_wrapper_user';
 
 // In-memory cache for token (to avoid async overhead on every request)
 // Populated on app initialization and after login
-let cachedToken = null;
+let cachedToken: string | null = null;
 
 // Detect if running in Tauri desktop app
-const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+const isTauri = typeof window !== 'undefined' && (window as any).__TAURI__ !== undefined;
 
 // In Tauri or Production Web, we need the full URL
 // In local dev mode, use relative path (Vite proxy handles it)
@@ -57,7 +67,7 @@ const api = axios.create({
  * Initialize auth from encrypted storage.
  * Call this on app startup to populate the token cache.
  */
-export async function initializeAuth() {
+export async function initializeAuth(): Promise<string | null> {
     try {
         cachedToken = await secureLocalStorage.getItem(TOKEN_KEY);
     } catch (error) {
@@ -68,7 +78,7 @@ export async function initializeAuth() {
 }
 
 // Add a request interceptor to include the JWT token
-api.interceptors.request.use((config) => {
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     if (cachedToken) {
         config.headers['Authorization'] = `Bearer ${cachedToken}`;
     }
@@ -81,7 +91,7 @@ api.interceptors.request.use((config) => {
 
 // Add response interceptor for handling auth errors
 api.interceptors.response.use(
-    (response) => response,
+    (response: AxiosResponse) => response,
     async (error) => {
         if (error.response?.status === 401) {
             // Clear cached token and encrypted storage
@@ -101,8 +111,8 @@ api.interceptors.response.use(
 );
 
 export const auth = {
-    login: async (email, password) => {
-        const response = await api.post('/auth/login', { email, password });
+    login: async (email: string, password: string): Promise<User> => {
+        const response = await api.post<AuthResponse>('/auth/login', { email, password });
         const { access_token, user } = response.data;
         // Store encrypted token and user data
         await secureLocalStorage.setItem(TOKEN_KEY, access_token);
@@ -111,8 +121,8 @@ export const auth = {
         cachedToken = access_token;
         return user;
     },
-    register: async (email, password, name) => {
-        const response = await api.post('/auth/register', { email, password, name });
+    register: async (email: string, password: string, name: string): Promise<User> => {
+        const response = await api.post<AuthResponse>('/auth/register', { email, password, name });
         const { access_token, user } = response.data;
         // Store encrypted token and user data
         await secureLocalStorage.setItem(TOKEN_KEY, access_token);
@@ -121,58 +131,58 @@ export const auth = {
         cachedToken = access_token;
         return user;
     },
-    logout: async () => {
+    logout: async (): Promise<void> => {
         cachedToken = null;
         await secureLocalStorage.removeItem(TOKEN_KEY);
         await secureLocalStorage.removeItem(USER_KEY);
     },
-    isAuthenticated: () => {
+    isAuthenticated: (): boolean => {
         return !!cachedToken;
     },
-    getUser: async () => {
+    getUser: async (): Promise<User | null> => {
         const user = await secureLocalStorage.getItem(USER_KEY, true);
         return user || null;
     },
-    getMe: () => api.get('/auth/me').then(res => res.data),
-    refreshUser: async () => {
-        const response = await api.get('/auth/me');
+    getMe: (): Promise<User> => api.get<User>('/auth/me').then(res => res.data),
+    refreshUser: async (): Promise<User> => {
+        const response = await api.get<User>('/auth/me');
         const user = response.data;
         await secureLocalStorage.setItem(USER_KEY, user);
         return user;
     },
-    regenerateApiKey: () => api.post('/auth/regenerate-api-key').then(res => res.data),
+    regenerateApiKey: (): Promise<{ api_key: string }> => api.post('/auth/regenerate-api-key').then(res => res.data),
     // Helper to get the current token (for downloads, etc.)
-    getToken: () => cachedToken,
+    getToken: (): string | null => cachedToken,
 };
 
 export const projects = {
-    list: () => api.get('/projects').then(res => res.data),
-    create: (data) => api.post('/projects', data).then(res => res.data),
-    delete: (id) => api.delete(`/projects/${id}`).then(res => res.data),
-    getConfig: (id) => api.get(`/projects/${id}/config`).then(res => res.data),
-    updateConfig: (id, data) => api.put(`/projects/${id}/config`, data).then(res => res.data),
-    uploadFiles: (id, files) => {
+    list: (): Promise<Project[]> => api.get('/projects').then(res => res.data),
+    create: (data: CreateProjectRequest): Promise<Project> => api.post('/projects', data).then(res => res.data),
+    delete: (id: string): Promise<{ success: boolean }> => api.delete(`/projects/${id}`).then(res => res.data),
+    getConfig: (id: string): Promise<ProjectConfig> => api.get(`/projects/${id}/config`).then(res => res.data),
+    updateConfig: (id: string, data: Partial<ProjectConfig>): Promise<ProjectConfig> => api.put(`/projects/${id}/config`, data).then(res => res.data),
+    uploadFiles: (id: string, files: File[]): Promise<{ message: string; files: string[] }> => {
         const formData = new FormData();
         for (let i = 0; i < files.length; i++) {
-            formData.append('files', files[i]);
+            formData.append('files', files[i] as Blob);
         }
         // Don't set Content-Type header - let browser set it with boundary
         return api.post(`/projects/${id}/upload`, formData).then(res => res.data);
     },
-    uploadZip: (id, file) => {
+    uploadZip: (id: string, file: File): Promise<{ message: string; files: string[] }> => {
         const formData = new FormData();
         formData.append('file', file);
         return api.post(`/projects/${id}/upload-zip`, formData).then(res => res.data);
     },
-    listFiles: (id) => api.get(`/projects/${id}/files`).then(res => res.data),
-    deleteFile: (projectId, fileId) => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),
+    listFiles: (id: string): Promise<any[]> => api.get(`/projects/${id}/files`).then(res => res.data),
+    deleteFile: (projectId: string, fileId: string): Promise<{ success: boolean }> => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),
 };
 
 export const compile = {
-    start: (projectId, data = {}) => api.post(`/compile/start?project_id=${projectId}`, data).then(res => res.data),
-    getStatus: (jobId) => api.get(`/compile/${jobId}/status`).then(res => res.data),
-    listJobs: (projectId) => api.get('/compile/jobs', { params: { project_id: projectId } }).then(res => res.data),
-    download: async (jobId, filename) => {
+    start: (projectId: string, data: any = {}): Promise<{ job_id: string; status: string }> => api.post(`/compile/start?project_id=${projectId}`, data).then(res => res.data),
+    getStatus: (jobId: string): Promise<BuildJob> => api.get(`/compile/${jobId}/status`).then(res => res.data),
+    listJobs: (projectId: string): Promise<BuildJob[]> => api.get('/compile/jobs', { params: { project_id: projectId } }).then(res => res.data),
+    download: async (jobId: string, filename: string): Promise<void> => {
         const token = auth.getToken();
         // Use proper URL based on environment (Tauri vs browser)
         const baseUrl = isTauri ? (import.meta.env.VITE_API_URL || 'http://localhost:8000') : '';
@@ -199,52 +209,52 @@ export const compile = {
 };
 
 export const licenses = {
-    list: (projectId) => api.get('/licenses', { params: { project_id: projectId } }).then(res => res.data),
-    create: (data) => api.post('/licenses', data).then(res => res.data),
-    revoke: (id) => api.post(`/licenses/${id}/revoke`).then(res => res.data),
-    delete: (id) => api.delete(`/licenses/${id}`).then(res => res.data),
-    getBindings: (id) => api.get(`/licenses/${id}/bindings`).then(res => res.data),
-    removeBinding: (licenseId, bindingId) => api.delete(`/licenses/${licenseId}/bindings/${bindingId}`).then(res => res.data),
+    list: (projectId: string): Promise<License[]> => api.get('/licenses', { params: { project_id: projectId } }).then(res => res.data),
+    create: (data: CreateLicenseRequest): Promise<License> => api.post('/licenses', data).then(res => res.data),
+    revoke: (id: string): Promise<License> => api.post(`/licenses/${id}/revoke`).then(res => res.data),
+    delete: (id: string): Promise<{ success: boolean }> => api.delete(`/licenses/${id}`).then(res => res.data),
+    getBindings: (id: string): Promise<HardwareBinding[]> => api.get(`/licenses/${id}/bindings`).then(res => res.data),
+    removeBinding: (licenseId: string, bindingId: string): Promise<{ success: boolean }> => api.delete(`/licenses/${licenseId}/bindings/${bindingId}`).then(res => res.data),
     // HWID Reset
-    resetHwid: (id, reason) => api.post(`/licenses/${id}/reset-hwid`, { reason }).then(res => res.data),
-    getResetHistory: (id) => api.get(`/licenses/${id}/reset-history`).then(res => res.data),
-    getResetStatus: (id) => api.get(`/licenses/${id}/reset-status`).then(res => res.data),
+    resetHwid: (id: string, reason: string): Promise<{ success: boolean }> => api.post(`/licenses/${id}/reset-hwid`, { reason }).then(res => res.data),
+    getResetHistory: (id: string): Promise<any[]> => api.get(`/licenses/${id}/reset-history`).then(res => res.data),
+    getResetStatus: (id: string): Promise<any> => api.get(`/licenses/${id}/reset-status`).then(res => res.data),
 };
 
 export const webhooks = {
-    list: () => api.get('/webhooks').then(res => res.data),
-    create: (data) => api.post('/webhooks', data).then(res => res.data),
-    get: (id) => api.get(`/webhooks/${id}`).then(res => res.data),
-    update: (id, data) => api.put(`/webhooks/${id}`, data).then(res => res.data),
-    delete: (id) => api.delete(`/webhooks/${id}`).then(res => res.data),
-    getDeliveries: (id, limit = 50) => api.get(`/webhooks/${id}/deliveries`, { params: { limit } }).then(res => res.data),
-    test: (id) => api.post(`/webhooks/${id}/test`).then(res => res.data),
-    getEvents: () => api.get('/webhooks/events/list').then(res => res.data),
+    list: (): Promise<Webhook[]> => api.get('/webhooks').then(res => res.data),
+    create: (data: CreateWebhookRequest): Promise<Webhook> => api.post('/webhooks', data).then(res => res.data),
+    get: (id: string): Promise<Webhook> => api.get(`/webhooks/${id}`).then(res => res.data),
+    update: (id: string, data: UpdateWebhookRequest): Promise<Webhook> => api.put(`/webhooks/${id}`, data).then(res => res.data),
+    delete: (id: string): Promise<{ success: boolean }> => api.delete(`/webhooks/${id}`).then(res => res.data),
+    getDeliveries: (id: string, limit: number = 50): Promise<WebhookDelivery[]> => api.get(`/webhooks/${id}/deliveries`, { params: { limit } }).then(res => res.data),
+    test: (id: string): Promise<{ success: boolean; status_code: number; response_body: string }> => api.post(`/webhooks/${id}/test`).then(res => res.data),
+    getEvents: (): Promise<WebhookEvent[]> => api.get('/webhooks/events/list').then(res => res.data),
 };
 
 export const stats = {
-    getDashboard: () => api.get('/stats/dashboard').then(res => res.data),
+    getDashboard: (): Promise<DashboardStats> => api.get('/stats/dashboard').then(res => res.data),
     // Mission Control Live Map
-    getMapData: () => api.get('/analytics/map-data').then(res => res.data),
+    getMapData: (): Promise<MapDataPoint[]> => api.get('/analytics/map-data').then(res => res.data),
 };
 
 // Admin API (admin role required)
 export const admin = {
-    getStats: () => api.get('/admin/stats').then(res => res.data),
-    getUsers: () => api.get('/admin/users').then(res => res.data),
-    getAnalytics: (days = 30) => api.get('/admin/analytics', { params: { days } }).then(res => res.data),
+    getStats: (): Promise<AdminStats> => api.get('/admin/stats').then(res => res.data),
+    getUsers: (): Promise<AdminUser[]> => api.get('/admin/users').then(res => res.data),
+    getAnalytics: (days: number = 30): Promise<any> => api.get('/admin/analytics', { params: { days } }).then(res => res.data),
     // New endpoints
-    getRevenue: () => api.get('/admin/revenue').then(res => res.data),
-    getSystemHealth: () => api.get('/admin/system-health').then(res => res.data),
-    updateUserPlan: (userId, plan) => api.put(`/admin/users/${userId}/plan`, { plan }).then(res => res.data),
-    updateUserRole: (userId, role) => api.put(`/admin/users/${userId}/role`, { role }).then(res => res.data),
-    banUser: (userId) => api.post(`/admin/users/${userId}/ban`).then(res => res.data),
+    getRevenue: (): Promise<any> => api.get('/admin/revenue').then(res => res.data),
+    getSystemHealth: (): Promise<any> => api.get('/admin/system-health').then(res => res.data),
+    updateUserPlan: (userId: string, plan: string): Promise<User> => api.put(`/admin/users/${userId}/plan`, { plan }).then(res => res.data),
+    updateUserRole: (userId: string, role: string): Promise<User> => api.put(`/admin/users/${userId}/role`, { role }).then(res => res.data),
+    banUser: (userId: string): Promise<{ success: boolean }> => api.post(`/admin/users/${userId}/ban`).then(res => res.data),
 };
 
 // Polar/Subscription API
 export const subscription = {
-    getStatus: () => api.get('/subscription/status').then(res => res.data),
-    createCheckout: (productId) =>
+    getStatus: (): Promise<SubscriptionStatus> => api.get('/subscription/status').then(res => res.data),
+    createCheckout: (productId: string): Promise<{ checkout_url: string }> =>
         api.post('/polar/create-checkout', { product_id: productId }).then(res => res.data),
 };
 
@@ -257,37 +267,37 @@ const publicApi = axios.create({
 // Cloud Build API
 export const cloudBuild = {
     // Start a cloud build
-    start: (projectId, data = {}) => 
+    start: (projectId: string, data: any = {}): Promise<{ job_id: string; status: string }> => 
         api.post('/cloud-build/start', { project_id: projectId, ...data }).then(res => res.data),
     
     // Get build status with stage progress
-    getStatus: (buildId) => 
+    getStatus: (buildId: string): Promise<any> => 
         api.get(`/cloud-build/${buildId}/status`).then(res => res.data),
     
     // Cancel a running build
-    cancel: (buildId) => 
+    cancel: (buildId: string): Promise<{ success: boolean }> => 
         api.post(`/cloud-build/${buildId}/cancel`).then(res => res.data),
     
     // Retry a failed build
-    retry: (buildId) => 
+    retry: (buildId: string): Promise<{ job_id: string; status: string }> => 
         api.post(`/cloud-build/${buildId}/retry`).then(res => res.data),
     
     // Cleanup build artifacts
-    cleanup: (buildId) => 
+    cleanup: (buildId: string): Promise<{ success: boolean }> => 
         api.post(`/cloud-build/${buildId}/cleanup`).then(res => res.data),
     
     // Get build history
-    getHistory: (limit = 20, offset = 0) => 
+    getHistory: (limit: number = 20, offset: number = 0): Promise<any> => 
         api.get('/cloud-build/history', { params: { limit, offset } }).then(res => res.data),
     
     // Get artifacts for a build (deprecated - use getStatus instead)
-    getArtifacts: (buildId) => 
+    getArtifacts: (buildId: string): Promise<any[]> => 
         api.get(`/cloud-build/${buildId}/status`).then(res => res.data.artifacts),
 };
 
 export const publicStore = {
-    getProject: (storeSlug) => publicApi.get(`/public/store/${storeSlug}`).then(res => res.data),
-    purchaseLicense: (storeSlug, buyerEmail, buyerName, successUrl, cancelUrl) =>
+    getProject: (storeSlug: string): Promise<any> => publicApi.get(`/public/store/${storeSlug}`).then(res => res.data),
+    purchaseLicense: (storeSlug: string, buyerEmail: string, buyerName: string, successUrl: string, cancelUrl: string): Promise<any> =>
         publicApi.post('/public/purchase', {
             store_slug: storeSlug,
             buyer_email: buyerEmail,
@@ -295,8 +305,7 @@ export const publicStore = {
             success_url: successUrl,
             cancel_url: cancelUrl
         }).then(res => res.data),
-    getLicensePortal: (licenseKey) => publicApi.get(`/public/license/${licenseKey}`).then(res => res.data),
+    getLicensePortal: (licenseKey: string): Promise<any> => publicApi.get(`/public/license/${licenseKey}`).then(res => res.data),
 };
 
 export default api;
-

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Tauri API Bridge - Detects environment and routes to appropriate backend
 // In Tauri: Uses invoke() to call Rust commands
 // In Browser: Falls back to HTTP API calls

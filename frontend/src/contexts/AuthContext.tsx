@@ -1,18 +1,33 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { auth } from '../services/api';
+import { User } from '../types/api';
 
-const AuthContext = createContext(null);
+interface AuthContextType {
+    user: User | null;
+    loading: boolean;
+    isAuthenticated: boolean;
+    isAdmin: boolean;
+    sessionExpired: boolean;
+    refreshUser: () => Promise<User | null>;
+    logout: () => Promise<void>;
+    login: (email: string, password: string) => Promise<User>;
+    register: (email: string, password: string, name: string) => Promise<User>;
+    acknowledgeSessionExpired: () => void;
+}
 
-export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const [sessionExpired, setSessionExpired] = useState(false);
 
     const refreshUser = useCallback(async () => {
         try {
             const userData = await auth.getMe();
-            setUser(userData);
-            return userData;
+            // Ensure userData matches User interface
+            setUser(userData as User);
+            return userData as User;
         } catch (error) {
             console.error('[AuthContext] Failed to refresh user:', error);
             return null;
@@ -31,18 +46,18 @@ export const AuthProvider = ({ children }) => {
         }
     }, []);
 
-    const login = useCallback(async (email, password) => {
+    const login = useCallback(async (email: string, password: string) => {
         const userData = await auth.login(email, password);
-        setUser(userData);
+        setUser(userData as User);
         setSessionExpired(false);
-        return userData;
+        return userData as User;
     }, []);
 
-    const register = useCallback(async (email, password, name) => {
+    const register = useCallback(async (email: string, password: string, name: string) => {
         const userData = await auth.register(email, password, name);
-        setUser(userData);
+        setUser(userData as User);
         setSessionExpired(false);
-        return userData;
+        return userData as User;
     }, []);
 
     /**

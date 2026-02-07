@@ -8,24 +8,42 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { cloudBuild, auth } from '../services/api';
 
-const BuildContext = createContext(null);
+// Extended build state for UI tracking
+interface BuildState {
+    status: string;
+    progress: number;
+    logs: string[];
+    outputPath?: string | null;
+    jobId?: string | null;
+    isBuilding: boolean;
+    error?: string;
+}
+
+interface BuildContextType {
+    builds: Record<string, BuildState>;
+    startBuild: (projectId: string, jobId: string) => void;
+    getBuild: (projectId: string) => BuildState;
+    updateBuildStatus: (projectId: string, statusData: any) => void;
+}
+
+const BuildContext = createContext<BuildContextType | null>(null);
 const STORAGE_KEY = 'cv_active_builds';
 
-export function BuildProvider({ children }) {
+export const BuildProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Map of projectId -> BuildState
-    const [builds, setBuilds] = useState({});
+    const [builds, setBuilds] = useState<Record<string, BuildState>>({});
     
     // Track active WebSocket connections to prevent duplicates
-    const activeSockets = useRef(new Map());
+    const activeSockets = useRef(new Map<string, WebSocket>());
 
     // Track WebSocket reconnect attempts per buildId
-    const wsRetryCount = useRef(new Map());
+    const wsRetryCount = useRef(new Map<string, number>());
 
     // Track active polling intervals (fallback when WS fails)
-    const activePollers = useRef(new Map());
+    const activePollers = useRef(new Map<string, NodeJS.Timeout>());
 
     // Ref to hold the latest connectWebSocket for recursive reconnection
-    const connectWebSocketRef = useRef(null);
+    const connectWebSocketRef = useRef<((projectId: string, buildId: string) => void) | null>(null);
 
     // Max reconnect attempts before falling back to polling
     const MAX_WS_RETRIES = 3;
@@ -36,11 +54,47 @@ export function BuildProvider({ children }) {
     const hasAttemptedSync = useRef(false);
 
     /**
+     * Send Browser Notification
+     */
+    const notifyUser = (_projectId: string, status: string) => {
+        if (!('Notification' in window)) return;
+        
+        if (Notification.permission === 'granted') {
+            const title = status === 'completed' ? 'Build Successful' : 'Build Failed';
+            const body = `Project build has ${status}. Click to view details.`;
+            new Notification(title, { body });
+        }
+    };
+
+    /**
+     * Persist active build to storage
+     */
+    const persistBuild = (projectId: string, buildId: string) => {
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            stored[projectId] = buildId;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        } catch (e) {
+            console.error("Storage Error", e);
+        }
+    };
+
+    const removePersistedBuild = (projectId: string) => {
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            delete stored[projectId];
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        } catch (e) {
+            console.error("Storage Error", e);
+        }
+    };
+
+    /**
      * Helper to process API status response (defined early as it's used by startPolling)
      */
-    const handleBuildUpdate = useCallback((projectId, statusData) => {
+    const handleBuildUpdate = useCallback((projectId: string, statusData: any) => {
         setBuilds(prev => {
-            const current = prev[projectId] || {};
+            const current = prev[projectId] || { logs: [], status: 'unknown', progress: 0, isBuilding: false };
             const isFinished = ['completed', 'failed', 'cancelled'].includes(statusData.status);
             
             return {
@@ -59,101 +113,10 @@ export function BuildProvider({ children }) {
         });
     }, []);
 
-    // Load initial state from storage
-    useEffect(() => {
-        const loadPersistedBuilds = async () => {
-            // Prevent multiple sync attempts
-            if (hasAttemptedSync.current) {
-                return;
-            }
-            hasAttemptedSync.current = true;
-
-            try {
-                // Check if user is authenticated - skip sync if not logged in
-                if (!auth.isAuthenticated()) {
-                    console.log('[BuildContext] User not authenticated, skipping build sync');
-                    return;
-                }
-
-                const stored = localStorage.getItem(STORAGE_KEY);
-                if (!stored) return;
-
-                const activeBuilds = JSON.parse(stored); // { projectId: buildId }
-                
-                // Re-hydrate state for each active build
-                for (const [projectId, buildId] of Object.entries(activeBuilds)) {
-                    try {
-                        // 1. Set initial loading state
-                        setBuilds(prev => ({
-                            ...prev,
-                            [projectId]: {
-                                status: 'running', // Assume running until verified
-                                progress: 0,
-                                logs: ['Resuming build session...'],
-                                jobId: buildId,
-                                isBuilding: true,
-                            }
-                        }));
-
-                        // 2. Fetch latest status from API
-                        const status = await cloudBuild.getStatus(buildId);
-                        
-                        // 3. Update state with real data
-                        handleBuildUpdate(projectId, status);
-
-                        // 4. Reconnect WebSocket if still running
-                        if (['pending', 'queued', 'running'].includes(status.status)) {
-                            connectWebSocket(projectId, buildId);
-                        } else {
-                            // If finished while away, clear storage
-                            removePersistedBuild(projectId);
-                        }
-                    } catch (err) {
-                        console.error(`Failed to sync build ${buildId}:`, err);
-                        // If 401 (Unauthorized), user is not logged in - clear all storage
-                        if (err.response?.status === 401) {
-                            console.log('[BuildContext] User not authenticated (401), clearing build storage');
-                            localStorage.removeItem(STORAGE_KEY);
-                            setBuilds({});
-                            return; // Stop processing remaining builds
-                        }
-                        // If 404, remove from storage
-                        if (err.response?.status === 404) {
-                            removePersistedBuild(projectId);
-                            setBuilds(prev => {
-                                const next = { ...prev };
-                                delete next[projectId];
-                                return next;
-                            });
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to load persisted builds", e);
-            }
-        };
-
-        loadPersistedBuilds();
-
-        // Request notification permission
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-
-        return () => {
-            // Cleanup all sockets, pollers, and retry state on unmount
-            activeSockets.current.forEach(ws => ws.close());
-            activeSockets.current.clear();
-            activePollers.current.forEach(interval => clearInterval(interval));
-            activePollers.current.clear();
-            wsRetryCount.current.clear();
-        };
-    }, []);
-
     /**
      * Start polling fallback for a build (used when WebSocket reconnection exhausted)
      */
-    const startPolling = useCallback((projectId, buildId) => {
+    const startPolling = useCallback((projectId: string, buildId: string) => {
         if (activePollers.current.has(buildId)) return; // Already polling
 
         console.log(`[BuildPoll] Starting polling fallback for ${buildId}`);
@@ -168,7 +131,7 @@ export function BuildProvider({ children }) {
                     removePersistedBuild(projectId);
                     notifyUser(projectId, status.status);
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error(`[BuildPoll] Poll failed for ${buildId}:`, err);
                 // On 404, stop polling
                 if (err.response?.status === 404) {
@@ -185,7 +148,7 @@ export function BuildProvider({ children }) {
     /**
      * Connect to WebSocket for real-time updates with exponential backoff reconnection
      */
-    const connectWebSocket = useCallback((projectId, buildId) => {
+    const connectWebSocket = useCallback((projectId: string, buildId: string) => {
         if (activeSockets.current.has(buildId)) return; // Already connected
 
         // Build WebSocket URL
@@ -213,9 +176,9 @@ export function BuildProvider({ children }) {
                     const data = msg.data;
                     
                     setBuilds(prev => {
-                        const current = prev[projectId] || { logs: [] };
+                        const current = prev[projectId] || { logs: [], status: 'unknown', progress: 0, isBuilding: false };
                         
-                        let newLogs = current.logs;
+                        let newLogs = current.logs || [];
                         if (data.stage) {
                             const lastLog = newLogs[newLogs.length - 1];
                             const newLog = `${data.stage} (${data.progress}%)`;
@@ -285,64 +248,114 @@ export function BuildProvider({ children }) {
     // Keep ref in sync so recursive reconnection always uses latest version
     connectWebSocketRef.current = connectWebSocket;
 
-    /**
-     * Send Browser Notification
-     */
-    const notifyUser = (projectId, status) => {
-        if (!('Notification' in window)) return;
-        
-        if (Notification.permission === 'granted') {
-            const title = status === 'completed' ? 'Build Successful' : 'Build Failed';
-            const body = `Project build has ${status}. Click to view details.`;
-            new Notification(title, { body });
-        }
-    };
 
-    /**
-     * Persist active build to storage
-     */
-    const persistBuild = (projectId, buildId) => {
-        try {
-            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            stored[projectId] = buildId;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-        } catch (e) {
-            console.error("Storage Error", e);
-        }
-    };
+    // Load initial state from storage
+    useEffect(() => {
+        const loadPersistedBuilds = async () => {
+            // Prevent multiple sync attempts
+            if (hasAttemptedSync.current) {
+                return;
+            }
+            hasAttemptedSync.current = true;
 
-    const removePersistedBuild = (projectId) => {
-        try {
-            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            delete stored[projectId];
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-        } catch (e) {
-            console.error("Storage Error", e);
+            try {
+                // Check if user is authenticated - skip sync if not logged in
+                if (!auth.isAuthenticated()) {
+                    console.log('[BuildContext] User not authenticated, skipping build sync');
+                    return;
+                }
+
+                const stored = localStorage.getItem(STORAGE_KEY);
+                if (!stored) return;
+
+                const activeBuilds = JSON.parse(stored); // { projectId: buildId }
+                
+                // Re-hydrate state for each active build
+                for (const [projectId, buildId] of Object.entries(activeBuilds)) {
+                    // Type assertion for buildId as string
+                    const bId = buildId as string;
+                    
+                    try {
+                        // 1. Set initial loading state
+                        setBuilds(prev => ({
+                            ...prev,
+                            [projectId]: {
+                                status: 'running', // Assume running until verified
+                                progress: 0,
+                                logs: ['Resuming build session...'],
+                                jobId: bId,
+                                isBuilding: true,
+                            }
+                        }));
+
+                        // 2. Fetch latest status from API
+                        const status = await cloudBuild.getStatus(bId);
+                        
+                        // 3. Update state with real data
+                        handleBuildUpdate(projectId, status);
+
+                        // 4. Reconnect WebSocket if still running
+                        if (['pending', 'queued', 'running'].includes(status.status)) {
+                            connectWebSocket(projectId, bId);
+                        } else {
+                            // If finished while away, clear storage
+                            removePersistedBuild(projectId);
+                        }
+                    } catch (err: any) {
+                        console.error(`Failed to sync build ${bId}:`, err);
+                        // If 401 (Unauthorized), user is not logged in - clear all storage
+                        if (err.response?.status === 401) {
+                            console.log('[BuildContext] User not authenticated (401), clearing build storage');
+                            localStorage.removeItem(STORAGE_KEY);
+                            setBuilds({});
+                            return; // Stop processing remaining builds
+                        }
+                        // If 404, remove from storage
+                        if (err.response?.status === 404) {
+                            removePersistedBuild(projectId);
+                            setBuilds(prev => {
+                                const next = { ...prev };
+                                delete next[projectId];
+                                return next;
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load persisted builds", e);
+            }
+        };
+
+        loadPersistedBuilds();
+
+        // Request notification permission
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
         }
-    };
+
+        return () => {
+            // Cleanup all sockets, pollers, and retry state on unmount
+            activeSockets.current.forEach(ws => ws.close());
+            activeSockets.current.clear();
+            activePollers.current.forEach(interval => clearInterval(interval));
+            activePollers.current.clear();
+            wsRetryCount.current.clear();
+        };
+    }, [connectWebSocket, handleBuildUpdate]);
 
     /**
      * Public method to update build status (e.g. from polling)
      * Handles cleanup if build is finished
      */
-    const updateBuildStatus = useCallback((projectId, statusData) => {
+    const updateBuildStatus = useCallback((projectId: string, statusData: any) => {
         handleBuildUpdate(projectId, statusData);
         
         // If finished, ensure cleanup happens (in case WS missed it)
         if (['completed', 'failed', 'cancelled'].includes(statusData.status)) {
-             // We need the buildId to close the socket. 
-             // Since state updates are async, we can't rely on 'builds' here being perfectly fresh,
-             // but we can try to find the socket by iteration or passed ID.
-             // Ideally statusData should contain buildId, but if not:
-             
-             // Cleanup storage immediately
              removePersistedBuild(projectId);
-             
              // Cleanup sockets (best effort)
-             activeSockets.current.forEach((ws, key) => {
+             activeSockets.current.forEach((_ws) => {
                  // We don't verify key == buildId because we don't have buildId easily here
-                 // But typically one project = one build. 
-                 // We can leave the socket to timeout or close on unmount if we can't find it.
              });
         }
     }, [handleBuildUpdate]);
@@ -350,7 +363,7 @@ export function BuildProvider({ children }) {
     /**
      * Start a new build
      */
-    const startBuild = useCallback((projectId, jobId) => {
+    const startBuild = useCallback((projectId: string, jobId: string) => {
         persistBuild(projectId, jobId);
         
         setBuilds(prev => ({
@@ -368,9 +381,7 @@ export function BuildProvider({ children }) {
         connectWebSocket(projectId, jobId);
     }, [connectWebSocket]);
 
-    // ... (Keep existing simple getters/setters for compatibility) ...
-
-    const getBuild = useCallback((projectId) => {
+    const getBuild = useCallback((projectId: string) => {
         return builds[projectId] || {
             status: 'idle',
             progress: 0,
@@ -386,7 +397,6 @@ export function BuildProvider({ children }) {
         startBuild,
         getBuild,
         updateBuildStatus,
-        // Expose other methods if needed
     }), [builds, startBuild, getBuild, updateBuildStatus]);
 
     return (
@@ -394,23 +404,25 @@ export function BuildProvider({ children }) {
             {children}
         </BuildContext.Provider>
     );
-}
+};
 
 export function useBuild() {
-    return useContext(BuildContext);
+    const context = useContext(BuildContext);
+    if (!context) {
+        throw new Error('useBuild must be used within a BuildProvider');
+    }
+    return context;
 }
 
 // Keep useProjectBuild for backward compatibility
-export function useProjectBuild(projectId) {
+export function useProjectBuild(projectId: string) {
     const { getBuild, startBuild, updateBuildStatus } = useBuild();
-    const build = getBuild(projectId); // This is already memoized-ish by being state
+    const build = getBuild(projectId); 
 
     return {
         ...build,
-        start: (jobId) => startBuild(projectId, jobId),
-        updateStatus: (statusData) => updateBuildStatus(projectId, statusData),
-        // Add stubs for methods we might have removed or didn't implement fully yet
-        // to prevent breaking existing components
+        start: (jobId: string) => startBuild(projectId, jobId),
+        updateStatus: (statusData: any) => updateBuildStatus(projectId, statusData),
         updateBuild: () => {},
         addLog: () => {},
         complete: () => {},
