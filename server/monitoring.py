@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Callable, List
 import json
 
@@ -46,7 +46,7 @@ class HealthMonitor:
         results = {
             "status": "healthy",
             "checks": {},
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         for name, check in self.checks.items():
@@ -56,7 +56,7 @@ class HealthMonitor:
                 response_time = time.time() - start_time
 
                 check["last_status"] = status
-                check["last_check"] = datetime.utcnow()
+                check["last_check"] = datetime.now(timezone.utc)
 
                 results["checks"][name] = {
                     "status": status.get("status", "unknown"),
@@ -83,7 +83,7 @@ class HealthMonitor:
 
     async def _trigger_alert(self, check_name: str, status: Dict):
         """Trigger alerts for failed health checks."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Check cooldown
         if check_name in self.last_alert:
@@ -118,7 +118,7 @@ class HealthMonitor:
         self.metrics[name].append(
             {
                 "value": value,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "tags": tags or {},
             }
         )
@@ -131,7 +131,7 @@ class HealthMonitor:
         self, name: Optional[str] = None, duration_minutes: int = 60
     ) -> Dict:
         """Get recorded metrics."""
-        cutoff = datetime.utcnow() - timedelta(minutes=duration_minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=duration_minutes)
 
         if name:
             return {

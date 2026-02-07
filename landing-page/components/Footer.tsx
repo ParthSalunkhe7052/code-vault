@@ -55,13 +55,6 @@ const Footer: React.FC = () => {
         
         <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-600">
           <p>&copy; {new Date().getFullYear()} CodeVault Inc. All rights reserved.</p>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500"></span>
-              All systems operational
-            </span>
-            <span>99.9% Uptime SLA</span>
-          </div>
         </div>
       </div>
     </footer>

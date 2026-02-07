@@ -5,13 +5,11 @@ Manages WebSocket connections for real-time build log streaming.
 """
 
 import logging
-import asyncio
+import json
 from datetime import datetime, timezone
 from typing import Dict, List
 
 from fastapi import WebSocket, WebSocketDisconnect
-
-from database import get_db, release_db
 
 logger = logging.getLogger(__name__)
 
@@ -71,30 +69,84 @@ async def broadcast_build_update(build_id: str, update_type: str, data: dict):
     )
 
 
-def get_build_stage(build: dict) -> tuple:
-    """Determine current build stage and progress."""
+def get_build_stage(build: dict) -> tuple[str, int]:
+    """Calculate build stage and detailed progress from build status, logs, and timing."""
     status = build.get("status", "pending")
-    progress = build.get("progress", 0)
-    logs = build.get("logs", [])
+    logs = build.get("logs") or []
+    started_at = build.get("started_at")
+    current_progress = build.get("progress", 0)
+
+    if isinstance(logs, str):
+        try:
+            logs = json.loads(logs)
+        except Exception:
+            logs = []
 
     if status == "pending":
         return "Queued", 5
     elif status == "queued":
-        return "Waiting for builder", 10
+        return "Waiting for runner", 8
     elif status == "running":
-        # Analyze logs for better progress
-        if logs:
-            log_text = " ".join(logs[-10:]).lower()
-            if "compiling" in log_text or "nuitka" in log_text:
-                return "Compiling", max(30, min(60, progress))
-            elif "packaging" in log_text or "uploading" in log_text:
-                return "Packaging", max(60, min(90, progress))
-        return "Building", max(20, min(50, progress))
+        # Check logs for stage keywords
+        logs_str = " ".join(str(log).lower() for log in logs)
+        log_based_progress = 15  # Default
+        stage = "Processing"
+
+        if "upload" in logs_str:
+            stage = "Uploading artifact"
+            log_based_progress = 90
+        elif "compil" in logs_str or "nuitka" in logs_str or "pkg" in logs_str:
+            stage = "Compiling binary"
+            log_based_progress = 55
+        elif "inject" in logs_str or "wrapper" in logs_str:
+            stage = "Injecting license protection"
+            log_based_progress = 35
+        elif (
+            "dependenc" in logs_str
+            or "install" in logs_str
+            or "pip" in logs_str
+            or "npm" in logs_str
+        ):
+            stage = "Installing dependencies"
+            log_based_progress = 20
+        elif "download" in logs_str or "source" in logs_str:
+            stage = "Downloading source"
+            log_based_progress = 12
+
+        # Time-based progress interpolation for smoother updates
+        if started_at:
+            try:
+                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+                # Estimate ~3-4 minutes for typical build (180-240 seconds)
+                estimated_duration = 210  # 3.5 minutes average
+                time_progress = min(85, int((elapsed / estimated_duration) * 85) + 10)
+
+                # Use the maximum of time-based and log-based progress
+                # But never exceed current_progress from webhooks if available
+                if current_progress and current_progress > 0:
+                    # Webhooks provide more accurate progress
+                    final_progress = max(
+                        current_progress, time_progress, log_based_progress
+                    )
+                else:
+                    final_progress = max(time_progress, log_based_progress)
+
+                return stage, min(
+                    95, final_progress
+                )  # Cap at 95% until actually complete
+            except Exception:
+                pass
+
+        # Fallback to log-based or webhook progress
+        return stage, max(current_progress or 0, log_based_progress)
+
     elif status == "completed":
         return "Complete", 100
     elif status == "failed":
-        return "Failed", progress
+        return "Failed", 100
+    elif status == "cancelling":
+        return "Cancelling", build.get("progress", 0)
     elif status == "cancelled":
-        return "Cancelled", progress
+        return "Cancelled", 100
     else:
-        return "Unknown", progress
+        return "Unknown", 0

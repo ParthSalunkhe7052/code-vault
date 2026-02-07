@@ -31,12 +31,12 @@ async def get_db():
 
     try:
         conn = await db_pool.acquire()
-        # Quick health check
-        await conn.fetchval("SELECT 1")
         return conn
     except asyncpg.exceptions.PostgresError as e:
         logger.error(f"[Database] Failed to acquire healthy connection: {e}")
-        raise HTTPException(status_code=503, detail="Database temporarily unavailable")
+        raise HTTPException(
+            status_code=503, detail="Database temporarily unavailable"
+        ) from e
 
 
 async def release_db(conn):

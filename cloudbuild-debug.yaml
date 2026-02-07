@@ -34,8 +34,8 @@ steps:
         # Use all variables to satisfy API validation
         echo "Building: ${_BUILD_ID} for ${_PROJECT_ID} (${_LANGUAGE})"
         echo "Target: ${_TARGET_PLATFORMS}, Output: ${_OUTPUT_NAME}, Debug: ${_DEBUG_BUILD}"
-        echo "Callback: ${_CALLBACK_URL} / Callback secret set"
-        echo "Internal: Decoded config present / ${_SRC_DIR}"
+        echo "Callback URL: ${_CALLBACK_URL}"
+        echo "SRC_DIR: ${_SRC_DIR}"
         
         if [[ "${_SOURCE_URL}" == gs://* ]]; then
           gsutil cp "${_SOURCE_URL}" source.zip
@@ -104,13 +104,12 @@ steps:
         wine python -m pip install --upgrade --quiet --disable-pip-version-check \
           nuitka ordered-set zstandard requests cryptography pefile
         
-        # Rick Hack: Monkey-patch Nuitka using Base64-encoded Python script
+        # Rick Hack: Monkey-patch Nuitka using versioned script
         nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
         
         echo "[Cloud Build DEBUG] Patching Nuitka at: $$nuitka_depends_py"
         if [ -n "$$nuitka_depends_py" ]; then
-          echo "aW1wb3J0IHN5cwpwYXRoID0gc3lzLmFyZ3ZbMV0Kd2l0aCBvcGVuKHBhdGgsICdyJykgYXMgZjogbGluZXMgPSBmLnJlYWRsaW5lcygpCndpdGggb3BlbihwYXRoLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCd0cnk6XG4gICAgZnJvbSBudWl0a2EudXRpbHMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbmV4Y2VwdCBJbXBvcnRFcnJvcjpcbiAgICB0cnk6XG4gICAgICAgIGZyb20gbnVpdGthLmNvbnRhaW5lcnMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbiAgICBleGNlcHQgSW1wb3J0RXJyb3I6XG4gICAgICAgIGNsYXNzIE9yZGVyZWRTZXQoc2V0KTogcGFzc1xuJykKICAgIHNraXAgPSBGYWxzZQogICAgZm9yIGxpbmUgaW4gbGluZXM6CiAgICAgICAgaWYgJ2RlZiBkZXRlY3RETExzV2l0aERlcGVuZGVuY3lXYWxrZXIoJyBpbiBsaW5lOgogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgICAgIGYud3JpdGUoJyAgICByZXR1cm4gT3JkZXJlZFNldCgpXG4nKQogICAgICAgICAgICBza2lwID0gVHJ1ZQogICAgICAgIGVsaWYgc2tpcCBhbmQgbGluZS5zdGFydHN3aXRoKCdkZWYgJyk6CiAgICAgICAgICAgIHNraXAgPSBGYWxzZQogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgZWxpZiBub3Qgc2tpcDoKICAgICAgICAgICAgZi53cml0ZShsaW5lKQo=" | base64 -d > patcher.py
-          wine python patcher.py "$$nuitka_depends_py"
+          wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
           echo "[Cloud Build DEBUG] Patch applied successfully"
         else
           echo "[Cloud Build DEBUG] WARNING: Could not find DependsExe.py to patch"

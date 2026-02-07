@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lock, Cloud, Zap, Cpu, Box, Clock, ShieldCheck, Terminal, Server } from 'lucide-react';
+import { Lock, Cloud, Zap, Cpu, Box, Clock, Server } from 'lucide-react';
 
 const FeatureCard: React.FC<{
   title: string;
@@ -146,9 +146,9 @@ const Features: React.FC = () => {
 
            {/* Card 6: Webhooks */}
            <FeatureCard 
-             title="Anti-Debug & VM (Coming Soon)"
-             description="Planned detection of common debugging tools and virtual machines."
-             icon={<ShieldCheck className="w-6 h-6 text-red-400" />}
+             title="Webhooks"
+             description="Send build, license, and validation events to your own systems."
+             icon={<Server className="w-6 h-6 text-cyan-400" />}
              className="md:col-span-1"
              fullWidthDesc={true}
            />

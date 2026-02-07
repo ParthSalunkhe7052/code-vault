@@ -171,7 +171,7 @@ const Pricing: React.FC = () => {
               <h4 className="text-white font-medium mb-2">Is my data safe?</h4>
               <p className="text-sm text-gray-400 leading-relaxed">
                 Yes. We use industry-standard encryption for data at rest and in transit. Your source code is never stored on our servers - 
-                only compiled binaries. All data is backed up daily and stored in secure, SOC 2 compliant data centers.
+                only compiled binaries. All data is backed up daily and stored in secure data centers with strong access controls.
               </p>
             </div>
             <div>

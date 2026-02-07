@@ -232,11 +232,9 @@ async def deliver_webhook_with_retry(
 
     # Build headers
     headers = {"Content-Type": "application/json"}
+    body_bytes = json.dumps(webhook_payload, sort_keys=True).encode()
     if secret:
-        payload_str = json.dumps(webhook_payload, sort_keys=True)
-        signature = hmac.new(
-            secret.encode(), payload_str.encode(), hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(secret.encode(), body_bytes, hashlib.sha256).hexdigest()
         headers["X-Webhook-Signature"] = signature
 
     start_time = time.time()
@@ -244,7 +242,7 @@ async def deliver_webhook_with_retry(
 
     try:
         async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
-            response = await client.post(url, json=webhook_payload, headers=headers)
+            response = await client.post(url, content=body_bytes, headers=headers)
             delivery_time_ms = int((time.time() - start_time) * 1000)
 
             success = 200 <= response.status_code < 300
@@ -305,7 +303,7 @@ async def deliver_webhook_with_retry(
             finally:
                 await release_db(conn)
 
-    except asyncio.TimeoutError:
+    except httpx.TimeoutException:
         error_msg = "Request timeout"
         await _log_delivery_failure(
             webhook_id, delivery_id, event, webhook_payload, error_msg, attempt
@@ -382,13 +380,8 @@ async def process_retry_queue():
 
     logger.info(f"[WebhookRetry] Processing {len(retries)} pending retries")
 
-    async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
-        tasks = []
-        for retry in retries:
-            task = _process_single_retry(retry)
-            tasks.append(task)
-
-        await asyncio.gather(*tasks, return_exceptions=True)
+    tasks = [_process_single_retry(retry) for retry in retries]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _process_single_retry(retry: Dict[str, Any]):

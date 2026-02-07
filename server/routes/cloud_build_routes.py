@@ -29,6 +29,11 @@ from config import (
     GCP_PROJECT_ID,
 )
 from middleware.rate_limiter import get_redis_client
+from routes.cloud_build_websocket import (
+    ws_manager,
+    broadcast_build_update,
+    get_build_stage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,12 +197,13 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
     zip_path = source_dir.parent / f"source_{build_id}.zip"
 
     try:
-        # Copy cloud_runner.py to source directory so it's available in Cloud Build
+        # Copy build scripts to source directory so they're available in Cloud Build
         try:
             # Path calculation: cloud_build_routes.py is at server/routes/
             # Go up 2 levels to reach project root: server/routes -> server -> root
             project_root = Path(__file__).parent.parent.parent
             script_source = project_root / ".github" / "scripts" / "cloud_runner.py"
+            patcher_source = project_root / ".github" / "scripts" / "nuitka_patch.py"
 
             logger.info(f"[Upload] Looking for cloud_runner.py at: {script_source}")
 
@@ -210,6 +216,7 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                     logger.info(f"[Upload] Found cloud_runner.py at cwd: {alt_source}")
 
             script_dest = source_dir / ".github" / "scripts" / "cloud_runner.py"
+            patcher_dest = source_dir / ".github" / "scripts" / "nuitka_patch.py"
 
             if script_source.exists():
                 script_dest.parent.mkdir(parents=True, exist_ok=True)
@@ -656,6 +663,9 @@ async def build_webhook(request: Request):
     platform = payload.get("platform")
     status = payload.get("status")
     remote_build_id = payload.get("cloud_build_id") or payload.get("github_run_id")
+    download_url = payload.get("download_url")
+    filename = payload.get("filename")
+    error = payload.get("error")
 
     if not build_id:
         raise HTTPException(400, "Missing build_id")
@@ -682,7 +692,7 @@ async def build_webhook(request: Request):
                     build_id,
                 )
 
-            # Update Artifact
+            # Update Artifact (platform-specific callback)
             if platform:
                 await conn.execute(
                     """
@@ -692,9 +702,9 @@ async def build_webhook(request: Request):
                     WHERE build_id = $5 AND platform = $6
                     """,
                     status,
-                    payload.get("download_key"),
-                    payload.get("filename"),
-                    payload.get("error"),
+                    download_url or payload.get("download_key"),
+                    filename or payload.get("filename"),
+                    error or payload.get("error"),
                     build_id,
                     platform,
                 )
@@ -705,7 +715,9 @@ async def build_webhook(request: Request):
                 fallback_status = "cancelled" if status == "cancelled" else "failed"
                 fallback_error = None
                 if fallback_status == "failed":
-                    fallback_error = payload.get("error") or "No platform artifact callback received"
+                    fallback_error = (
+                        payload.get("error") or "No platform artifact callback received"
+                    )
 
                 await conn.execute(
                     """
@@ -734,17 +746,23 @@ async def build_webhook(request: Request):
                 else:
                     final_status = "failed"
 
-                # If we only have one artifact, sync its download key to the main table for backward compatibility
-                download_key = None
-                filename = None
-                if len(artifacts) == 1 and final_status == "completed":
-                    # Get the single artifact data
-                    art = await conn.fetchrow(
-                        "SELECT download_key, download_filename FROM cloud_build_artifacts WHERE build_id = $1",
-                        build_id,
-                    )
-                    download_key = art["download_key"]
-                    filename = art["download_filename"]
+                # For overall callback, use download_url/filename from payload directly
+                # For platform callbacks, get from artifacts table
+                final_download_key = download_url
+                final_filename = filename
+
+                if not final_download_key or not final_filename:
+                    # Try to get from artifacts if not provided in overall callback
+                    if len(artifacts) == 1 and final_status == "completed":
+                        art = await conn.fetchrow(
+                            "SELECT download_key, download_filename FROM cloud_build_artifacts WHERE build_id = $1",
+                            build_id,
+                        )
+                        if art:
+                            final_download_key = (
+                                final_download_key or art["download_key"]
+                            )
+                            final_filename = final_filename or art["download_filename"]
 
                 await conn.execute(
                     """
@@ -754,8 +772,8 @@ async def build_webhook(request: Request):
                     WHERE id = $4
                     """,
                     final_status,
-                    download_key,
-                    filename,
+                    final_download_key,
+                    final_filename,
                     build_id,
                 )
             else:
@@ -787,50 +805,6 @@ async def build_webhook(request: Request):
         f"[CloudBuild] Webhook failed after {max_retries} retries: {last_error}"
     )
     raise HTTPException(500, f"Database error after retries: {last_error}")
-
-
-# WebSocket Connection Manager for real-time log streaming
-class ConnectionManager:
-    """Manages WebSocket connections for build log streaming."""
-
-    def __init__(self):
-        # build_id -> list of WebSocket connections
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket, build_id: str):
-        await websocket.accept()
-        if build_id not in self.active_connections:
-            self.active_connections[build_id] = []
-        self.active_connections[build_id].append(websocket)
-        logger.debug(f"[WS] Client connected to build {build_id}")
-
-    def disconnect(self, websocket: WebSocket, build_id: str):
-        if build_id in self.active_connections:
-            if websocket in self.active_connections[build_id]:
-                self.active_connections[build_id].remove(websocket)
-            if not self.active_connections[build_id]:
-                del self.active_connections[build_id]
-        logger.debug(f"[WS] Client disconnected from build {build_id}")
-
-    async def broadcast(self, build_id: str, message: dict):
-        """Broadcast a message to all connected clients for a build."""
-        if build_id not in self.active_connections:
-            return
-
-        dead_connections = []
-        for connection in self.active_connections[build_id]:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                dead_connections.append(connection)
-
-        # Clean up dead connections
-        for conn in dead_connections:
-            self.disconnect(conn, build_id)
-
-
-# Global connection manager instance
-ws_manager = ConnectionManager()
 
 
 @router.websocket("/ws/{build_id}")
@@ -898,18 +872,6 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
         pass
     finally:
         ws_manager.disconnect(websocket, build_id)
-
-
-async def broadcast_build_update(build_id: str, update_type: str, data: dict):
-    """Helper function to broadcast updates to all connected WebSocket clients."""
-    await ws_manager.broadcast(
-        build_id,
-        {
-            "type": update_type,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-    )
 
 
 async def scheduled_cloud_build_cleanup():
@@ -1008,89 +970,6 @@ async def scheduled_cloud_build_cleanup():
 
         # Run every 24 hours
         await asyncio.sleep(86400)
-
-
-def get_build_stage(build: dict) -> tuple[str, int]:
-    """Calculate build stage and detailed progress from build status, logs, and timing."""
-    status = build["status"]
-    logs = build.get("logs") or []
-    started_at = build.get("started_at")
-    current_progress = build.get("progress", 0)
-
-    if isinstance(logs, str):
-        try:
-            logs = json.loads(logs)
-        except Exception:
-            logs = []
-
-    if status == "pending":
-        return "Queued", 5
-    elif status == "queued":
-        return "Waiting for runner", 8
-    elif status == "running":
-        # Check logs for stage keywords
-        logs_str = " ".join(str(log).lower() for log in logs)
-        log_based_progress = 15  # Default
-        stage = "Processing"
-
-        if "upload" in logs_str:
-            stage = "Uploading artifact"
-            log_based_progress = 90
-        elif "compil" in logs_str or "nuitka" in logs_str or "pkg" in logs_str:
-            stage = "Compiling binary"
-            log_based_progress = 55
-        elif "inject" in logs_str or "wrapper" in logs_str:
-            stage = "Injecting license protection"
-            log_based_progress = 35
-        elif (
-            "dependenc" in logs_str
-            or "install" in logs_str
-            or "pip" in logs_str
-            or "npm" in logs_str
-        ):
-            stage = "Installing dependencies"
-            log_based_progress = 20
-        elif "download" in logs_str or "source" in logs_str:
-            stage = "Downloading source"
-            log_based_progress = 12
-
-        # Time-based progress interpolation for smoother updates
-        if started_at:
-            try:
-                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
-                # Estimate ~3-4 minutes for typical build (180-240 seconds)
-                estimated_duration = 210  # 3.5 minutes average
-                time_progress = min(85, int((elapsed / estimated_duration) * 85) + 10)
-
-                # Use the maximum of time-based and log-based progress
-                # But never exceed current_progress from webhooks if available
-                if current_progress and current_progress > 0:
-                    # Webhooks provide more accurate progress
-                    final_progress = max(
-                        current_progress, time_progress, log_based_progress
-                    )
-                else:
-                    final_progress = max(time_progress, log_based_progress)
-
-                return stage, min(
-                    95, final_progress
-                )  # Cap at 95% until actually complete
-            except Exception:
-                pass
-
-        # Fallback to log-based or webhook progress
-        return stage, max(current_progress or 0, log_based_progress)
-
-    elif status == "completed":
-        return "Completed", 100
-    elif status == "failed":
-        return "Failed", 100
-    elif status == "cancelling":
-        return "Cancelling", build.get("progress", 0)
-    elif status == "cancelled":
-        return "Cancelled", 100
-    else:
-        return "Unknown", 0
 
 
 @router.get("/{build_id}/status")
@@ -1745,7 +1624,7 @@ async def progress_webhook(request: Request):
 # =============================================================================
 
 # In-memory queue processing task (runs in background)
-_queue_processor_started = False
+_queue_processor_task: Optional[asyncio.Task] = None
 
 
 async def add_to_queue(
@@ -1771,10 +1650,9 @@ async def add_to_queue(
     await redis_client.zadd(queue_name, {json.dumps(queue_item): priority})
 
     # Start queue processor if not already started
-    global _queue_processor_started
-    if not _queue_processor_started:
-        _queue_processor_started = True
-        asyncio.create_task(process_build_queue())
+    global _queue_processor_task
+    if _queue_processor_task is None or _queue_processor_task.done():
+        _queue_processor_task = asyncio.create_task(process_build_queue())
 
     # Get queue position
     position = await redis_client.zrank(queue_name, json.dumps(queue_item))

@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 
-const pageVariants = {
+export const pageVariants = {
     initial: {
         opacity: 0,
         y: 20,
@@ -16,12 +16,17 @@ const pageVariants = {
     },
 };
 
-const pageTransition = {
+export const pageTransition = {
     duration: 0.3,
     ease: [0.4, 0, 0.2, 1], // Ease out
 };
 
-export const AnimatedPage = ({ children }) => {
+export const AnimatedPage = ({
+    children,
+    className = "",
+    variants = pageVariants,
+    transition = pageTransition,
+}) => {
     const location = useLocation();
 
     return (
@@ -31,8 +36,9 @@ export const AnimatedPage = ({ children }) => {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                variants={pageVariants}
-                transition={pageTransition}
+                variants={variants}
+                transition={transition}
+                className={className}
             >
                 {children}
             </motion.div>

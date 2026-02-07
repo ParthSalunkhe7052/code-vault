@@ -184,6 +184,7 @@ class CloudBuildClient:
             "_CALLBACK_URL": callback_url,
             "_OUTPUT_NAME": config.get("output_name", "app"),
             "_DEBUG_BUILD": str(build_config.get("debug_build", "false")).lower(),
+            "_NUITKA_CACHE_DIR": "/workspace/.nuitka-cache",
         }
 
         try:

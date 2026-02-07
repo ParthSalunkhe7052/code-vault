@@ -107,40 +107,92 @@ steps:
       - '-c'
       - |
         # set -e removed to allow partial success
-        
+
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"linux"* || "${_LANGUAGE}" != "python" ]]; then
           echo "[Cloud Build] Skipping Linux build (not Python or not in target)"
+          echo "skipped" > /workspace/build_status_linux
           exit 0
         fi
-        
+
         echo "[Cloud Build] ===== Building for Linux ====="
-        
+
         # Install build dependencies
         apt-get update -qq && apt-get install -y -qq patchelf build-essential ccache > /dev/null 2>&1
-        
+
         # Install Python build tools
         pip install --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography
-        
+
         # Load config
         decoded_config=$$(cat /workspace/config.json)
-        
+
         # Run runner
         python3 "./project/source/.github/scripts/cloud_runner.py" \
           --config "$$decoded_config" \
           --source "./project/source" || echo "Linux build failed (continuing)"
-        
+
         # Package output
         cd "./project/source"
         output_name="${_OUTPUT_NAME}"
+        # Look in platform-specific output dir
+        if [ -d "build_output_linux" ]; then
+          cp -r build_output_linux/* .
+        fi
+
+        linux_artifacts=""
+        linux_status="failed"
+        linux_error=""
+
         if [ -f "$$output_name" ]; then
           chmod +x "$$output_name"
           tar -czf "$$output_name-linux.tar.gz" "$$output_name"
           mkdir -p /workspace/artifacts
           mv "$$output_name-linux.tar.gz" /workspace/artifacts/
-          echo "completed" > /workspace/build_status_linux
+          linux_artifacts="$$output_name-linux.tar.gz"
+          linux_status="completed"
+        else
+          if [ -f "error_message.txt" ]; then
+            linux_error=$$(cat error_message.txt)
+          else
+            linux_error="Linux build completed but output file not found"
+          fi
         fi
+
+        # Write status file for webhook callback
+        echo "$$linux_status" > /workspace/build_status_linux
+        echo "$$linux_artifacts" > /workspace/linux_artifacts
+        echo "$$linux_error" > /workspace/linux_error
     waitFor: ['download-config']
+    volumes:
+      - name: 'artifacts'
+        path: '/workspace/artifacts'
+
+  # ===== STEP 4a: Upload Linux Artifact =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-linux'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+        if [[ "$$linux_status" != "completed" ]]; then
+          echo "[Cloud Build] Skipping Linux upload (build not completed)"
+          exit 0
+        fi
+
+        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+        if [ -z "$$linux_artifact" ]; then
+          echo "[Cloud Build] No Linux artifact to upload"
+          exit 0
+        fi
+
+        echo "[Cloud Build] Uploading Linux artifact: $$linux_artifact"
+        gsutil cp "/workspace/artifacts/$$linux_artifact" "${_SOURCE_URL%.source.zip}.linux.zip" || {
+          echo "[Cloud Build] Failed to upload Linux artifact"
+          exit 1
+        }
+        echo "[Cloud Build] Linux artifact uploaded successfully"
+    waitFor: ['build-linux']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
@@ -153,53 +205,105 @@ steps:
       - '-c'
       - |
         # set -e removed to allow partial success
-        
+
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"windows"* || "${_LANGUAGE}" != "python" ]]; then
           echo "[Cloud Build] Skipping Windows build (not Python or not in target)"
+          echo "skipped" > /workspace/build_status_windows
           exit 0
         fi
-        
+
         echo "[Cloud Build] ===== Building for Windows ====="
-        
+
         # Rick Hack: Force Nuitka cache and dummy bypass
         export NUITKA_CACHE_DIR=${_NUITKA_CACHE_DIR}
         mkdir -p $$NUITKA_CACHE_DIR
-        
+
         # Install deps in Wine
         wine python -m pip install --upgrade --quiet --disable-pip-version-check \
           nuitka ordered-set zstandard requests cryptography pefile
-        
-        # Rick Hack: Monkey-patch Nuitka using Base64-encoded Python script
+
+        # Rick Hack: Monkey-patch Nuitka using versioned script
         nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
-        
+
         if [ -n "$$nuitka_depends_py" ]; then
-          echo "aW1wb3J0IHN5cwpwYXRoID0gc3lzLmFyZ3ZbMV0Kd2l0aCBvcGVuKHBhdGgsICdyJykgYXMgZjogbGluZXMgPSBmLnJlYWRsaW5lcygpCndpdGggb3BlbihwYXRoLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCd0cnk6XG4gICAgZnJvbSBudWl0a2EudXRpbHMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbmV4Y2VwdCBJbXBvcnRFcnJvcjpcbiAgICB0cnk6XG4gICAgICAgIGZyb20gbnVpdGthLmNvbnRhaW5lcnMuT3JkZXJlZFNldHMgaW1wb3J0IE9yZGVyZWRTZXRcbiAgICBleGNlcHQgSW1wb3J0RXJyb3I6XG4gICAgICAgIGNsYXNzIE9yZGVyZWRTZXQoc2V0KTogcGFzc1xuJykKICAgIHNraXAgPSBGYWxzZQogICAgZm9yIGxpbmUgaW4gbGluZXM6CiAgICAgICAgaWYgJ2RlZiBkZXRlY3RETExzV2l0aERlcGVuZGVuY3lXYWxrZXIoJyBpbiBsaW5lOgogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgICAgIGYud3JpdGUoJyAgICByZXR1cm4gT3JkZXJlZFNldCgpXG4nKQogICAgICAgICAgICBza2lwID0gVHJ1ZQogICAgICAgIGVsaWYgc2tpcCBhbmQgbGluZS5zdGFydHN3aXRoKCdkZWYgJyk6CiAgICAgICAgICAgIHNraXAgPSBGYWxzZQogICAgICAgICAgICBmLndyaXRlKGxpbmUpCiAgICAgICAgZWxpZiBub3Qgc2tpcDoKICAgICAgICAgICAgZi53cml0ZShsaW5lKQo=" | base64 -d > patcher.py
-          wine python patcher.py "$$nuitka_depends_py"
+          echo "[Cloud Build] Patching Nuitka at: $$nuitka_depends_py"
+          wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
           echo "[Cloud Build] Patch applied successfully"
         fi
-        
+
         # Run runner
         decoded_config=$$(cat /workspace/config.json)
         wine python "./project/source/.github/scripts/cloud_runner.py" \
           --config "$$decoded_config" \
           --source "$$(winepath -w $$(realpath ./project/source))"
-        
+
         # Package output
         output_name="${_OUTPUT_NAME}"
+        # Look in platform-specific output dir
+        if [ -d "./project/source/build_output_windows_wine" ]; then
+          cp -r ./project/source/build_output_windows_wine/* ./project/source/
+        fi
+
+        windows_artifacts=""
+        windows_status="failed"
+        windows_error=""
+
         if [ -f "./project/source/$$output_name.exe" ]; then
           zip -q "$$output_name-windows.zip" "./project/source/$$output_name.exe"
           mkdir -p /workspace/artifacts
           mv "$$output_name-windows.zip" /workspace/artifacts/
-          echo "completed" > /workspace/build_status_windows
+          windows_artifacts="$$output_name-windows.zip"
+          windows_status="completed"
+        else
+          if [ -f "./project/source/error_message.txt" ]; then
+            windows_error=$$(cat ./project/source/error_message.txt)
+          else
+            windows_error="Windows build completed but output file not found"
+          fi
         fi
+
+        # Write status file for webhook callback
+        echo "$$windows_status" > /workspace/build_status_windows
+        echo "$$windows_artifacts" > /workspace/windows_artifacts
+        echo "$$windows_error" > /workspace/windows_error
     waitFor: ['download-config']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
 
+  # ===== STEP 4c: Upload Windows Artifact =====
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-windows'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+        if [[ "$$windows_status" != "completed" ]]; then
+          echo "[Cloud Build] Skipping Windows upload (build not completed)"
+          exit 0
+        fi
+
+        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+        if [ -z "$$windows_artifact" ]; then
+          echo "[Cloud Build] No Windows artifact to upload"
+          exit 0
+        fi
+
+        echo "[Cloud Build] Uploading Windows artifact: $$windows_artifact"
+        gsutil cp "/workspace/artifacts/$$windows_artifact" "${_SOURCE_URL%.source.zip}.windows.zip" || {
+          echo "[Cloud Build] Failed to upload Windows artifact"
+          exit 1
+        }
+        echo "[Cloud Build] Windows artifact uploaded successfully"
+    waitFor: ['build-windows']
+    volumes:
+      - name: 'artifacts'
+        path: '/workspace/artifacts'
+
   # ===== STEP 4c: Build for Node.js =====
-  - name: 'node:18-slim'
+  - name: 'node:20-slim'
     id: 'build-nodejs'
     entrypoint: 'bash'
     args:
@@ -212,12 +316,12 @@ steps:
         fi
         
         echo "[Cloud Build] ===== Building for Node.js ====="
-        npm install -g pkg --quiet
+        npm install -g @yao-pkg/pkg --quiet
         cd "./project/source"
         if [ -f "package.json" ]; then npm install --quiet; fi
         
         mkdir -p /workspace/artifacts
-        pkg . --target node18-linux-x64,node18-win-x64 --out-path /workspace/artifacts/
+        pkg . --target node20-linux-x64,node20-win-x64 --out-path /workspace/artifacts/
         
         echo "completed" > /workspace/build_status_linux
         echo "completed" > /workspace/build_status_windows
@@ -235,25 +339,67 @@ steps:
       - '-c'
       - |
         set +e
+
+        # Read status files
         linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
         windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-        
+
+        # Read artifact names
+        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null || echo "")
+        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null || echo "")
+
+        # Read errors
+        linux_error=$$(cat /workspace/linux_error 2>/dev/null || echo "")
+        windows_error=$$(cat /workspace/windows_error 2>/dev/null || echo "")
+
         # Compute overall status
-        if [ "$$linux_status" != "success" ] && [ "$$linux_status" != "completed" ] || [ "$$windows_status" != "success" ] && [ "$$windows_status" != "completed" ]; then
-          overall_status="failed"
-        else
+        all_skipped=true
+        if [[ "$$linux_status" != "skipped" ]]; then all_skipped=false; fi
+        if [[ "$$windows_status" != "skipped" ]]; then all_skipped=false; fi
+
+        if [[ "$$all_skipped" == "true" ]]; then
+          overall_status="cancelled"
+        elif [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then
           overall_status="completed"
+        else
+          overall_status="failed"
         fi
-        
-        # Overall HMAC
-        payload='{"build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","timestamp":'"$$(date +%s)"'}'
+
+        # Build download URLs (presigned URLs from R2)
+        base_url="${_SOURCE_URL%.source.zip}"
+        download_url=""
+        filename=""
+
+        if [[ "$$linux_status" == "completed" && -n "$$linux_artifact" ]]; then
+          download_url="$${base_url}.linux.zip"
+          filename="$$linux_artifact"
+        elif [[ "$$windows_status" == "completed" && -n "$$windows_artifact" ]]; then
+          download_url="$${base_url}.windows.zip"
+          filename="$$windows_artifact"
+        fi
+
+        # Build error message
+        error_msg=""
+        if [[ "$$overall_status" == "failed" ]]; then
+          if [[ -n "$$linux_error" ]]; then error_msg="Linux: $$linux_error; "; fi
+          if [[ -n "$$windows_error" ]]; then error_msg="$${error_msg}Windows: $$windows_error"; fi
+          if [[ -z "$$error_msg" ]]; then error_msg="Build failed - see logs for details"; fi
+        fi
+
+        # Build the payload - include cloud_build_id for tracking
+        payload='{"build_id":"'"${_BUILD_ID}"'","cloud_build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","download_url":"'"$$download_url"'","filename":"'"$$filename"'","error":"'"$$error_msg"'","timestamp":'"$$(date +%s)"'}'
         sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $$2}')
-        
+
+        echo "[Cloud Build] Sending webhook callback..."
+        echo "[Cloud Build] Payload: $$payload"
+
         curl -sf -X POST "${_CALLBACK_URL}" \
           -H "Content-Type: application/json" \
           -H "X-Signature: $$sig" \
           -d "$$payload" || echo "Webhook failed"
-    waitFor: ['build-linux', 'build-windows', 'build-nodejs']
+
+        echo "[Cloud Build] Webhook callback completed"
+    waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
 
 # ===== Secrets Configuration =====
 availableSecrets:

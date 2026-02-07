@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X } from 'lucide-react';
 import api from '../services/api';
 import { useProjectBuild } from '../contexts/BuildContext';
@@ -48,41 +48,6 @@ export function CloudBuildButton({
   
   // Polling interval ref for cleanup
   const pollIntervalRef = useRef(null);
-
-  // Sync with Global Context on Mount/Update
-  useEffect(() => {
-    if (projectBuild && projectBuild.status) {
-       if (['pending', 'queued', 'running'].includes(projectBuild.status)) {
-           setStatus('building');
-           setBuildId(projectBuild.jobId);
-           if (typeof projectBuild.progress === 'number') {
-             setProgress(projectBuild.progress);
-           }
-           if (status === 'idle') {
-             pollStatus(projectBuild.jobId); // Resume polling
-           }
-       }
-       if (projectBuild.status === 'completed') {
-           if (status === 'building') {
-             if (pollIntervalRef.current) {
-                 // Poller is running, let it finish
-             } else if (projectBuild.jobId) {
-                 pollStatus(projectBuild.jobId);
-             }
-           }
-       }
-       if (projectBuild.status === 'failed') {
-           setStatus('failed');
-           if (projectBuild.error) {
-             setError(projectBuild.error);
-           }
-       }
-       if (projectBuild.status === 'cancelled') {
-           setStatus('cancelled');
-           setError('Build was cancelled');
-       }
-    }
-  }, [projectBuild.status, projectBuild.jobId, projectBuild.progress, projectBuild.error, status]);
 
   // Animated progress effect - smoothly animate to target progress
   useEffect(() => {
@@ -155,7 +120,7 @@ export function CloudBuildButton({
     }
   };
 
-  const pollStatus = async (id) => {
+  const pollStatus = useCallback(async (id) => {
     let pollCount = 0;
     
     const checkStatus = async () => {
@@ -296,7 +261,42 @@ export function CloudBuildButton({
     };
     
     checkStatus();
-  };
+  }, [isMultiPlatform, targetPlatforms, projectBuild, onComplete]);
+
+  // Sync with Global Context on Mount/Update
+  useEffect(() => {
+    if (projectBuild && projectBuild.status) {
+       if (['pending', 'queued', 'running'].includes(projectBuild.status)) {
+           setStatus('building');
+           setBuildId(projectBuild.jobId);
+           if (typeof projectBuild.progress === 'number') {
+             setProgress(projectBuild.progress);
+           }
+           if (status === 'idle') {
+             pollStatus(projectBuild.jobId); // Resume polling
+           }
+       }
+       if (projectBuild.status === 'completed') {
+           if (status === 'building') {
+             if (pollIntervalRef.current) {
+                 // Poller is running, let it finish
+             } else if (projectBuild.jobId) {
+                 pollStatus(projectBuild.jobId);
+             }
+           }
+       }
+       if (projectBuild.status === 'failed') {
+           setStatus('failed');
+           if (projectBuild.error) {
+             setError(projectBuild.error);
+           }
+       }
+       if (projectBuild.status === 'cancelled') {
+           setStatus('cancelled');
+           setError('Build was cancelled');
+       }
+    }
+  }, [projectBuild?.status, projectBuild?.jobId, projectBuild?.progress, projectBuild?.error, status, pollStatus]);
 
   const resetBuild = () => {
     setStatus('idle');

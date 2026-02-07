@@ -1,6 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
@@ -10,6 +9,7 @@ import { BuildProvider } from './contexts/BuildContext';
 import { PricingProvider } from './contexts/PricingContext';
 import { initializeAuth } from './services/api';
 import Spinner from './components/Spinner';
+import { AnimatedPage, pageVariants, pageTransition } from './components/AnimatedPage';
 
 // Lazy-loaded page components
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -21,38 +21,6 @@ const Settings = lazy(() => import('./pages/Settings'));
 const BuildSettings = lazy(() => import('./pages/BuildSettings'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-
-// Page transition variants
-const pageVariants = {
-    initial: { opacity: 0, y: 20 },
-    animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -20 }
-};
-
-const pageTransition = {
-    duration: 0.3,
-    ease: [0.4, 0, 0.2, 1]
-};
-
-// Animated page wrapper
-const AnimatedPage = ({ children }) => {
-    const location = useLocation();
-    return (
-        <AnimatePresence mode="wait">
-            <motion.div
-                key={location.pathname}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                variants={pageVariants}
-                transition={pageTransition}
-                className="h-full"
-            >
-                {children}
-            </motion.div>
-        </AnimatePresence>
-    );
-};
 
 // Full page loading spinner
 const FullPageLoader = () => (
@@ -71,7 +39,7 @@ const LazyPage = ({ children }) => (
             <Spinner size="lg" />
         </div>
     }>
-        <AnimatedPage>
+        <AnimatedPage className="h-full" variants={pageVariants} transition={pageTransition}>
             {children}
         </AnimatedPage>
     </Suspense>

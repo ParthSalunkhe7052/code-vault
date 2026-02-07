@@ -257,8 +257,9 @@ async def run_migrations():
             print(f"  - Note: projects.signing_secret check: {e}")
 
         # Ensure all existing projects HAVE a signing secret
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
         await conn.execute(
-            "UPDATE projects SET signing_secret = md5(random()::text) WHERE signing_secret IS NULL"
+            "UPDATE projects SET signing_secret = encode(gen_random_bytes(32), 'hex') WHERE signing_secret IS NULL"
         )
         print("  - Backfilled missing signing_secrets")
 
@@ -281,7 +282,7 @@ async def run_migrations():
         if admin_email:
             print(f"[Migration] Setting up admin: {admin_email}")
             await conn.execute(
-                "UPDATE users SET role = 'admin', plan = 'enterprise' WHERE email = $1",
+                "UPDATE users SET role = 'admin', plan = 'business' WHERE email = $1",
                 admin_email,
             )
 

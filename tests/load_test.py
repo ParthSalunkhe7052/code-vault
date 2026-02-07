@@ -6,11 +6,10 @@ Tests performance under concurrent load.
 import asyncio
 import time
 import statistics
-from concurrent.futures import ThreadPoolExecutor
 import argparse
+from typing import Optional
 
 import httpx
-import aiohttp
 
 
 class LoadTester:
@@ -20,31 +19,40 @@ class LoadTester:
         self.base_url = base_url.rstrip("/")
         self.results = []
 
-    async def make_request(self, endpoint: str, method: str = "GET", data: dict = None):
+    async def _make_request(
+        self,
+        client: httpx.AsyncClient,
+        endpoint: str,
+        method: str = "GET",
+        data: Optional[dict] = None,
+    ):
         """Make a single request and measure response time."""
         url = f"{self.base_url}{endpoint}"
         start_time = time.time()
 
         try:
-            async with aiohttp.ClientSession() as session:
-                if method == "GET":
-                    async with session.get(url, timeout=10) as response:
-                        await response.text()
-                        status = response.status
-                elif method == "POST":
-                    async with session.post(url, json=data, timeout=10) as response:
-                        await response.text()
-                        status = response.status
-                else:
-                    status = 0
-
-                elapsed = time.time() - start_time
+            if method == "GET":
+                response = await client.get(url)
+            elif method == "POST":
+                response = await client.post(url, json=data)
+            else:
                 return {
                     "endpoint": endpoint,
-                    "status": status,
-                    "response_time": elapsed,
-                    "success": 200 <= status < 300,
+                    "status": 0,
+                    "response_time": 0,
+                    "success": False,
+                    "error": f"Unsupported method: {method}",
                 }
+
+            await response.aread()
+            status = response.status_code
+            elapsed = time.time() - start_time
+            return {
+                "endpoint": endpoint,
+                "status": status,
+                "response_time": elapsed,
+                "success": 200 <= status < 300,
+            }
         except Exception as e:
             elapsed = time.time() - start_time
             return {
@@ -55,12 +63,23 @@ class LoadTester:
                 "error": str(e),
             }
 
+    async def make_request(
+        self, endpoint: str, method: str = "GET", data: Optional[dict] = None
+    ):
+        """Make a single request and measure response time."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            return await self._make_request(client, endpoint, method, data)
+
     async def run_concurrent_requests(
         self, endpoint: str, count: int, method: str = "GET", data: dict = None
     ):
         """Run multiple concurrent requests."""
-        tasks = [self.make_request(endpoint, method, data) for _ in range(count)]
-        return await asyncio.gather(*tasks)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tasks = [
+                self._make_request(client, endpoint, method, data)
+                for _ in range(count)
+            ]
+            return await asyncio.gather(*tasks)
 
     def print_results(self, results: list, test_name: str):
         """Print test results."""
@@ -124,15 +143,17 @@ class LoadTester:
         print(f"\nTesting login endpoint with {concurrency} concurrent requests...")
 
         # Generate unique emails for each request
-        async def make_login_request(i):
-            return await self.make_request(
-                "/api/v1/auth/login",
-                "POST",
-                {"email": f"loadtest{i}@example.com", "password": "wrongpassword"},
-            )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            async def make_login_request(i):
+                return await self._make_request(
+                    client,
+                    "/api/v1/auth/login",
+                    "POST",
+                    {"email": f"loadtest{i}@example.com", "password": "wrongpassword"},
+                )
 
-        tasks = [make_login_request(i) for i in range(concurrency)]
-        results = await asyncio.gather(*tasks)
+            tasks = [make_login_request(i) for i in range(concurrency)]
+            results = await asyncio.gather(*tasks)
         self.print_results(results, f"Login - {concurrency} concurrent")
         return results
 
