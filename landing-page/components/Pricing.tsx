@@ -19,8 +19,10 @@ const PricingCard: React.FC<{
     <div className="mb-8">
       <h3 className="text-lg font-medium text-gray-300 mb-2">{tier}</h3>
       <div className="flex items-baseline gap-1">
-        <span className="text-4xl font-bold text-white">${price}</span>
-        <span className="text-sm text-gray-500">{period}</span>
+        <span className="text-4xl font-bold text-white">
+          {typeof price === 'string' && price.toLowerCase() === 'custom' ? price : `$${price}`}
+        </span>
+        {period && <span className="text-sm text-gray-500">{period}</span>}
       </div>
     </div>
     
@@ -63,7 +65,7 @@ const Pricing: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 max-w-6xl mx-auto">
           <PricingCard 
             tier="Free"
             price="0"
@@ -74,7 +76,7 @@ const Pricing: React.FC = () => {
               { text: "1 Project", included: true },
               { text: "50 Licenses", included: true },
               { text: "Local Builds Only", included: true },
-              { text: "Basic Obfuscation", included: true },
+              { text: "Community Support", included: true },
               { text: "Cloud Builds", included: false },
               { text: "Node.js Support", included: false },
               { text: "Analytics", included: false },
@@ -93,10 +95,9 @@ const Pricing: React.FC = () => {
               { text: "500 Licenses", included: true },
               { text: "25 Cloud Builds/mo", included: true },
               { text: "Node.js Support", included: true },
-              { text: "Offline Crypto Leases", included: true },
-              { text: "Advanced Nuitka Compilation", included: true },
+              { text: "Offline Leases", included: true },
               { text: "Analytics & Webhooks", included: true },
-              { text: "Priority Support", included: true },
+              { text: "No Branding / Splash Screen", included: true },
             ]}
           />
           <PricingCard 
@@ -111,9 +112,23 @@ const Pricing: React.FC = () => {
               { text: "100 Cloud Builds/mo", included: true },
               { text: "10 Team Seats", included: true },
               { text: "White-labeling (Custom Splash)", included: true },
-              { text: "Dedicated Build Runners", included: true },
-              { text: "SLA Agreement", included: true },
               { text: "Priority Support", included: true },
+            ]}
+          />
+          <PricingCard 
+            tier="Enterprise"
+            price="Custom"
+            period=""
+            ctaLink="mailto:sales@codevault.com?subject=CodeVault Enterprise"
+            ctaLabel="Contact Sales"
+            features={[
+              { text: "Unlimited Licenses", included: true },
+              { text: "Unlimited Cloud Builds", included: true },
+              { text: "Unlimited Team Seats", included: true },
+              { text: "Dedicated Build Runners", included: true },
+              { text: "Custom SLAs", included: true },
+              { text: "Security Reviews", included: true },
+              { text: "Dedicated Support", included: true },
             ]}
           />
         </div>

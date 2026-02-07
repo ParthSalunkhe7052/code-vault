@@ -6,7 +6,8 @@ const PricingContext = createContext();
 export const TIERS = {
   FREE: 'free',
   PRO: 'pro',
-  BUSINESS: 'business'
+  BUSINESS: 'business',
+  ENTERPRISE: 'enterprise'
 };
 
 // Polar product IDs (must match backend config)
@@ -35,6 +36,13 @@ const DEFAULT_LIMITS = {
     maxProjects: Infinity,
     maxLicenses: 5000,
     buildCredits: 100,
+    canCloudBuild: true,
+    offlineLease: true
+  },
+  [TIERS.ENTERPRISE]: {
+    maxProjects: Infinity,
+    maxLicenses: Infinity,
+    buildCredits: Infinity,
     canCloudBuild: true,
     offlineLease: true
   }
