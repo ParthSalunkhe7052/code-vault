@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from database import get_db, release_db
 from storage_service import storage_service
 from utils import get_current_user, get_current_admin_user, get_user_tier
+from middleware.tier_enforcement import requires_feature
 from config import (
     BUILD_CALLBACK_SECRET,
     ENVIRONMENT,
@@ -34,37 +35,23 @@ from routes.cloud_build_websocket import (
     broadcast_build_update,
     get_build_stage,
 )
+from routes.cloud_build_utils import (
+    validate_safe_path,
+    verify_webhook_signature as verify_webhook_signature_util,
+    invalidate_cached_source,
+)
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/cloud-build", tags=["cloud-build"])
+router = APIRouter(
+    prefix="/api/v1/cloud-build", 
+    tags=["cloud-build"],
+    dependencies=[Depends(requires_feature("cloud_builds"))]
+)
 
 # Local upload directory - should match project_routes
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def validate_safe_path(base_dir: Path, user_input: str) -> Path:
-    """Validate that user input doesn't escape the base directory."""
-    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*$", user_input):
-        raise HTTPException(
-            400,
-            "Invalid path component: only alphanumeric, dashes, underscores allowed",
-        )
-
-    if ".." in user_input or "/" in user_input or "\\" in user_input:
-        raise HTTPException(400, "Invalid path component")
-
-    candidate = base_dir / os.path.basename(user_input)
-
-    try:
-        resolved = candidate.resolve()
-        base_resolved = base_dir.resolve()
-        if not str(resolved).startswith(str(base_resolved)):
-            raise HTTPException(400, "Invalid path component")
-        return resolved
-    except (OSError, ValueError):
-        raise HTTPException(400, "Invalid path component")
 
 
 class CloudBuildRequest(BaseModel):
@@ -156,32 +143,6 @@ async def verify_webhook_signature(request: Request) -> bool:
     ).hexdigest()
 
     return hmac.compare_digest(signature.lower(), expected.lower())
-
-
-async def invalidate_cached_source(project_id: str):
-    """
-    Invalidate cached source for a project when files are uploaded/changed.
-    This ensures fresh source is always used for new builds.
-    """
-    if not storage_service.is_cloud_enabled() or not storage_service.client:
-        return
-
-    project_source_key = f"uploads/{project_id}/source.zip"
-
-    try:
-        s3 = storage_service.client
-        bucket = storage_service.bucket
-
-        # Check if cached source exists and delete it
-        try:
-            s3.head_object(Bucket=bucket, Key=project_source_key)
-            s3.delete_object(Bucket=bucket, Key=project_source_key)
-            logger.info(f"[Cache] Invalidated cached source: {project_source_key}")
-        except Exception:
-            # Cache doesn't exist, that's fine
-            pass
-    except Exception as e:
-        logger.warning(f"[Cache] Failed to invalidate source cache: {e}")
 
 
 async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
@@ -667,7 +628,15 @@ async def build_webhook(request: Request):
     platform = payload.get("platform")
     status = payload.get("status")
     remote_build_id = payload.get("cloud_build_id") or payload.get("github_run_id")
+
+    # Handle new GCS blob keys from Cloud Build (A1-A2 fix)
+    linux_download_key = payload.get("linux_download_key")
+    windows_download_key = payload.get("windows_download_key")
+
+    # Legacy fallback for GitHub Actions (old format)
     download_url = payload.get("download_url")
+    download_key = payload.get("download_key")
+
     filename = payload.get("filename")
     error = payload.get("error")
 
@@ -698,6 +667,18 @@ async def build_webhook(request: Request):
 
             # Update Artifact (platform-specific callback)
             if platform:
+                # Determine download key: new GCS format or legacy
+                if platform == "linux" and linux_download_key:
+                    artifact_download_key = linux_download_key
+                elif platform == "windows" and windows_download_key:
+                    artifact_download_key = windows_download_key
+                elif download_key:
+                    artifact_download_key = download_key
+                elif download_url:
+                    artifact_download_key = download_url
+                else:
+                    artifact_download_key = None
+
                 await conn.execute(
                     """
                     UPDATE cloud_build_artifacts
@@ -706,9 +687,9 @@ async def build_webhook(request: Request):
                     WHERE build_id = $5 AND platform = $6
                     """,
                     status,
-                    download_url or payload.get("download_key"),
-                    filename or payload.get("filename"),
-                    error or payload.get("error"),
+                    artifact_download_key,
+                    filename,
+                    error,
                     build_id,
                     platform,
                 )
@@ -750,16 +731,22 @@ async def build_webhook(request: Request):
                 else:
                     final_status = "failed"
 
-                # For overall callback, use download_url/filename from payload directly
+                # For overall callback, use GCS blob keys from new payload format
                 # For platform callbacks, get from artifacts table
-                final_download_key = download_url
+                # Priority: linux_download_key > windows_download_key > download_key > download_url
+                final_download_key = (
+                    linux_download_key
+                    or windows_download_key
+                    or download_key
+                    or download_url
+                )
                 final_filename = filename
 
                 if not final_download_key or not final_filename:
                     # Try to get from artifacts if not provided in overall callback
-                    if len(artifacts) == 1 and final_status == "completed":
+                    if final_status == "completed":
                         art = await conn.fetchrow(
-                            "SELECT download_key, download_filename FROM cloud_build_artifacts WHERE build_id = $1",
+                            "SELECT download_key, download_filename FROM cloud_build_artifacts WHERE build_id = $1 AND status = 'completed' LIMIT 1",
                             build_id,
                         )
                         if art:
@@ -1045,14 +1032,14 @@ async def get_build_status(
 
                         # CRITICAL FIX: Also update artifacts if the build is terminal
                         # This ensures the frontend doesn't get stuck waiting for artifacts
-                        if db_status in ['failed', 'cancelled', 'completed']:
-                             await conn.execute(
+                        if db_status in ["failed", "cancelled", "completed"]:
+                            await conn.execute(
                                 """UPDATE cloud_build_artifacts
                                    SET status = $1::text, 
                                        error_message = COALESCE(error_message, 'Build finished with status: ' || $1::text)
                                    WHERE build_id = $2::text AND status IN ('pending', 'running')""",
                                 db_status,
-                                build_id
+                                build_id,
                             )
 
                         # Refresh build data
@@ -1076,29 +1063,43 @@ async def get_build_status(
         for art in artifacts:
             download_url = None
             download_key = art["download_key"]
-            
+
             # Recovery: If completed but no key (failed webhook), guess the key
+            # New GCS pattern: builds/{build_id}/{platform}/{filename}
             if art["status"] == "completed" and not download_key:
-                # Guess standard pattern: builds/{build_id}/source.{platform}.zip
-                # Note: cloudbuild.yaml uses "${_SOURCE_URL%.source.zip}.windows.zip"
-                # If _SOURCE_URL was "builds/{id}/source.zip", then "builds/{id}/source.windows.zip"
-                guessed_key = f"builds/{build_id}/source.{art['platform']}.zip"
-                
-                # Check if it exists (HEAD request) before offering it
-                try:
-                    # We can't easily check existence here without overhead, 
-                    # but offering a broken link is better than no link if the file likely exists.
-                    # Ideally we would check storage_service.client.head_object(...)
-                    download_key = guessed_key
-                    
-                    # Update DB to save the guess so we don't guess every time
-                    await conn.execute(
-                        "UPDATE cloud_build_artifacts SET download_key = $1 WHERE id = $2",
-                        download_key, art["id"]
+                # Try multiple filename patterns
+                possible_filenames = [
+                    f"{art['platform']}_build.zip",
+                    f"{build_id}_{art['platform']}.zip",
+                    f"source.{art['platform']}.zip",
+                ]
+
+                for filename_guess in possible_filenames:
+                    guessed_key = (
+                        f"builds/{build_id}/{art['platform']}/{filename_guess}"
                     )
-                    logger.info(f"[CloudBuild] Recovered missing download key: {download_key}")
-                except Exception:
-                    pass
+
+                    # Try to generate signed URL to verify blob exists
+                    try:
+                        test_url = generate_gcs_signed_url(guessed_key)
+                        if test_url:
+                            download_key = guessed_key
+                            logger.info(
+                                f"[CloudBuild] Recovered missing download key: {download_key}"
+                            )
+
+                            # Update DB to save the guess so we don't guess every time
+                            await conn.execute(
+                                "UPDATE cloud_build_artifacts SET download_key = $1 WHERE id = $2",
+                                download_key,
+                                art["id"],
+                            )
+                            break
+                    except Exception as recovery_error:
+                        logger.debug(
+                            f"[CloudBuild] Recovery attempt failed for {guessed_key}: {recovery_error}"
+                        )
+                        continue
 
             if art["status"] == "completed" and download_key:
                 download_url = generate_gcs_signed_url(download_key)
@@ -1108,7 +1109,8 @@ async def get_build_status(
                     "platform": art["platform"],
                     "status": art["status"],
                     "download_url": download_url,
-                    "filename": art["download_filename"] or f"{art['platform']}_build.zip",
+                    "filename": art["download_filename"]
+                    or f"{art['platform']}_build.zip",
                     "error": art["error_message"],
                 }
             )
@@ -1153,7 +1155,25 @@ async def get_build_status(
         # Backward compatibility for single artifact builds
         if len(artifact_list) == 1:
             response["download_key"] = artifact_list[0].get("download_url")
+            response["download_url"] = artifact_list[0].get(
+                "download_url"
+            )  # A3: Top-level download_url
             response["download_filename"] = artifact_list[0].get("filename")
+        elif len(artifact_list) > 1:
+            # A3: For multi-platform, provide primary platform URL (windows preferred, then linux)
+            for art in artifact_list:
+                if art.get("platform") == "windows" and art.get("download_url"):
+                    response["download_url"] = art["download_url"]
+                    response["download_key"] = art["download_url"]
+                    response["download_filename"] = art["filename"]
+                    break
+            else:
+                for art in artifact_list:
+                    if art.get("download_url"):
+                        response["download_url"] = art["download_url"]
+                        response["download_key"] = art["download_url"]
+                        response["download_filename"] = art["filename"]
+                        break
 
         return response
     finally:
@@ -1228,6 +1248,38 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
                     ),
                     build_id,
                 )
+
+                # A6: Recover artifact download keys for completed builds
+                if db_status == "completed":
+                    artifacts = await conn.fetch(
+                        "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
+                        build_id,
+                    )
+                    for art in artifacts:
+                        if art["status"] == "completed" and not art["download_key"]:
+                            # Try to recover the download key using the same logic as status endpoint
+                            possible_filenames = [
+                                f"{art['platform']}_build.zip",
+                                f"{build_id}_{art['platform']}.zip",
+                                f"source.{art['platform']}.zip",
+                            ]
+
+                            for filename_guess in possible_filenames:
+                                guessed_key = f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                                try:
+                                    test_url = generate_gcs_signed_url(guessed_key)
+                                    if test_url:
+                                        await conn.execute(
+                                            "UPDATE cloud_build_artifacts SET download_key = $1 WHERE id = $2",
+                                            guessed_key,
+                                            art["id"],
+                                        )
+                                        logger.info(
+                                            f"[CloudBuild] Sync recovered download key for {art['platform']}: {guessed_key}"
+                                        )
+                                        break
+                                except Exception:
+                                    continue
 
                 logger.info(
                     f"[CloudBuild] Manual sync: Build {build_id} status changed from {build['status']} to {db_status}"

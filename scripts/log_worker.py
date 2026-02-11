@@ -33,13 +33,18 @@ async def flush_batch(conn: asyncpg.Connection, batch: List[dict]):
 
     try:
         # Prepare data for executemany
-        # columns: license_id, license_key, hwid, ip_address, result, response_time_ms, machine_name, created_at
+        # columns: license_id, project_id, license_key, hwid, ip_address, country, city, latitude, longitude, result, response_time_ms, created_at
         data = [
             (
                 b.get("license_id"),
+                b.get("project_id"),
                 b.get("license_key"),
                 b.get("hwid"),
                 b.get("ip_address"),
+                b.get("country"),
+                b.get("city"),
+                b.get("latitude"),
+                b.get("longitude"),
                 b.get("result"),
                 b.get("response_time_ms"),
                 b.get("created_at")
@@ -49,8 +54,8 @@ async def flush_batch(conn: asyncpg.Connection, batch: List[dict]):
 
         await conn.executemany(
             """
-            INSERT INTO validation_logs (license_id, license_key, hwid, ip_address, result, response_time_ms, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO validation_logs (license_id, project_id, license_key, hwid, ip_address, country, city, latitude, longitude, result, response_time_ms, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             """,
             data
         )

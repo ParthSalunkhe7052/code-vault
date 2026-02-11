@@ -1,0 +1,17 @@
+{
+  "name": "@codevault/sdk",
+  "version": "1.0.0",
+  "description": "Official Node.js SDK for CodeVault License Management",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo "Error: no test specified" && exit 1"
+  },
+  "keywords": [
+    "codevault",
+    "license",
+    "protection",
+    "drm"
+  ],
+  "author": "CodeVault Team",
+  "license": "MIT"
+}

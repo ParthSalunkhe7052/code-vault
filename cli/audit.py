@@ -7,7 +7,7 @@ All logging failures are silent to avoid blocking builds.
 
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import requests
 
@@ -41,19 +41,21 @@ class AuditLogger:
         license_mode: str,
         obfuscate_enabled: bool,
         lease_enabled: bool,
-        source_file: Optional[str] = None
+        source_file: Optional[str] = None,
     ) -> None:
         """Log the start of a build operation."""
-        self._queue_event({
-            "event_type": "build_start",
-            "project_id": project_id,
-            "language": language,
-            "license_mode": license_mode,
-            "obfuscate_enabled": obfuscate_enabled,
-            "lease_enabled": lease_enabled,
-            "source_file": source_file,
-            "timestamp": time.time(),
-        })
+        self._queue_event(
+            {
+                "event_type": "build_start",
+                "project_id": project_id,
+                "language": language,
+                "license_mode": license_mode,
+                "obfuscate_enabled": obfuscate_enabled,
+                "lease_enabled": lease_enabled,
+                "source_file": source_file,
+                "timestamp": time.time(),
+            }
+        )
 
     def log_build_success(
         self,
@@ -61,18 +63,20 @@ class AuditLogger:
         language: str,
         duration_ms: int,
         output_size_bytes: int,
-        license_mode: str
+        license_mode: str,
     ) -> None:
         """Log a successful build."""
-        self._queue_event({
-            "event_type": "build_success",
-            "project_id": project_id,
-            "language": language,
-            "duration_ms": duration_ms,
-            "output_size_bytes": output_size_bytes,
-            "license_mode": license_mode,
-            "timestamp": time.time(),
-        })
+        self._queue_event(
+            {
+                "event_type": "build_success",
+                "project_id": project_id,
+                "language": language,
+                "duration_ms": duration_ms,
+                "output_size_bytes": output_size_bytes,
+                "license_mode": license_mode,
+                "timestamp": time.time(),
+            }
+        )
 
     def log_build_failure(
         self,
@@ -80,49 +84,48 @@ class AuditLogger:
         language: str,
         error_message: str,
         error_type: str,
-        license_mode: str
+        license_mode: str,
     ) -> None:
         """Log a failed build."""
         # Truncate very long error messages
         if len(error_message) > 500:
             error_message = error_message[:500] + "... (truncated)"
 
-        self._queue_event({
-            "event_type": "build_failure",
-            "project_id": project_id,
-            "language": language,
-            "error_message": error_message,
-            "error_type": error_type,
-            "license_mode": license_mode,
-            "timestamp": time.time(),
-        })
+        self._queue_event(
+            {
+                "event_type": "build_failure",
+                "project_id": project_id,
+                "language": language,
+                "error_message": error_message,
+                "error_type": error_type,
+                "license_mode": license_mode,
+                "timestamp": time.time(),
+            }
+        )
 
-    def log_security_event(
-        self,
-        event_type: str,
-        details: Dict[str, Any]
-    ) -> None:
+    def log_security_event(self, event_type: str, details: Dict[str, Any]) -> None:
         """Log a security-related event (e.g., path traversal attempt)."""
-        self._queue_event({
-            "event_type": f"security_{event_type}",
-            "details": details,
-            "timestamp": time.time(),
-        })
+        self._queue_event(
+            {
+                "event_type": f"security_{event_type}",
+                "details": details,
+                "timestamp": time.time(),
+            }
+        )
 
     def log_obfuscation_stats(
-        self,
-        files_processed: int,
-        files_failed: int,
-        duration_ms: int
+        self, files_processed: int, files_failed: int, duration_ms: int
     ) -> None:
         """Log obfuscation statistics."""
-        self._queue_event({
-            "event_type": "obfuscation_stats",
-            "files_processed": files_processed,
-            "files_failed": files_failed,
-            "duration_ms": duration_ms,
-            "timestamp": time.time(),
-        })
+        self._queue_event(
+            {
+                "event_type": "obfuscation_stats",
+                "files_processed": files_processed,
+                "files_failed": files_failed,
+                "duration_ms": duration_ms,
+                "timestamp": time.time(),
+            }
+        )
 
     def _queue_event(self, event: Dict[str, Any]) -> None:
         """Add event to queue for async sending."""
@@ -147,9 +150,7 @@ class AuditLogger:
         # Try to send (with timeout to avoid blocking)
         try:
             thread = threading.Thread(
-                target=self._send_events_sync,
-                args=(events_to_send,),
-                daemon=True
+                target=self._send_events_sync, args=(events_to_send,), daemon=True
             )
             thread.start()
         except Exception:
@@ -168,7 +169,7 @@ class AuditLogger:
             # Filter out None values and prepare payload
             payload = {
                 "events": events,
-                "client_time": datetime.utcnow().isoformat(),
+                "client_time": datetime.now(timezone.utc).isoformat(),
             }
 
             # Use short timeout to avoid hanging (fire-and-forget)
@@ -200,12 +201,16 @@ def log_build_start(
     license_mode: str = "GENERIC_BUILD",
     obfuscate_enabled: bool = False,
     lease_enabled: bool = False,
-    source_file: Optional[str] = None
+    source_file: Optional[str] = None,
 ) -> None:
     """Log build start."""
     AuditLogger().log_build_start(
-        project_id, language, license_mode,
-        obfuscate_enabled, lease_enabled, source_file
+        project_id,
+        language,
+        license_mode,
+        obfuscate_enabled,
+        lease_enabled,
+        source_file,
     )
 
 
@@ -214,12 +219,11 @@ def log_build_success(
     language: str,
     duration_ms: int,
     output_size_bytes: int,
-    license_mode: str
+    license_mode: str,
 ) -> None:
     """Log build success."""
     AuditLogger().log_build_success(
-        project_id, language, duration_ms,
-        output_size_bytes, license_mode
+        project_id, language, duration_ms, output_size_bytes, license_mode
     )
 
 
@@ -228,12 +232,11 @@ def log_build_failure(
     language: str,
     error_message: str,
     error_type: str,
-    license_mode: str
+    license_mode: str,
 ) -> None:
     """Log build failure."""
     AuditLogger().log_build_failure(
-        project_id, language, error_message,
-        error_type, license_mode
+        project_id, language, error_message, error_type, license_mode
     )
 
 
@@ -242,6 +245,8 @@ def log_security_event(event_type: str, details: Dict[str, Any]) -> None:
     AuditLogger().log_security_event(event_type, details)
 
 
-def log_obfuscation_stats(files_processed: int, files_failed: int, duration_ms: int) -> None:
+def log_obfuscation_stats(
+    files_processed: int, files_failed: int, duration_ms: int
+) -> None:
     """Log obfuscation statistics."""
     AuditLogger().log_obfuscation_stats(files_processed, files_failed, duration_ms)

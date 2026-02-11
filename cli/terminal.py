@@ -1,6 +1,10 @@
 """
 Terminal utilities for License Wrapper CLI.
 Provides colored output and console helpers.
+
+DEPRECATED: This module is kept only because compiler_logic.py still imports
+Colors and print_progress_bar. New code should use codevault_cli.console (Rich)
+instead. This file will be removed once compiler_logic.py is migrated.
 """
 
 import sys
@@ -14,6 +18,7 @@ class Colors:
     RED = "\033[91m"
     BLUE = "\033[94m"
     CYAN = "\033[96m"
+    MAGENTA = "\033[95m"
     WHITE = "\033[97m"
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -34,7 +39,7 @@ def enable_colors():
 
 def color_print(msg, color=Colors.RESET):
     """Print colored message with Unicode-safe encoding."""
-    enable_colors()
+    # B17: Colors already enabled at CLI startup
     output = f"{color}{msg}{Colors.RESET}"
     try:
         print(output)
@@ -55,29 +60,26 @@ def print_header(title: str):
 
 def print_success(msg: str):
     """Print success message."""
-    color_print(f"✅ {msg}", Colors.GREEN)
+    color_print(f"[OK] {msg}", Colors.GREEN)
 
 
 def print_error(msg: str):
     """Print error message."""
-    color_print(f"❌ {msg}", Colors.RED)
+    color_print(f"[ERROR] {msg}", Colors.RED)
 
 
 def print_warning(msg: str):
     """Print warning message."""
-    color_print(f"⚠️  {msg}", Colors.YELLOW)
+    color_print(f"[WARN] {msg}", Colors.YELLOW)
 
 
 def print_info(msg: str):
     """Print info message."""
-    color_print(f"📋 {msg}", Colors.BLUE)
+    color_print(f"[INFO] {msg}", Colors.BLUE)
 
 
 def print_progress_bar(
-    percent: int,
-    width: int = 30,
-    phase: str = "",
-    elapsed_time: str = ""
+    percent: int, width: int = 30, phase: str = "", elapsed_time: str = ""
 ) -> None:
     """Print a visual progress bar.
 
@@ -93,7 +95,7 @@ def print_progress_bar(
     percent = max(0, min(100, percent))
 
     filled = int(width * percent / 100)
-    bar = "█" * filled + "░" * (width - filled)
+    bar = "#" * filled + "-" * (width - filled)
 
     # Build the status text
     status_parts = []

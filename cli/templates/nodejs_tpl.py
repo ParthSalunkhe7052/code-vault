@@ -9,6 +9,24 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+// Ed25519 public key for signature verification (embedded at build time)
+const _LW_PUBLIC_KEY_PEM = `{public_key}`;
+
+function _lw_buildSignatureMessage(data) {
+    const features = JSON.stringify((data.features || []).slice().sort());
+    const variables = JSON.stringify(data.variables || {});
+    return [
+        data.status || '',
+        data.expires_at != null ? String(data.expires_at) : '',
+        features,
+        variables,
+        data.client_nonce || data.nonce || '',
+        data.server_nonce || '',
+        data.timestamp != null ? String(data.timestamp) : '',
+        data.server_time != null ? String(data.server_time) : '',
+    ].join('|');
+}
+
 function _lw_getExeDir() {
     if (process.pkg) {
         return path.dirname(process.execPath);
@@ -33,13 +51,7 @@ function _lw_getMachineSecret() {
     return crypto.createHash('sha256').update(info).digest();
 }
 
-function _lw_xorEncrypt(data, key) {
-    const result = Buffer.alloc(data.length);
-    for (let i = 0; i < data.length; i++) {
-        result[i] = data[i] ^ key[i % key.length];
-    }
-    return result;
-}
+
 
 function _lw_encryptLease(leaseData) {
     try {
@@ -77,11 +89,7 @@ function _lw_decryptLease(encryptedData) {
             decipher.setAuthTag(authTag);
             const dataJson = Buffer.concat([decipher.update(encrypted), decipher.final()]);
             return JSON.parse(dataJson.toString('utf-8'));
-        } else if (raw.slice(0, 4).toString() === 'XOR:') {
-            // Legacy fallback
-            const encrypted = raw.slice(4);
-            const dataJson = _lw_xorEncrypt(encrypted, secret);
-            return JSON.parse(dataJson.toString('utf-8'));
+
         }
         return null;
     } catch (e) {
@@ -208,7 +216,7 @@ async function _lw_loadOrPromptLicense() {
     const licenseKey = await _lw_promptForLicenseKey();
     
     if (!licenseKey) {
-        console.log('\n❌ No license key provided. Exiting...');
+        console.log('\n[ERROR] No license key provided. Exiting...');
         process.exit(1);
     }
     
@@ -282,8 +290,36 @@ async function _lw_validate() {
                     if (res.statusCode === 200) {
                         try {
                             const result = JSON.parse(body);
+                            // Verify Ed25519 signature if public key is available
+                            if (result.signature && _LW_PUBLIC_KEY_PEM && _LW_PUBLIC_KEY_PEM.trim() !== '') {
+                                try {
+                                    const msg = _lw_buildSignatureMessage(result);
+                                    const sigBuf = Buffer.from(result.signature, 'base64');
+                                    const ok = crypto.verify(null, Buffer.from(msg, 'utf-8'),
+                                        { key: _LW_PUBLIC_KEY_PEM, format: 'pem', type: 'spki' }, sigBuf);
+                                    if (!ok) {
+                                        console.error('[ERROR] Server response signature invalid');
+                                        _lw_pauseAndExit(1);
+                                        return;
+                                    }
+                                } catch (sigErr) {
+                                    console.error('[WARN] Signature check failed:', sigErr.message);
+                                }
+                            }
                             if (result.status === 'valid') {
-                                console.log("✅ License validated online");
+                                console.log("[OK] License validated online");
+                                
+                                // SEC4: Start heartbeat
+                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval});
+
+                                // MON2: Capture floating session token
+                                _LW_SESSION_TOKEN = (result.variables || {})["_cv_session_token"];
+                                if (_LW_SESSION_TOKEN) {
+                                    process.on('exit', () => {
+                                        _lw_releaseSession(LICENSE_KEY, SERVER_URL, hwid, _LW_SESSION_TOKEN);
+                                    });
+                                }
+
                                 // Check clock drift and create lease
                                 const serverTime = result.server_time || result.timestamp || Math.floor(Date.now() / 1000);
                                 const localTime = Math.floor(Date.now() / 1000);
@@ -297,7 +333,7 @@ async function _lw_validate() {
                                 resolve(true);
                             } else {
                                 console.error('\n' + '='.repeat(50));
-                                console.error('  ❌ LICENSE INVALID');
+                                console.error('  [ERROR] LICENSE INVALID');
                                 console.error('='.repeat(50));
                                 console.error(`${result.message || 'License key is invalid or expired.'}`);
                                 console.error('='.repeat(50));
@@ -308,7 +344,7 @@ async function _lw_validate() {
                             }
                         } catch (e) {
                             console.error('\n' + '='.repeat(50));
-                            console.error('  ❌ RESPONSE ERROR');
+                            console.error('  [ERROR] RESPONSE ERROR');
                             console.error('='.repeat(50));
                             console.error('Failed to parse server response.');
                             console.error('='.repeat(50));
@@ -316,7 +352,7 @@ async function _lw_validate() {
                         }
                     } else {
                         console.error('\n' + '='.repeat(50));
-                        console.error('  ❌ SERVER ERROR');
+                        console.error('  [ERROR] SERVER ERROR');
                         console.error('='.repeat(50));
                         console.error(`License server returned HTTP ${res.statusCode}.`);
                         console.error('='.repeat(50));
@@ -329,17 +365,17 @@ async function _lw_validate() {
             });
             
             req.on('error', (e) => {
-                console.error(`⚠️ Connection error: ${e.message || 'Unknown network error'}`);
+                console.error(`[WARN] Connection error: ${e.message || 'Unknown network error'}`);
                 console.log('[License Wrapper] Checking offline lease...');
                 
                 // Try offline lease
                 const leaseResult = _lw_validateLease(LICENSE_KEY, hwid);
                 if (leaseResult.valid) {
-                    console.log('✅ Running with valid offline lease');
+                    console.log('[OK] Running with valid offline lease');
                     resolve(true);
                 } else {
                     console.error('\n' + '='.repeat(50));
-                    console.error('  ❌ OFFLINE - LICENSE REQUIRED');
+                    console.error('  [ERROR] OFFLINE - LICENSE REQUIRED');
                     console.error('='.repeat(50));
                     console.error(`Cannot validate license offline: ${leaseResult.message}`);
                     console.error('Please connect to the internet to validate your license.');
@@ -353,7 +389,7 @@ async function _lw_validate() {
             
         } catch (e) {
             console.error('\n' + '='.repeat(50));
-            console.error('  ❌ VALIDATION ERROR');
+            console.error('  [ERROR] VALIDATION ERROR');
             console.error('='.repeat(50));
             console.error(e.message || e);
             console.error('='.repeat(50));
@@ -384,7 +420,7 @@ _lw_validate().then(() => {
         console.log("[License Wrapper] Starting application...");
         require('./{target_file}');
     } catch (e) {
-        console.error('\n❌ Runtime Error:', e);
+        console.error('\n[ERROR] Runtime Error:', e);
         _lw_pauseAndExit(1);
     }
 }).catch(e => {
@@ -405,7 +441,7 @@ const _LW_LEASE_ENABLED = {lease_enabled};
 
 function _lw_showErrorAndWait(type, error) {
     process.stderr.write('\n' + '='.repeat(60) + '\n');
-    process.stderr.write('  ❌ ' + type + '\n');
+    process.stderr.write('  [ERROR] ' + type + '\n');
     process.stderr.write('='.repeat(60) + '\n');
     process.stderr.write('\nError: ' + (error.message || error) + '\n');
     if (error.stack) {
@@ -481,11 +517,69 @@ const _lw_fs = require('fs');
 const _lw_path = require('path');
 const _lw_readline = require('readline');
 
+// Global session tracking for floating licenses (MON2)
+let _LW_SESSION_TOKEN = null;
+
+// ============ Ed25519 SIGNATURE VERIFICATION ============
+// The public key is embedded at build time. Only the server holds the private key.
+// This prevents attackers from forging validation responses even if they extract
+// this key from the binary — public keys can verify but cannot sign.
+const _LW_PUBLIC_KEY_PEM = `{public_key}`;
+
+function _lw_buildSignatureMessage(data) {
+    const features = JSON.stringify((data.features || []).slice().sort());
+    const variables = JSON.stringify(data.variables || {});
+    return [
+        data.status || '',
+        data.expires_at != null ? String(data.expires_at) : '',
+        features,
+        variables,
+        data.client_nonce || data.nonce || '',
+        data.server_nonce || '',
+        data.timestamp != null ? String(data.timestamp) : '',
+        data.server_time != null ? String(data.server_time) : '',
+    ].join('|');
+}
+
+function _lw_verifyEd25519Signature(responseData, signatureB64) {
+    if (!_LW_PUBLIC_KEY_PEM || _LW_PUBLIC_KEY_PEM.trim() === '') {
+        // No public key embedded — fall back to trusting server response (legacy HMAC mode)
+        return true;
+    }
+    try {
+        const message = _lw_buildSignatureMessage(responseData);
+        const signatureBuffer = Buffer.from(signatureB64, 'base64');
+        const isValid = _lw_crypto.verify(
+            null, // Ed25519 doesn't use a separate hash algorithm
+            Buffer.from(message, 'utf-8'),
+            { key: _LW_PUBLIC_KEY_PEM, format: 'pem', type: 'spki' },
+            signatureBuffer
+        );
+        return isValid;
+    } catch (e) {
+        process.stderr.write(`[License Wrapper] Signature verification error: ${e.message}\n`);
+        return false;
+    }
+}
+
 function _lw_getExeDir() {
     if (process.pkg) {
         return _lw_path.dirname(process.execPath);
     }
     return __dirname;
+}
+
+function _lw_getBinaryHash() {
+    try {
+        // In pkg-compiled binaries, process.execPath is the path to the .exe
+        const path = process.execPath;
+        const hash = _lw_crypto.createHash('sha256');
+        const fileBuffer = _lw_fs.readFileSync(path);
+        hash.update(fileBuffer);
+        return hash.digest('hex');
+    } catch (e) {
+        return null;
+    }
 }
 
 function _lw_getLicenseKeyPath() {
@@ -505,13 +599,7 @@ function _lw_getMachineSecret() {
     return _lw_crypto.createHash('sha256').update(info).digest();
 }
 
-function _lw_xorEncrypt(data, key) {
-    const result = Buffer.alloc(data.length);
-    for (let i = 0; i < data.length; i++) {
-        result[i] = data[i] ^ key[i % key.length];
-    }
-    return result;
-}
+
 
 function _lw_encryptLease(leaseData) {
     const secret = _lw_getMachineSecret();
@@ -615,6 +703,67 @@ function _lw_validateLease(licenseKey, hwid) {
     const mins = Math.floor((remaining % 3600) / 60);
     console.log(`[License Wrapper] Offline lease valid (${hours}h ${mins}m remaining)`);
     return { valid: true, message: 'Valid' };
+}
+
+function _lw_startHeartbeat(licenseKey, hwid, serverUrl, intervalMs) {
+    setInterval(async () => {
+        try {
+            const urlObj = new URL(serverUrl + "/api/v1/license/heartbeat");
+            const postData = JSON.stringify({
+                license_key: licenseKey,
+                hwid: hwid,
+                timestamp: Math.floor(Date.now() / 1000),
+                nonce: _lw_crypto.randomBytes(16).toString('hex')
+            });
+            
+            const options = {
+                hostname: urlObj.hostname,
+                port: urlObj.port,
+                path: urlObj.pathname,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(postData)
+                }
+            };
+            
+            const lib = urlObj.protocol === 'http:' ? _lw_http : _lw_https;
+            const req = lib.request(options);
+            req.on('error', () => {});
+            req.write(postData);
+            req.end();
+        } catch (e) {}
+    }, intervalMs);
+}
+
+function _lw_releaseSession(licenseKey, serverUrl, hwid, token) {
+    if (!token) return;
+    try {
+        // Use sync execution via powershell or bash to ensure it completes before exit
+        const postData = JSON.stringify({
+            license_key: licenseKey,
+            hwid: hwid,
+            session_token: token
+        });
+        
+        const url = serverUrl + "/api/v1/license/release";
+        
+        if (process.platform === 'win32') {
+            require('child_process').spawnSync('powershell', [
+                '-Command', 
+                `Invoke-RestMethod -Method Post -Uri "${url}" -ContentType "application/json" -Body '${postData}'`
+            ]);
+        } else {
+            require('child_process').spawnSync('curl', [
+                '-X', 'POST', 
+                '-H', 'Content-Type: application/json',
+                '-d', postData,
+                url
+            ]);
+        }
+    } catch (e) {
+        // Ignore
+    }
 }
 
 function _lw_deleteSavedLicenseAndLease() {
@@ -849,7 +998,8 @@ async function _lw_validate() {
                 hwid: hwid,
                 machine_name: _lw_os.hostname(),
                 timestamp: Math.floor(Date.now() / 1000),
-                nonce: _lw_crypto.randomBytes(16).toString('hex')
+                nonce: _lw_crypto.randomBytes(16).toString('hex'),
+                binary_hash: _lw_getBinaryHash()
             });
             
             const options = {
@@ -871,8 +1021,25 @@ async function _lw_validate() {
                     if (res.statusCode === 200) {
                         try {
                             const result = JSON.parse(body);
+                            // Verify Ed25519 signature to prevent forged responses
+                            if (result.signature && !_lw_verifyEd25519Signature(result, result.signature)) {
+                                _lw_showErrorAndWait('SIGNATURE INVALID', new Error('Server response signature verification failed.\n\nThis may indicate a tampered response or misconfigured server.\nPlease contact the application developer.'));
+                                return;
+                            }
                             if (result.status === 'valid') {
-                                console.log("✅ License validated online");
+                                console.log("[OK] License validated online");
+                                
+                                // SEC4: Start heartbeat
+                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval});
+
+                                // MON2: Capture floating session token
+                                _LW_SESSION_TOKEN = (result.variables || {})["_cv_session_token"];
+                                if (_LW_SESSION_TOKEN) {
+                                    process.on('exit', () => {
+                                        _lw_releaseSession(LICENSE_KEY, SERVER_URL, hwid, _LW_SESSION_TOKEN);
+                                    });
+                                }
+
                                 // Check clock drift and create lease
                                 const serverTime = result.server_time || result.timestamp || Math.floor(Date.now() / 1000);
                                 const localTime = Math.floor(Date.now() / 1000);
@@ -903,14 +1070,14 @@ async function _lw_validate() {
             });
             
             req.on('error', (e) => {
-                console.error(`⚠️ Connection error: ${e.message || 'Unknown network error'}`);
+                console.error(`[WARN] Connection error: ${e.message || 'Unknown network error'}`);
 
                 // Only attempt offline lease validation if lease mode is enabled
                 if (_LW_LEASE_ENABLED) {
                     console.log('[License Wrapper] Checking offline lease...');
                     const leaseResult = _lw_validateLease(LICENSE_KEY, hwid);
                     if (leaseResult.valid) {
-                        console.log('✅ Running with valid offline lease');
+                        console.log('[OK] Running with valid offline lease');
                         resolve(true);
                         return;
                     } else {
@@ -953,7 +1120,7 @@ NODEJS_WRAPPER_SUFFIX = r"""
 } catch (globalError) {
     // CRITICAL: Catch any error during module loading/setup
     process.stderr.write('\n='.repeat(60) + '\n');
-    process.stderr.write('  ❌ CRITICAL STARTUP ERROR\n');
+    process.stderr.write('  [ERROR] CRITICAL STARTUP ERROR\n');
     process.stderr.write('='.repeat(60) + '\n');
     process.stderr.write('\nError: ' + (globalError.message || globalError) + '\n');
     if (globalError.stack) {

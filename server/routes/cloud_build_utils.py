@@ -85,10 +85,25 @@ def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> boo
 
 
 async def invalidate_cached_source(project_id: str) -> None:
-    """Invalidate any cached source files for a project"""
+    """Invalidate cached source for a project when files are uploaded/changed."""
+    from storage_service import storage_service
+
+    if not storage_service.is_cloud_enabled() or not storage_service.client:
+        return
+
+    project_source_key = f"uploads/{project_id}/source.zip"
+
     try:
-        # Delete cached source archive if it exists
-        # Implementation depends on your cache system (Redis, etc.)
-        logger.info(f"[CloudBuild] Invalidated cache for project {project_id}")
+        s3 = storage_service.client
+        bucket = storage_service.bucket
+
+        # Check if cached source exists and delete it
+        try:
+            s3.head_object(Bucket=bucket, Key=project_source_key)
+            s3.delete_object(Bucket=bucket, Key=project_source_key)
+            logger.info(f"[Cache] Invalidated cached source: {project_source_key}")
+        except Exception:
+            # Cache doesn't exist, that's fine
+            pass
     except Exception as e:
-        logger.warning(f"[CloudBuild] Failed to invalidate cache: {e}")
+        logger.warning(f"[Cache] Failed to invalidate source cache: {e}")

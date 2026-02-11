@@ -16,6 +16,7 @@ from models import (
     LicenseValidationRequest,
     LicenseValidationResponse,
     LicenseCreateRequest,
+    LicenseReleaseRequest,
     LicenseVariableCreateRequest,
     LicenseVariableUpdateRequest,
 )
@@ -143,7 +144,9 @@ async def validate_license(
         async with conn.transaction():
             # Lock the license row and JOIN with projects to get signing_secret
             license_row = await conn.fetchrow(
-                """SELECT l.id, l.license_key, l.status, l.expires_at, l.max_machines, l.features, p.signing_secret 
+                """SELECT l.id, l.license_key, l.status, l.expires_at, l.max_machines, l.features, 
+                          l.license_mode, l.max_concurrent,
+                          p.id as project_id, p.signing_secret, p.signing_private_key, p.user_id 
                    FROM licenses l 
                    JOIN projects p ON l.project_id = p.id
                    WHERE l.license_key = $1 FOR UPDATE""",
@@ -156,7 +159,27 @@ async def validate_license(
             
             # Use project secret or fallback to global if none (for legacy)
             from config import SECRET_KEY
-            signing_secret = license_row["signing_secret"] if license_row and license_row["signing_secret"] else SECRET_KEY
+            
+            # Extract signing info safely (handles migration gaps and mocks)
+            signing_secret = SECRET_KEY
+            signing_private_key = None
+            license_mode = "static"
+            max_concurrent = 1
+            project_id = None
+            user_id = None
+
+            if license_row:
+                try:
+                    signing_secret = license_row["signing_secret"] or SECRET_KEY
+                    signing_private_key = license_row["signing_private_key"]
+                    license_mode = license_row.get("license_mode", "static") if hasattr(license_row, "get") else license_row["license_mode"]
+                    max_concurrent = license_row.get("max_concurrent", 1) if hasattr(license_row, "get") else license_row["max_concurrent"]
+                    project_id = license_row["project_id"]
+                    user_id = license_row["user_id"]
+                except (KeyError, TypeError):
+                    # Fallback for old schema or incomplete mocks
+                    if not project_id and "project_id" in license_row: project_id = license_row["project_id"]
+                    if not user_id and "user_id" in license_row: user_id = license_row["user_id"]
 
             if not license_row:
                 result_status = "invalid"
@@ -169,11 +192,17 @@ async def validate_license(
                 message = "License has expired"
             
             # Prepare log data for Redis
+            geo = get_geo_from_ip(client_ip)
             log_data = {
                 "license_id": license_row["id"] if license_row else None,
+                "project_id": license_row["project_id"] if license_row else None,
                 "license_key": data.license_key,
                 "hwid": data.hwid,
                 "ip_address": client_ip,
+                "country": geo.get("country"),
+                "city": geo.get("city"),
+                "latitude": geo.get("latitude"),
+                "longitude": geo.get("longitude"),
                 "result": result_status,
                 "response_time_ms": response_time,
                 "machine_name": data.machine_name,
@@ -185,8 +214,48 @@ async def validate_license(
                 asyncio.create_task(_push_validation_log_to_redis(log_data))
                 return create_validation_response(result_status, message, data.nonce)
 
+            # SEC2: Binary integrity check — if client sends binary_hash,
+            # verify it matches a registered hash for this project
+            if data.binary_hash and license_row:
+                project_id = await conn.fetchval(
+                    "SELECT project_id FROM licenses WHERE id = $1", license_row["id"]
+                )
+                hash_match = await conn.fetchval(
+                    "SELECT 1 FROM binary_hashes WHERE project_id = $1 AND binary_hash = $2",
+                    project_id,
+                    data.binary_hash,
+                )
+                if not hash_match:
+                    log_data["result"] = "tampered"
+                    asyncio.create_task(_push_validation_log_to_redis(log_data))
+                    return create_validation_response(
+                        "tampered",
+                        "Binary integrity check failed. This executable may have been modified.",
+                        data.nonce,
+                    )
+
             # Check HWID binding
             license_id = license_row["id"]
+            
+            # SEC3: HWID heuristics
+            from utils import analyze_hwid
+            flag_reason = analyze_hwid(data.hwid)
+            if flag_reason:
+                from routes.webhook_routes import trigger_webhook
+                asyncio.create_task(
+                    trigger_webhook(
+                        license_row["user_id"],
+                        "hwid.suspicious",
+                        {
+                            "license_key": data.license_key,
+                            "hwid": data.hwid,
+                            "reason": flag_reason,
+                            "ip_address": client_ip,
+                            "machine_name": data.machine_name
+                        }
+                    )
+                )
+
             existing_binding = await conn.fetchrow(
                 "SELECT id, is_active FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
                 license_id,
@@ -212,11 +281,14 @@ async def validate_license(
                 # Update existing binding (reactivate if needed, always update IP)
                 await conn.execute(
                     """UPDATE hardware_bindings 
-                       SET last_seen_at = NOW(), machine_name = $1, ip_address = $2, is_active = TRUE 
+                       SET last_seen_at = NOW(), machine_name = $1, ip_address = $2, is_active = TRUE,
+                           is_flagged = $4, flagged_reason = $5, flagged_at = CASE WHEN $4 = TRUE THEN NOW() ELSE flagged_at END
                        WHERE id = $3""",
                     data.machine_name,
                     client_ip,
                     existing_binding["id"],
+                    flag_reason is not None,
+                    flag_reason
                 )
             else:
                 machine_count = await conn.fetchval(
@@ -234,14 +306,17 @@ async def validate_license(
 
                 await conn.execute(
                     """
-                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address, is_active)
-                    VALUES ($1, $2, $3, $4, $5, TRUE)
+                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address, is_active, 
+                                                 is_flagged, flagged_reason, flagged_at)
+                    VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, CASE WHEN $6 = TRUE THEN NOW() ELSE NULL END)
                 """,
                     secrets.token_hex(16),
                     license_id,
                     data.hwid,
                     data.machine_name,
                     client_ip,
+                    flag_reason is not None,
+                    flag_reason
                 )
 
             await conn.execute(
@@ -252,6 +327,55 @@ async def validate_license(
             # Final success log push
             asyncio.create_task(_push_validation_log_to_redis(log_data))
 
+            # MON2: Floating licenses
+            session_token = None
+            if license_row.get("license_mode") == "floating":
+                # Check for existing active session for this HWID
+                active_session = await conn.fetchrow(
+                    """SELECT session_token FROM license_sessions 
+                       WHERE license_id = $1 AND hwid = $2 AND is_active = TRUE AND expires_at > NOW()""",
+                    license_id,
+                    data.hwid,
+                )
+
+                if active_session:
+                    session_token = active_session["session_token"]
+                    # Update TTL (6 mins - interval 5m + 1m grace)
+                    await conn.execute(
+                        """UPDATE license_sessions 
+                           SET expires_at = NOW() + INTERVAL '360 seconds', last_active_at = NOW() 
+                           WHERE license_id = $1 AND hwid = $2 AND is_active = TRUE""",
+                        license_id,
+                        data.hwid,
+                    )
+                else:
+                    # Count active sessions
+                    active_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM license_sessions WHERE license_id = $1 AND is_active = TRUE AND expires_at > NOW()",
+                        license_id,
+                    )
+
+                    if active_count >= (license_row["max_concurrent"] or 1):
+                        log_data["result"] = "concurrent_limit"
+                        asyncio.create_task(_push_validation_log_to_redis(log_data))
+                        return create_validation_response(
+                            "concurrent_limit",
+                            f"Maximum concurrent sessions ({license_row['max_concurrent']}) reached. Close other instances or upgrade.",
+                            data.nonce,
+                        )
+
+                    # Create new session
+                    session_token = secrets.token_hex(32)
+                    await conn.execute(
+                        """INSERT INTO license_sessions (id, license_id, hwid, session_token, ip_address, expires_at)
+                           VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '360 seconds')""",
+                        secrets.token_hex(16),
+                        license_id,
+                        data.hwid,
+                        session_token,
+                        client_ip,
+                    )
+
             # Fetch variables
             var_rows = await conn.fetchrow(
                 """SELECT json_object_agg(key, value) as vars 
@@ -260,6 +384,8 @@ async def validate_license(
                 license_id,
             )
             variables = var_rows["vars"] if var_rows and var_rows["vars"] else {}
+            if session_token:
+                variables["_cv_session_token"] = session_token
 
         return create_validation_response(
             "valid",
@@ -269,7 +395,80 @@ async def validate_license(
             features=json.loads(license_row["features"]) if isinstance(license_row["features"], str) else (license_row["features"] or []),
             variables=variables,
             secret=signing_secret,
+            private_key_pem=signing_private_key,
         )
+    finally:
+        await release_db(conn)
+
+
+@router.post("/license/heartbeat")
+async def license_heartbeat(
+    request: Request,
+    data: LicenseValidationRequest,
+):
+    """Update heartbeat for an active license session (SEC4)."""
+    conn = await get_db()
+    try:
+        # Check if the binding exists and is active
+        binding = await conn.fetchrow(
+            """SELECT hb.id, hb.is_active, p.heartbeat_interval_seconds 
+               FROM hardware_bindings hb
+               JOIN licenses l ON hb.license_id = l.id
+               JOIN projects p ON l.project_id = p.id
+               WHERE l.license_key = $1 AND hb.hwid = $2""",
+            data.license_key,
+            data.hwid
+        )
+        
+        if not binding:
+            raise HTTPException(status_code=404, detail="License session not found")
+            
+        if not binding["is_active"]:
+            raise HTTPException(status_code=403, detail="Session inactive")
+            
+        # Update heartbeat
+        await conn.execute(
+            """UPDATE hardware_bindings 
+               SET last_heartbeat_at = NOW(), 
+                   heartbeat_count = heartbeat_count + 1
+               WHERE id = $1""",
+            binding["id"]
+        )
+        
+        return {
+            "status": "alive",
+            "server_time": int(time.time()),
+            "next_heartbeat": binding["heartbeat_interval_seconds"]
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.post("/license/release")
+async def release_license(
+    data: LicenseReleaseRequest,
+):
+    """Release a floating license session (MON2)."""
+    conn = await get_db()
+    try:
+        # Find session and release it
+        result = await conn.execute(
+            """UPDATE license_sessions 
+               SET is_active = FALSE, released_at = NOW()
+               WHERE license_id = (SELECT id FROM licenses WHERE license_key = $1)
+               AND hwid = $2 AND session_token = $3 AND is_active = TRUE""",
+            data.license_key,
+            data.hwid,
+            data.session_token,
+        )
+
+        if result == "UPDATE 0":
+            return {
+                "status": "error",
+                "message": "Session not found or already released",
+            }
+
+        return {"status": "released"}
     finally:
         await release_db(conn)
 
@@ -359,8 +558,8 @@ async def create_license(
 
         await conn.execute(
             """
-            INSERT INTO licenses (id, project_id, license_key, expires_at, max_machines, features, client_name, client_email, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO licenses (id, project_id, license_key, expires_at, max_machines, features, client_name, client_email, notes, license_type, license_mode, max_concurrent)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         """,
             license_id,
             data.project_id,
@@ -371,6 +570,9 @@ async def create_license(
             data.client_name,
             data.client_email,
             data.notes,
+            data.license_type,
+            data.license_mode,
+            data.max_concurrent,
         )
 
         if data.client_email:
@@ -485,6 +687,48 @@ async def delete_license(license_id: str, user: dict = Depends(get_current_user)
         if result == "DELETE 0":
             raise HTTPException(status_code=404, detail="License not found")
         return {"status": "deleted"}
+    finally:
+        await release_db(conn)
+
+
+@router.post("/licenses/{license_id}/convert")
+async def convert_license(
+    license_id: str,
+    new_type: str = "perpetual",
+    user: dict = Depends(get_current_user),
+):
+    """Convert a trial license to perpetual or subscription (MON1)."""
+    conn = await get_db()
+    try:
+        # Verify ownership and current type
+        license_data = await conn.fetchrow(
+            """SELECT l.id, l.license_type
+               FROM licenses l JOIN projects p ON l.project_id = p.id
+               WHERE l.id = $1 AND p.user_id = $2""",
+            license_id,
+            user["id"],
+        )
+
+        if not license_data:
+            raise HTTPException(status_code=404, detail="License not found")
+
+        if license_data["license_type"] != "trial":
+            raise HTTPException(
+                status_code=400, detail="Only trial licenses can be converted"
+            )
+
+        await conn.execute(
+            """UPDATE licenses 
+               SET license_type = $1, 
+                   converted_from_trial = TRUE,
+                   converted_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = $2""",
+            new_type,
+            license_id,
+        )
+
+        return {"status": "converted", "new_type": new_type}
     finally:
         await release_db(conn)
 

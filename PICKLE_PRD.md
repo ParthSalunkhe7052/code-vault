@@ -1,77 +1,86 @@
-# Frontend Refactoring & Security Overhaul PRD
+# CodeVault Implementation PRD
 
 ## HR Eng
 
-| Frontend Overhaul PRD |  | Comprehensive refactoring of the Dashboard and Landing Page to address critical security vulnerabilities, accessibility failures, and technical debt. |
+| CodeVault Implementation |  | Summary: Systematic transformation of CodeVault from prototype to Enterprise LaaS platform. |
 | :---- | :---- | :---- |
-| **Author**: Pickle Rick **Contributors**: User **Intended audience**: Engineering | **Status**: Draft **Created**: 2026-02-07 | **Context**: CodeVault Frontend |
+| **Author**: Pickle Rick **Contributors**: User **Intended audience**: Engineering | **Status**: Approved **Created**: 2026-02-11 | **Context**: Implementation Plan |
 
 ## Introduction
 
-The CodeVault frontend (Dashboard and Landing Page) has significant technical debt, critical security flaws (fake encryption, hardcoded keys), and accessibility violations. This PRD defines the scope for a "God Mode" overhaul to bring the engineering quality up to the level of the visual design.
+CodeVault is evolving from a credit-burning prototype into a secure, monetized Licensing-as-a-Service (LaaS) platform. This implementation plan addresses Stability, Security, and Monetization in three distinct phases.
 
 ## Problem Statement
 
-**Current Process:** The current frontend is visually appealing but engineered with "Jerry-level" shortcuts.
-**Primary Users:** Developers using CodeVault to license their software.
+**Current Process:** Prototype grade. Loose dependencies, weak crypto (HMAC), no revenue model, no integrity checks.
+**Primary Users:** Developers protecting their Python/Node.js applications.
 **Pain Points:**
--   False sense of security (client-side encryption).
--   Accessibility barriers (screen readers cannot use key dialogs).
--   Fragile architecture (excessive re-renders, window event bus).
--   Zero type safety despite TypeScript config.
-**Importance:** Critical. Security flaws undermine the core value proposition (licensing protection). Accessibility violations are legally and ethically unacceptable.
+1.  **Instability:** Unpinned dependencies, "works on my machine" issues.
+2.  **Insecurity:** HMAC is insufficient; lack of binary integrity checks.
+3.  **No Revenue:** No enforcement of license types or concurrency.
+**Importance:** Without these changes, CodeVault is just a toy. With them, it's a business.
 
 ## Objective & Scope
 
-**Objective:** Eliminate 100% of identified blockers (Security, A11y, Build) and significant technical debt.
-**Ideal Outcome:** A secure, accessible, type-safe, and performant frontend codebase.
+**Objective:** Execute the 3-Phase Implementation Plan to achieve Stability, Security, and Monetization.
+**Ideal Outcome:** A stable CLI, Ed25519-secured licensing, and a functional Stripe/Analytics integration.
 
-### In-scope or Goals
--   **Security**: Remove fake encryption, secure cookies, fix auth navigation, try-catch logout.
--   **Accessibility**: Fix ConfirmDialog, Navigation labels, Skip links, reduced motion.
--   **Architecture**: Optimize Contexts (useMemo), fix WebSocket reconnection, optimistic updates.
--   **Type Safety**: Migration to TSX, strict mode.
--   **Landing Page**: SEO tags, contrast fixes, build pipeline fixes.
+### In-scope
+-   **Phase 1: Stability**: Dependency pinning, CLI consolidation, Integration Tests.
+-   **Phase 2: Security**: Ed25519 migration, Binary Integrity, HWID Heuristics, Heartbeat.
+-   **Phase 3: Monetization**: License Types (Perpetual/Sub), Floating Licenses, SDK, Analytics, Stripe.
 
-### Not-in-scope or Non-Goals
--   Backend API changes (except where strictly necessary for auth cookies).
--   New feature development (Feature freeze effective immediately).
+### Not-in-scope
+-   New UI designs (unless specified for Analytics).
+-   Mobile app support.
 
 ## Product Requirements
 
 ### Critical User Journeys (CUJs)
-1.  **Secure Authentication**: User logs in, receives a secure cookie (or token), and session persists safely. On 401, user is prompted to save work before redirect.
-2.  **Accessible Project Deletion**: Screen reader user navigates to "Delete Project", hears the alert dialog context, confirms deletion using keyboard only.
-3.  **Resilient Build Monitoring**: User starts a build. Network glitches. WebSocket reconnects automatically without page refresh.
+1.  **The Upgrade**: Developer updates CLI. Old wrappers are gone. Dependencies fail explicitly if missing.
+2.  **The Secure Build**: Developer builds app. Binary hash is recorded. Keys are auto-rotated to Ed25519.
+3.  **The Floating User**: End-user grabs a floating license. Heartbeat maintains session. Session expires on disconnect.
+4.  **The Admin**: Admin views "Validation Heatmaps" and "Usage Counters" on the dashboard.
 
 ### Functional Requirements
 
-| Priority | Requirement | User Story |
-| :---- | :---- | :---- |
-| P0 | **Security**: Remove client-side encryption & hardcoded keys. | As a user, I want my data to be actually secure, not obfuscated. |
-| P0 | **Security**: Fix hard navigation on 401. | As a user, I don't want to lose my work if my token expires. |
-| P0 | **A11y**: Fix ConfirmDialog accessibility. | As a screen reader user, I need to know what I'm confirming. |
-| P0 | **Build**: Enable strict type checking. | As a dev, I want the build to fail if types are wrong. |
-| P1 | **Perf**: Fix Context re-renders. | As a user, I want the app to be snappy. |
-| P1 | **Architecture**: WebSocket Reconnection. | As a user, I want build updates to persist through network blips. |
-| P1 | **Landing Page**: SEO & Social Meta Tags. | As a marketing lead, I want links to look professional on Twitter. |
+| ID | Priority | Requirement | Depends On |
+| :--- | :--- | :--- | :--- |
+| **S1** | P0 | Remove auto-pip install requests; fail explicitly. | None |
+| **S2** | P0 | Pin PKG_VERSION to 5.12.0. | None |
+| **S3** | P1 | Replace `os.system('cls')` with ANSI codes. | None |
+| **S4** | P1 | Fix SSL CERT_NONE; add `DB_SSL_VERIFY` env var. | None |
+| **S5** | P0 | Delete `cli/wrappers.py`; update imports. | None |
+| **S6** | P0 | Consolidate CLI; merge commands, thin shim for `lw_compiler.py`. | S5 |
+| **S7** | P0 | Pin all dependency versions. | S2 |
+| **S8** | P0 | Create integration test suite (7 cases). | S4 |
+| **S8b** | P1 | Expose FastAPI /docs with response models. | None |
+| **SEC1** | P0 | Migrate to Ed25519; deprecate HMAC. | S8 |
+| **SEC2** | P0 | Binary integrity checking (SHA-256). | SEC1 |
+| **SEC3** | P1 | HWID validation heuristics & webhooks. | S8 |
+| **SEC4** | P0 | Heartbeat periodic re-validation. | SEC1 |
+| **SEC5** | P1 | Upgrade javascript-obfuscator to 5.x. | S2, S8 |
+| **MON1** | P0 | Implement License types (Perpetual, Sub, Trial). | S8 |
+| **MON2** | P1 | Implement Floating/Concurrent licenses. | SEC4, MON1 |
+| **MON3** | P1 | Create Standalone SDK (Python/Node). | SEC1, SEC4 |
+| **MON4** | P2 | Analytics Dashboard (Heatmaps, Trends). | S8 |
+| **MON5** | P0 | Usage-based pricing + Stripe integration. | MON1 |
+| **MON6** | P2 | Enhance API Documentation. | Independent |
+
+## Database Migrations
+-   010: `signing_algorithm` on projects
+-   011: `binary_hashes` table
+-   012: Heartbeat columns + `flagged_reason`
+-   013: `license_type`, trial/sub fields
+-   014: `license_mode`, `max_concurrent`, `license_sessions`
+-   015: Analytics Materialized Views
+-   016: `usage_counters`, Stripe fields
 
 ## Risks & Mitigations
+-   **Risk**: Migration breaks existing clients. -> **Mitigation**: 90-day grace period for Ed25519.
+-   **Risk**: Floating license race conditions. -> **Mitigation**: Database transactions for session checkout.
 
--   **Risk**: TS migration reveals massive hidden bugs. **Mitigation**: Phased migration (critical paths first).
--   **Risk**: Auth changes break login. **Mitigation**: Test E2E login flow extensively.
-
-## Business Benefits
-
-**Success Metrics:**
-| Metric | Current State | Future State | Impact |
-| :---- | :---- | :---- | :---- |
-| Build Errors (Types) | Ignored | 0 | Higher reliability |
-| Lighthouse A11y Score | ~60 | >90 | Legal compliance |
-| Security Vulnerabilities | 4 (Critical) | 0 | Trust |
-
-## Stakeholders / Owners
-
-| Name | Role |
-| :---- | :---- |
-| Pickle Rick | Lead Engineer |
+## Success Metrics
+-   100% of dependencies pinned.
+-   0% reliance on `os.system` for clear screens.
+-   Successful End-to-End test run of the new Licensing Flow.

@@ -5,14 +5,12 @@
 # Supports multi-platform builds: Windows, Linux, macOS
 
 substitutions:
-  # Build parameters (passed from API)
-  _BUILD_ID: 'unknown'
-  _PROJECT_ID: 'unknown'
+  _CALLBACK_URL: 'https://cloudbuild-486309.uc.r.appspot.com/build/callback'
+  _TARGET_PLATFORMS: 'linux,windows'
   _LANGUAGE: 'python'
-  _TARGET_PLATFORMS: 'windows,linux,macos'
+  _GCS_BUCKET: 'codevault-builds'
   _SOURCE_URL: ''
   _CONFIG_URL: ''  # GCS URL to config JSON (avoids 8KB substitution limit)
-  _CALLBACK_URL: ''
   _OUTPUT_NAME: 'app'
   _DEBUG_BUILD: 'false'  # Set to 'true' for verbose logging
   _NUITKA_CACHE_DIR: '/workspace/.nuitka-cache'
@@ -187,7 +185,7 @@ steps:
         fi
 
         echo "[Cloud Build] Uploading Linux artifact: $$linux_artifact"
-        gsutil cp "/workspace/artifacts/$$linux_artifact" "${_SOURCE_URL%.source.zip}.linux.zip" || {
+        gsutil cp "/workspace/artifacts/$$linux_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$$linux_artifact" || {
           echo "[Cloud Build] Failed to upload Linux artifact"
           exit 1
         }
@@ -292,7 +290,7 @@ steps:
         fi
 
         echo "[Cloud Build] Uploading Windows artifact: $$windows_artifact"
-        gsutil cp "/workspace/artifacts/$$windows_artifact" "${_SOURCE_URL%.source.zip}.windows.zip" || {
+        gsutil cp "/workspace/artifacts/$$windows_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/windows/$$windows_artifact" || {
           echo "[Cloud Build] Failed to upload Windows artifact"
           exit 1
         }
@@ -365,17 +363,21 @@ steps:
           overall_status="failed"
         fi
 
-        # Build download URLs (presigned URLs from R2)
-        base_url="${_SOURCE_URL%.source.zip}"
-        download_url=""
+        # Build GCS blob keys for server-side URL generation
+        linux_download_key=""
+        windows_download_key=""
         filename=""
 
         if [[ "$$linux_status" == "completed" && -n "$$linux_artifact" ]]; then
-          download_url="$${base_url}.linux.zip"
+          linux_download_key="builds/${_BUILD_ID}/linux/$$linux_artifact"
           filename="$$linux_artifact"
-        elif [[ "$$windows_status" == "completed" && -n "$$windows_artifact" ]]; then
-          download_url="$${base_url}.windows.zip"
-          filename="$$windows_artifact"
+        fi
+
+        if [[ "$$windows_status" == "completed" && -n "$$windows_artifact" ]]; then
+          windows_download_key="builds/${_BUILD_ID}/windows/$$windows_artifact"
+          if [[ -z "$$filename" ]]; then
+            filename="$$windows_artifact"
+          fi
         fi
 
         # Build error message
@@ -386,17 +388,34 @@ steps:
           if [[ -z "$$error_msg" ]]; then error_msg="Build failed - see logs for details"; fi
         fi
 
-        # Build the payload - include cloud_build_id for tracking
-        payload='{"build_id":"'"${_BUILD_ID}"'","cloud_build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","download_url":"'"$$download_url"'","filename":"'"$$filename"'","error":"'"$$error_msg"'","timestamp":'"$$(date +%s)"'}'
+        # Build the payload with GCS blob keys instead of URLs
+        payload='{"build_id":"'"${_BUILD_ID}"'","cloud_build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","linux_download_key":"'"$$linux_download_key"'","windows_download_key":"'"$$windows_download_key"'","filename":"'"$$filename"'","error":"'"$$error_msg"'","timestamp":'"$$(date +%s)"'}'
         sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $$2}')
 
         echo "[Cloud Build] Sending webhook callback..."
         echo "[Cloud Build] Payload: $$payload"
 
-        curl -sf -X POST "${_CALLBACK_URL}" \
-          -H "Content-Type: application/json" \
-          -H "X-Signature: $$sig" \
-          -d "$$payload" || echo "Webhook failed"
+        # Retry logic with exponential backoff (A7)
+        max_retries=3
+        retry_delay=5
+        for i in $(seq 1 $$max_retries); do
+          echo "[Cloud Build] Webhook attempt $$i/$$max_retries..."
+          if curl -sf -X POST "${_CALLBACK_URL}" \
+            -H "Content-Type: application/json" \
+            -H "X-Signature: $$sig" \
+            -d "$$payload"; then
+            echo "[Cloud Build] Webhook succeeded on attempt $$i"
+            break
+          else
+            if [[ $$i -lt $$max_retries ]]; then
+              echo "[Cloud Build] Webhook failed, retrying in $${retry_delay}s..."
+              sleep $$retry_delay
+              retry_delay=$$((retry_delay * 2))  # Exponential backoff
+            else
+              echo "[Cloud Build] Webhook failed after $$max_retries attempts"
+            fi
+          fi
+        done
 
         echo "[Cloud Build] Webhook callback completed"
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']

@@ -59,15 +59,30 @@ async def init_database_with_retry():
     pool_min = int(os.getenv("DB_POOL_MIN_SIZE", "3"))
     pool_max = int(os.getenv("DB_POOL_MAX_SIZE", "20"))
 
-    # Heroku Postgres requires SSL
+    # SSL configuration for Postgres
+    # Heroku Postgres uses self-signed certs and does not provide a stable CA,
+    # so CERT_NONE is the accepted default. Set DB_SSL_VERIFY=true and
+    # DB_SSL_CA_PATH to a CA bundle to enable full verification.
     ssl_mode = os.getenv("DB_SSL", "")
+    ssl_verify = os.getenv("DB_SSL_VERIFY", "false").lower() == "true"
     pool_kwargs = {}
     if ssl_mode == "require" or "sslmode=require" in DATABASE_URL:
         import ssl as ssl_module
 
         ssl_ctx = ssl_module.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl_module.CERT_NONE
+        if ssl_verify:
+            ca_path = os.getenv("DB_SSL_CA_PATH", "")
+            if ca_path:
+                ssl_ctx.load_verify_locations(ca_path)
+            # check_hostname and CERT_REQUIRED are the defaults from create_default_context
+        else:
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl_module.CERT_NONE
+            if ENVIRONMENT == "production":
+                logger.warning(
+                    "[Database] SSL certificate verification is DISABLED (CERT_NONE). "
+                    "Set DB_SSL_VERIFY=true and DB_SSL_CA_PATH for production hardening."
+                )
         pool_kwargs["ssl"] = ssl_ctx
 
     # Retry loop for initial connection
@@ -152,14 +167,6 @@ async def close_database():
         await db_pool.close()
         db_pool = None
         logger.info("[Database] Connection pool closed")
-
-
-async def close_database():
-    """Close database pool."""
-    global db_pool
-    if db_pool:
-        await db_pool.close()
-        db_pool = None
 
 
 @asynccontextmanager

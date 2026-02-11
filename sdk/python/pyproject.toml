@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codevault-sdk"
+version = "1.0.0"
+description = "Official Python SDK for CodeVault License Management"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+dependencies = [
+    "cryptography>=42.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["codevault"]

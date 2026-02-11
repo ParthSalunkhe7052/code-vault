@@ -46,6 +46,7 @@ class LicenseValidationRequest(BaseModel):
     nonce: str = Field(..., min_length=16, max_length=64)
     timestamp: int
     client_version: Optional[str] = None
+    binary_hash: Optional[str] = Field(None, max_length=128)  # SHA-256 self-hash for integrity check
 
 
 class LicenseValidationResponse(BaseModel):
@@ -61,6 +62,12 @@ class LicenseValidationResponse(BaseModel):
     server_time: int = 0  # Server's current UTC timestamp for offline lease
 
 
+class LicenseReleaseRequest(BaseModel):
+    license_key: str
+    hwid: str
+    session_token: str
+
+
 class LicenseCreateRequest(BaseModel):
     project_id: str
     client_name: Optional[str] = None
@@ -69,6 +76,9 @@ class LicenseCreateRequest(BaseModel):
     max_machines: int = Field(default=1, ge=1, le=100)
     features: List[str] = []
     notes: Optional[str] = None
+    license_type: str = Field(default="perpetual", pattern="^(perpetual|subscription|trial)$")
+    license_mode: str = Field(default="static", pattern="^(static|floating)$")
+    max_concurrent: int = Field(default=1, ge=1, le=100)
 
 
 # =============================================================================
@@ -93,6 +103,7 @@ class ProjectConfigRequest(BaseModel):
     # Build options
     skip_obfuscation: Optional[bool] = True  # Default: skip for faster builds
     enable_lease: Optional[bool] = False  # Default: lease disabled
+    heartbeat_interval: Optional[int] = 300  # Default: 5 minutes
 
 
 # =============================================================================

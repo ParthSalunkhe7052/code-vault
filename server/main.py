@@ -88,6 +88,7 @@ from config import (
     CORS_ALLOW_ALL,
     ENVIRONMENT,
     REDIS_URL,
+    ENABLE_PUBLIC_DOCS,
 )
 from startup_checks import run_startup_checks
 from database import lifespan
@@ -147,9 +148,12 @@ async def app_lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CodeVault API",
-    description="API for CodeVault License Management SaaS",
-    version="1.0.0",
+    description="Enterprise-grade Licensing-as-a-Service (LaaS) API. Supports Ed25519 asymmetric signing, binary integrity checking, floating licenses, and usage-based billing.",
+    version="1.1.0",
     lifespan=app_lifespan,
+    docs_url="/docs" if ENABLE_PUBLIC_DOCS else None,
+    redoc_url="/redoc" if ENABLE_PUBLIC_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_PUBLIC_DOCS else None,
 )
 
 # =============================================================================
@@ -191,6 +195,7 @@ else:
 # =============================================================================
 
 from routes.polar_routes import router as polar_router
+from routes.stripe_routes import router as stripe_router
 from routes.auth_routes import router as auth_router
 from routes.webhook_routes import router as webhook_router
 from routes.license_routes import router as license_router
@@ -202,6 +207,7 @@ from routes.cloud_build_routes import router as cloud_build_router
 from routes.system_routes import router as system_router
 
 app.include_router(polar_router)
+app.include_router(stripe_router)
 app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(license_router)
