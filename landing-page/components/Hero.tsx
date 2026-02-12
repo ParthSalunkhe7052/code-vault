@@ -61,9 +61,9 @@ const Hero: React.FC = () => {
               <span>Get Started</span>
               <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover:translate-x-1" />
             </a>
-            <a href="#how-it-works" className="inline-flex h-14 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-10 font-bold text-white transition-all hover:bg-white/10 backdrop-blur-sm">
+<a href="#how-it-works" className="inline-flex h-14 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-10 font-bold text-white transition-all hover:bg-white/10 backdrop-blur-sm">
               <Terminal className="w-5 h-5 mr-2 text-slate-500" />
-              View Docs
+              How It Works
             </a>
           </motion.div>
 

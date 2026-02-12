@@ -131,8 +131,12 @@ async def app_lifespan(app: FastAPI):
         _background_tasks = []
         _background_tasks.append(asyncio.create_task(cleanup_compile_cache()))
         _background_tasks.append(asyncio.create_task(scheduled_cloud_build_cleanup()))
-        _background_tasks.append(asyncio.create_task(start_retry_processor(interval_seconds=60)))
-        _background_tasks.append(asyncio.create_task(start_health_monitoring(interval_seconds=60)))
+        _background_tasks.append(
+            asyncio.create_task(start_retry_processor(interval_seconds=60))
+        )
+        _background_tasks.append(
+            asyncio.create_task(start_health_monitoring(interval_seconds=60))
+        )
         logging.getLogger(__name__).info("[Startup] Background cleanup tasks started")
         logging.getLogger(__name__).info("[Startup] Webhook retry processor started")
         logging.getLogger(__name__).info("[Startup] Health monitoring started")
@@ -195,7 +199,6 @@ else:
 # =============================================================================
 
 from routes.polar_routes import router as polar_router
-from routes.stripe_routes import router as stripe_router
 from routes.auth_routes import router as auth_router
 from routes.webhook_routes import router as webhook_router
 from routes.license_routes import router as license_router
@@ -207,7 +210,6 @@ from routes.cloud_build_routes import router as cloud_build_router
 from routes.system_routes import router as system_router
 
 app.include_router(polar_router)
-app.include_router(stripe_router)
 app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(license_router)

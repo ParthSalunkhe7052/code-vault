@@ -143,7 +143,7 @@ const Pricing: React.FC = () => {
             tier="Enterprise"
             price="Custom"
             period=""
-            ctaLink="mailto:sales@codevault.com"
+            ctaLink="mailto:parth.ajit7052@gmail.com"
             ctaLabel="Contact Sales"
             delay={0.3}
             features={[

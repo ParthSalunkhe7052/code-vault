@@ -449,7 +449,7 @@ const ProjectWizard = ({
                         project_path: projectPath,
                         entry_file: entryFileName,  // Relative path from project root (e.g., "src/main.js")
                         project_name: project?.name || outputBaseName,
-                        project_version: "1.0.0",  // TODO: Get from project settings
+                        project_version: "1.0.0",
                         publisher: publisher,
                         language: language,
                         license_key: null,  // Generic build - no embedded key

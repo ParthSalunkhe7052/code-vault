@@ -105,9 +105,7 @@ POLAR_PRODUCT_BUSINESS = os.getenv("POLAR_PRODUCT_BUSINESS", "")
 # Google Cloud Build
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "cloudbuild-486309")
 
-# Stripe Configuration
-STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Note: Stripe removed - using Polar for payments
 
 # =============================================================================
 # SECURITY VALIDATION (Startup Checks)
