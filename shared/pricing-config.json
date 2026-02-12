@@ -1,0 +1,107 @@
+{
+  "tiers": {
+    "free": {
+      "name": "Free",
+      "price": 0,
+      "period": "forever",
+      "description": "For testing and small tools",
+      "features": [
+        "1 Project",
+        "50 Active Licenses",
+        "Local Builds Only",
+        "Community Support"
+      ],
+      "limitations": [
+        "No Cloud Builds",
+        "No Node.js Support",
+        "No Analytics or Webhooks"
+      ],
+      "limits": {
+        "max_projects": 1,
+        "max_licenses_per_project": 50,
+        "cloud_builds_per_month": 0,
+        "can_cloud_build": false,
+        "analytics": false,
+        "webhooks": false,
+        "node_support": false
+      }
+    },
+    "pro": {
+      "name": "Pro",
+      "price": 15,
+      "period": "month",
+      "description": "For indie developers shipping apps",
+      "features": [
+        "Unlimited Projects",
+        "500 Active Licenses",
+        "25 Cloud Builds/month",
+        "Node.js Support",
+        "Offline Leases",
+        "Analytics & Webhooks",
+        "No Branding"
+      ],
+      "limitations": [],
+      "limits": {
+        "max_projects": -1,
+        "max_licenses_per_project": 500,
+        "cloud_builds_per_month": 25,
+        "can_cloud_build": true,
+        "analytics": true,
+        "webhooks": true,
+        "node_support": true
+      }
+    },
+    "business": {
+      "name": "Business",
+      "price": 39,
+      "period": "month",
+      "description": "For teams and studios at scale",
+      "features": [
+        "Unlimited Projects",
+        "5,000 Active Licenses",
+        "100 Cloud Builds/month",
+        "10 Team Seats",
+        "White Label Branding",
+        "Priority Support"
+      ],
+      "limitations": [],
+      "limits": {
+        "max_projects": -1,
+        "max_licenses_per_project": 5000,
+        "cloud_builds_per_month": 100,
+        "can_cloud_build": true,
+        "analytics": true,
+        "webhooks": true,
+        "node_support": true,
+        "white_label_branding": true,
+        "team_seats": 10
+      }
+    },
+    "enterprise": {
+      "name": "Enterprise",
+      "price": "Custom",
+      "period": "",
+      "description": "For regulated and high-volume deployments",
+      "features": [
+        "Unlimited Projects & Licenses",
+        "Unlimited Cloud Builds",
+        "Unlimited Team Seats",
+        "Dedicated Build Runners",
+        "Custom SLAs & Security Reviews",
+        "24/7 Phone Support"
+      ],
+      "limitations": [],
+      "limits": {
+        "max_projects": -1,
+        "max_licenses_per_project": -1,
+        "cloud_builds_per_month": -1,
+        "can_cloud_build": true,
+        "analytics": true,
+        "webhooks": true,
+        "node_support": true,
+        "white_label_branding": true,
+        "team_seats": -1
+      }
+    }
+  }
+}

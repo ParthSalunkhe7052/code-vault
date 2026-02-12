@@ -77,6 +77,9 @@ elif not REDIS_URL:
 # Admin
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
+# Google Cloud Storage
+GCS_BUILDS_BUCKET = os.getenv("GCS_BUILDS_BUCKET", "codevault-builds")
+
 
 # GitHub Actions (Cloud Build)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -110,6 +113,28 @@ GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "cloudbuild-486309")
 # =============================================================================
 # SECURITY VALIDATION (Startup Checks)
 # =============================================================================
+
+# CRITICAL: Production Security Validation (Fail Fast)
+if ENVIRONMENT == "production":
+    # Validate secrets are not using default values
+    if SECRET_KEY == "dev-secret-key-change-in-production":
+        raise ValueError(
+            "CRITICAL: SECRET_KEY is using default value in production! "
+            "Set SECRET_KEY environment variable to a secure random value. "
+            "Generate one with: openssl rand -hex 32"
+        )
+    if JWT_SECRET == "jwt-secret-change-in-production":
+        raise ValueError(
+            "CRITICAL: JWT_SECRET is using default value in production! "
+            "Set JWT_SECRET environment variable to a secure random value. "
+            "Generate one with: openssl rand -hex 32"
+        )
+    
+    # Validate minimum length
+    if len(SECRET_KEY) < 32:
+        raise ValueError("SECRET_KEY must be at least 32 characters long")
+    if len(JWT_SECRET) < 32:
+        raise ValueError("JWT_SECRET must be at least 32 characters long")
 
 # Track configuration issues
 config_issues = []
@@ -215,7 +240,7 @@ TIER_LIMITS = {
         "analytics": True,
         "webhooks": True,
         "team_seats": 10,
-        "white_labeling": True,
+        "white_label_branding": True,
         "node_support": True,
     },
     "enterprise": {
@@ -229,7 +254,7 @@ TIER_LIMITS = {
         "analytics": True,
         "webhooks": True,
         "team_seats": -1,  # unlimited
-        "white_labeling": True,
+        "white_label_branding": True,
         "node_support": True,
     },
 }
@@ -267,7 +292,7 @@ PRICING_CONFIG = {
             "100 Cloud Builds/mo",
             "10 Team Seats (RBAC)",
             "Priority Support",
-            "White Labeling",
+            "White Label Branding",
         ],
     },
     "enterprise": {

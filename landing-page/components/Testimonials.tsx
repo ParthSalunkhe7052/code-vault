@@ -30,7 +30,7 @@ const Testimonials: React.FC = () => {
           </div>
         </div>
 
-        {/* The "Indie Hacker" Featured Quote */}
+        {/* Beta Testimonial CTA */}
         <div className="max-w-4xl mx-auto">
            <div className="relative rounded-3xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent p-10 md:p-14 text-center overflow-hidden">
               
@@ -41,15 +41,15 @@ const Testimonials: React.FC = () => {
 
               <blockquote className="relative z-10">
                  <p className="text-2xl md:text-3xl font-medium text-slate-200 leading-relaxed mb-8">
-                   "Finally, I can distribute my algorithmic trading bot without finding it on BlackHatWorld the next day. <span className="text-white font-bold decoration-purple-500 decoration-2 underline underline-offset-4">CodeVault is the Stripe for Licensing.</span>"
+                   "We're currently collecting testimonials from our beta users. Join our early access program to be featured here."
                  </p>
                  
                  <footer className="flex flex-col items-center justify-center gap-2">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-bold text-lg mb-2 shadow-lg shadow-blue-500/20">
-                       A
-                    </div>
-                    <div className="text-white font-semibold">Alex V.</div>
-                    <div className="text-sm text-slate-500">Indie Developer & Algo Trader</div>
+                    <div className="text-white font-semibold">Your Company Here</div>
+                    <div className="text-sm text-slate-500">Early Access Partner</div>
+                    <a href="mailto:parth.ajit7052@gmail.com" className="mt-4 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition-colors">
+                      Apply for Beta
+                    </a>
                  </footer>
               </blockquote>
 
