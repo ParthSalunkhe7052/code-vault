@@ -7,7 +7,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional, List, Dict
 import logging
 import os
@@ -57,8 +57,18 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class CloudBuildRequest(BaseModel):
     project_id: str
     license_id: Optional[str] = None
-    target_platforms: List[str] = ["windows"]  # windows, macos, linux
-    compatibility_mode: bool = False  # Toggle for Turbo Mode optimizations
+    target_platforms: List[str] = ["windows"]
+    compatibility_mode: bool = False
+    
+    @validator('target_platforms')
+    def validate_platforms(cls, v):
+        allowed = {'windows', 'macos', 'linux'}
+        invalid = set(v) - allowed
+        if invalid:
+            raise ValueError(f"Invalid platforms: {invalid}. Allowed: {allowed}")
+        if not v:
+            raise ValueError("At least one platform must be specified")
+        return v
 
 
 class CloudBuildResponse(BaseModel):
@@ -93,7 +103,8 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
 
             # Initialize GCS client
             gcs_client = gcs_storage.Client()
-            bucket = gcs_client.bucket("codevault-builds")
+            from config import GCS_BUILDS_BUCKET
+            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
             blob = bucket.blob(download_key)
 
             # Check if blob exists in GCS

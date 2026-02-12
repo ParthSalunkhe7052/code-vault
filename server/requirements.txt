@@ -5,7 +5,7 @@
 # Web framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-pydantic[email]==2.10.4
+pydantic[email]>=2.11.2
 python-multipart==0.0.20
 
 # Auth
@@ -13,7 +13,7 @@ bcrypt==4.2.1
 PyJWT==2.10.1
 
 # HTTP client (webhooks, geo analytics)
-httpx==0.27.2
+httpx>=0.28.1
 
 # Database
 psycopg2-binary==2.9.10
@@ -27,13 +27,13 @@ redis==5.2.1
 boto3==1.35.86
 
 # Email (Resend)
-resend==2.5.0
+resend==2.5.1
 
 # Environment
 python-dotenv==1.0.1
 
 # Payments (Polar)
-polar-sdk==0.18.2
+polar-sdk==0.18.1
 
 # Geolocation (Mission Control Map)
 geoip2==4.8.1

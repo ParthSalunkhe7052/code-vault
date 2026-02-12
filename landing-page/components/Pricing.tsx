@@ -1,7 +1,8 @@
-import React from 'react';
-import { Check, X, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Check, X, Zap, XIcon } from 'lucide-react';
 import { APP_URL } from '../lib/config';
 import { motion } from 'framer-motion';
+import { EnterpriseContactForm } from './EnterpriseContactForm';
 
 const PricingCard: React.FC<{
   tier: string;
@@ -71,6 +72,8 @@ const PricingCard: React.FC<{
 );
 
 const Pricing: React.FC = () => {
+  const [showEnterpriseForm, setShowEnterpriseForm] = useState(false);
+
   return (
     <section id="pricing" className="py-32 relative bg-background overflow-hidden">
       {/* Background decoration */}
@@ -119,7 +122,7 @@ const Pricing: React.FC = () => {
               { text: "Node.js Support", included: true },
               { text: "Offline Leases", included: true },
               { text: "Analytics & Webhooks", included: true },
-              { text: "White-label Splash", included: false },
+              { text: "White Label Branding", included: false },
             ]}
           />
           <PricingCard 
@@ -135,27 +138,75 @@ const Pricing: React.FC = () => {
               { text: "100 Cloud Builds/mo", included: true },
               { text: "10 Team Seats", included: true },
               { text: "Advanced Nuitka Config", included: true },
-              { text: "White-label Splash", included: true },
+              { text: "White Label Branding", included: true },
               { text: "Priority Support", included: true },
             ]}
           />
-          <PricingCard 
-            tier="Enterprise"
-            price="Custom"
-            period=""
-            ctaLink="mailto:sales@codevault.com"
-            ctaLabel="Contact Sales"
-            delay={0.3}
-            features={[
-              { text: "Unlimited Licenses", included: true },
-              { text: "Unlimited Cloud Builds", included: true },
-              { text: "Unlimited Team Seats", included: true },
-              { text: "Dedicated Runners", included: true },
-              { text: "Custom SLAs", included: true },
-              { text: "Security Audits", included: true },
-              { text: "24/7 Phone Support", included: true },
-            ]}
-          />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="relative p-8 rounded-3xl border mt-4 flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02] border-white/10 bg-[#0f1219] hover:bg-[#13161f] z-0"
+          >
+            <div className="mb-8">
+              <h3 className="text-lg font-medium mb-2 text-slate-400">Enterprise</h3>
+              <div className="flex items-baseline gap-1">
+                <span className="text-4xl font-bold text-white tracking-tight">Custom</span>
+              </div>
+            </div>
+            
+            <ul className="space-y-4 mb-8 flex-1">
+              {[
+                { text: "Unlimited Licenses", included: true },
+                { text: "Unlimited Cloud Builds", included: true },
+                { text: "Unlimited Team Seats", included: true },
+                { text: "Dedicated Runners", included: true },
+                { text: "Custom SLAs", included: true },
+                { text: "Security Audits", included: true },
+                { text: "24/7 Phone Support", included: true },
+              ].map((feature, idx) => (
+                <li key={idx} className="flex items-start gap-3 text-sm group">
+                  {feature.included ? (
+                    <div className="mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-slate-300">
+                       <Check size={10} strokeWidth={3} />
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 bg-transparent">
+                       <X size={12} className="text-slate-700" />
+                    </div>
+                  )}
+                  <span className={feature.included ? 'text-slate-300' : 'text-slate-600 line-through decoration-slate-700'}>
+                    {feature.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <button 
+              onClick={() => setShowEnterpriseForm(true)}
+              className="w-full py-3.5 rounded-xl font-bold transition-all text-center inline-block bg-white/5 hover:bg-white/10 text-white border border-white/5"
+            >
+              Contact Sales
+            </button>
+          </motion.div>
+
+          {/* Enterprise Contact Form Modal */}
+          {showEnterpriseForm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="relative w-full max-w-lg bg-[#0f1219] border border-white/10 rounded-2xl p-8">
+                <button
+                  onClick={() => setShowEnterpriseForm(false)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+                >
+                  <XIcon size={24} />
+                </button>
+                <h3 className="text-2xl font-bold text-white mb-2 text-center">Enterprise Plan</h3>
+                <p className="text-slate-400 text-center mb-6">Get in touch for custom pricing and dedicated support.</p>
+                <EnterpriseContactForm />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* FAQ Section */}

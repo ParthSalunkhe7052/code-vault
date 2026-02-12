@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 # Fixtures specific to cloud build tests
 # =============================================================================
 
+
 @pytest.fixture
 def mock_pro_user():
     """Generate a mock Pro tier user."""
@@ -79,44 +80,41 @@ def callback_secret():
 # HMAC Signature Verification Tests
 # =============================================================================
 
+
 class TestHMACVerification:
     """Tests for HMAC webhook signature verification."""
 
     def test_valid_signature_is_accepted(self, callback_secret):
         """Valid HMAC signature should be accepted."""
-        payload = json.dumps({
-            "build_id": "bld_test123",
-            "status": "completed",
-            "download_key": "builds/test/app.exe"
-        })
-        
+        payload = json.dumps(
+            {
+                "build_id": "bld_test123",
+                "status": "completed",
+                "download_key": "builds/test/app.exe",
+            }
+        )
+
         expected = hmac.new(
-            callback_secret.encode(),
-            payload.encode(),
-            hashlib.sha256
+            callback_secret.encode(), payload.encode(), hashlib.sha256
         ).hexdigest()
-        
+
         # Simulate verification
         computed = hmac.new(
-            callback_secret.encode(),
-            payload.encode(),
-            hashlib.sha256
+            callback_secret.encode(), payload.encode(), hashlib.sha256
         ).hexdigest()
-        
+
         assert hmac.compare_digest(expected.lower(), computed.lower())
 
     def test_invalid_signature_is_rejected(self, callback_secret):
         """Invalid HMAC signature should be rejected."""
         payload = json.dumps({"build_id": "test123"})
-        
+
         valid_sig = hmac.new(
-            callback_secret.encode(),
-            payload.encode(),
-            hashlib.sha256
+            callback_secret.encode(), payload.encode(), hashlib.sha256
         ).hexdigest()
-        
+
         invalid_sig = "0" * 64  # Wrong signature
-        
+
         assert not hmac.compare_digest(valid_sig.lower(), invalid_sig.lower())
 
     def test_empty_signature_is_rejected(self):
@@ -127,19 +125,16 @@ class TestHMACVerification:
     def test_signature_case_insensitive(self, callback_secret):
         """Signature comparison should be case-insensitive."""
         payload = b"test payload"
-        
-        sig = hmac.new(
-            callback_secret.encode(),
-            payload,
-            hashlib.sha256
-        ).hexdigest()
-        
+
+        sig = hmac.new(callback_secret.encode(), payload, hashlib.sha256).hexdigest()
+
         assert hmac.compare_digest(sig.lower(), sig.upper().lower())
 
 
 # =============================================================================
 # Tier Limit Tests
 # =============================================================================
+
 
 class TestTierLimits:
     """Tests for cloud build tier limit enforcement."""
@@ -151,7 +146,7 @@ class TestTierLimits:
             "cloud_builds_per_month": 0,
             "max_projects": 1,
         }
-        
+
         assert free_tier_limits["cloud_compilation"] is False
         assert free_tier_limits["cloud_builds_per_month"] == 0
 
@@ -162,9 +157,9 @@ class TestTierLimits:
             "cloud_builds_per_month": 25,
             "max_projects": 10,
         }
-        
+
         assert pro_tier_limits["cloud_compilation"] is True
-        assert pro_tier_limits["cloud_builds_per_month"] == 10
+        assert pro_tier_limits["cloud_builds_per_month"] == 25
 
     def test_business_has_builds(self):
         """Business tier should have higher cloud build limits."""
@@ -173,17 +168,17 @@ class TestTierLimits:
             "cloud_builds_per_month": 100,
             "max_projects": -1,
         }
-        
+
         assert business_limits["cloud_builds_per_month"] == 100
 
     def test_monthly_limit_enforcement(self):
         """Monthly build limit should be enforced correctly."""
         max_builds = 10
         current_builds = 10
-        
+
         # Should be at limit
         assert current_builds >= max_builds
-        
+
         # One more build should fail
         can_build = current_builds < max_builds
         assert can_build is False
@@ -192,6 +187,7 @@ class TestTierLimits:
 # =============================================================================
 # Build Request Validation Tests
 # =============================================================================
+
 
 class TestBuildRequestValidation:
     """Tests for cloud build request validation."""
@@ -203,7 +199,7 @@ class TestBuildRequestValidation:
             "license_id": None,
             "target_platform": "windows",
         }
-        
+
         assert len(request["project_id"]) == 32
         assert request["target_platform"] in ["windows", "linux"]
 
@@ -213,20 +209,21 @@ class TestBuildRequestValidation:
             "license_id": None,
             "target_platform": "windows",
         }
-        
+
         assert "project_id" not in request
 
     def test_invalid_platform_rejected(self):
         """Invalid target platform should be rejected."""
         valid_platforms = ["windows", "linux"]
         invalid_platform = "macos"
-        
+
         assert invalid_platform not in valid_platforms
 
 
 # =============================================================================
 # Source Directory Tests
 # =============================================================================
+
 
 class TestSourceDirectoryValidation:
     """Tests for source directory validation."""
@@ -235,14 +232,14 @@ class TestSourceDirectoryValidation:
         """Source path should follow correct format: uploads/{project_id}/source."""
         project_id = secrets.token_hex(16)
         base_dir = temp_project_dir
-        
+
         # The expected path format
         expected_path = base_dir / project_id / "source"
-        
+
         # Create the directory
         expected_path.mkdir(parents=True, exist_ok=True)
         (expected_path / "main.py").write_text("print('hello')")
-        
+
         assert expected_path.exists()
         assert (expected_path / "main.py").exists()
 
@@ -250,7 +247,7 @@ class TestSourceDirectoryValidation:
         """Empty source directory should be rejected."""
         source_dir = temp_project_dir / "empty_source"
         source_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # No files in directory
         files = list(source_dir.iterdir())
         assert len(files) == 0
@@ -258,16 +255,16 @@ class TestSourceDirectoryValidation:
     def test_alternate_path_fallback(self, temp_project_dir):
         """Should try alternate path if primary doesn't exist."""
         project_id = "test_project"
-        
+
         # Primary path doesn't exist
         primary_path = temp_project_dir / project_id / "source"
         assert not primary_path.exists()
-        
+
         # Create alternate path
         alt_path = temp_project_dir / "projects" / project_id / "source"
         alt_path.mkdir(parents=True, exist_ok=True)
         (alt_path / "main.py").write_text("print('hello')")
-        
+
         # Fallback should work
         assert alt_path.exists()
 
@@ -276,20 +273,28 @@ class TestSourceDirectoryValidation:
 # Build Status Tests
 # =============================================================================
 
+
 class TestBuildStatus:
     """Tests for build status transitions."""
 
     def test_valid_status_transitions(self):
         """Status should follow valid transition path."""
-        valid_statuses = ["pending", "queued", "running", "completed", "failed", "cancelled"]
-        
+        valid_statuses = [
+            "pending",
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+        ]
+
         for status in valid_statuses:
             assert status in valid_statuses
 
     def test_pending_to_queued(self):
         """Build should transition from pending to queued."""
         next_status = "queued"
-        
+
         valid_from_pending = ["queued", "failed", "cancelled"]
         assert next_status in valid_from_pending
 
@@ -298,7 +303,7 @@ class TestBuildStatus:
         mock_cloud_build["status"] = "completed"
         mock_cloud_build["download_key"] = "builds/test/app.exe"
         mock_cloud_build["download_filename"] = "app.exe"
-        
+
         assert mock_cloud_build["status"] == "completed"
         assert mock_cloud_build["download_key"] is not None
         assert mock_cloud_build["download_filename"] is not None
@@ -307,7 +312,7 @@ class TestBuildStatus:
         """Failed build should have error message."""
         mock_cloud_build["status"] = "failed"
         mock_cloud_build["error_message"] = "Compilation failed: syntax error"
-        
+
         assert mock_cloud_build["status"] == "failed"
         assert mock_cloud_build["error_message"] is not None
 
@@ -315,6 +320,7 @@ class TestBuildStatus:
 # =============================================================================
 # Webhook Payload Tests
 # =============================================================================
+
 
 class TestWebhookPayload:
     """Tests for webhook payload handling."""
@@ -327,7 +333,7 @@ class TestWebhookPayload:
             "download_key": "builds/bld_abc123/app.exe",
             "filename": "app.exe",
         }
-        
+
         assert "build_id" in payload
         assert payload["status"] in ["completed", "failed"]
         assert "download_key" in payload
@@ -339,7 +345,7 @@ class TestWebhookPayload:
             "status": "failed",
             "error": "Compilation timed out",
         }
-        
+
         assert payload["status"] == "failed"
         assert "error" in payload
 
@@ -349,13 +355,14 @@ class TestWebhookPayload:
             "status": "completed",
             "download_key": "test",
         }
-        
+
         assert "build_id" not in payload
 
 
 # =============================================================================
 # Config Generation Tests
 # =============================================================================
+
 
 class TestConfigGeneration:
     """Tests for build config generation."""
@@ -370,7 +377,7 @@ class TestConfigGeneration:
             "license_key": "GENERIC_BUILD",
             "api_url": "https://api.example.com/api/v1/license/validate",
         }
-        
+
         assert config["language"] == "python"
         assert config["entry_file"].endswith(".py")
 
@@ -383,7 +390,7 @@ class TestConfigGeneration:
             "output_name": "test_app",
             "license_key": "GENERIC_BUILD",
         }
-        
+
         assert config["language"] == "nodejs"
         assert config["entry_file"].endswith(".js")
 
@@ -391,7 +398,7 @@ class TestConfigGeneration:
         """Should default to GENERIC_BUILD if no license specified."""
         license_id = None
         expected_key = "GENERIC_BUILD" if not license_id else "actual_key"
-        
+
         assert expected_key == "GENERIC_BUILD"
 
 
@@ -399,20 +406,21 @@ class TestConfigGeneration:
 # Download URL Tests
 # =============================================================================
 
+
 class TestDownloadURL:
     """Tests for download URL generation."""
 
     def test_expired_download_rejected(self):
         """Expired download should be rejected."""
         expires_at = datetime.now(timezone.utc) - timedelta(days=1)  # Expired yesterday
-        
+
         is_expired = expires_at < datetime.now(timezone.utc)
         assert is_expired is True
 
     def test_valid_download_accepted(self):
         """Valid (non-expired) download should be accepted."""
         expires_at = datetime.now(timezone.utc) + timedelta(days=6)  # Expires in 6 days
-        
+
         is_expired = expires_at < datetime.now(timezone.utc)
         assert is_expired is False
 
@@ -422,7 +430,7 @@ class TestDownloadURL:
             "status": "completed",
             "download_key": None,
         }
-        
+
         can_download = build["status"] == "completed" and build["download_key"]
         assert not can_download
 
@@ -430,6 +438,7 @@ class TestDownloadURL:
 # =============================================================================
 # Integration-style Tests (Mocked)
 # =============================================================================
+
 
 class TestCloudBuildIntegration:
     """Integration-style tests with mocked dependencies."""
@@ -445,10 +454,10 @@ class TestCloudBuildIntegration:
             "settings": json.dumps({"entry_file": "main.py"}),
         }
         mock_db_connection.fetchval.return_value = 0  # No builds this month
-        
+
         # Simulate the insert would succeed
         mock_db_connection.execute.return_value = "INSERT 0 1"
-        
+
         # The build would be created
         assert mock_db_connection.execute is not None
 
@@ -456,24 +465,26 @@ class TestCloudBuildIntegration:
     async def test_webhook_updates_status(self, mock_db_connection, mock_cloud_build):
         """Webhook should update build status in database."""
         mock_db_connection.fetchrow.return_value = mock_cloud_build
-        
+
         # Simulate update
         await mock_db_connection.execute(
             "UPDATE cloud_builds SET status = $1 WHERE id = $2",
-            "completed", mock_cloud_build["id"]
+            "completed",
+            mock_cloud_build["id"],
         )
-        
+
         mock_db_connection.execute.assert_called()
 
     @pytest.mark.asyncio
-    async def test_get_status_returns_build_info(self, mock_db_connection, mock_cloud_build):
+    async def test_get_status_returns_build_info(
+        self, mock_db_connection, mock_cloud_build
+    ):
         """Get status should return build information."""
         mock_db_connection.fetchrow.return_value = mock_cloud_build
-        
+
         result = await mock_db_connection.fetchrow(
-            "SELECT * FROM cloud_builds WHERE id = $1",
-            mock_cloud_build["id"]
+            "SELECT * FROM cloud_builds WHERE id = $1", mock_cloud_build["id"]
         )
-        
+
         assert result is not None
         assert result["id"] == mock_cloud_build["id"]

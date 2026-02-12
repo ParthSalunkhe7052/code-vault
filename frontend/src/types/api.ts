@@ -13,9 +13,11 @@ export interface User {
   email: string;
   name: string;
   role: "user" | "admin";
-  tier: "free" | "pro" | "business";
+  tier: "free" | "pro" | "business" | "enterprise";
+  plan?: "free" | "pro" | "business" | "enterprise";
   polar_customer_id: string | null;
   api_key: string;
+  build_credits?: number;
   created_at: string;
   updated_at?: string;
 }
