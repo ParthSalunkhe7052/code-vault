@@ -64,15 +64,18 @@ export const POLAR_PRODUCTS: Record<string, string> = {
   [TIERS.BUSINESS]: 'd5781651-cff8-44ed-8a3c-7cf42a6512f5',
 };
 
+// Default free tier limits
+const FREE_TIER_LIMITS: TierLimits = {
+  maxProjects: 1,
+  maxLicenses: 50,
+  buildCredits: 0,
+  canCloudBuild: false,
+  offlineLease: false
+};
+
 // Default limits (fallback only - real limits come from backend)
 const DEFAULT_LIMITS: Record<string, TierLimits> = {
-  [TIERS.FREE]: {
-    maxProjects: 1,
-    maxLicenses: 50,
-    buildCredits: 0,
-    canCloudBuild: false,
-    offlineLease: false
-  },
+  [TIERS.FREE]: FREE_TIER_LIMITS,
   [TIERS.PRO]: {
     maxProjects: Infinity,
     maxLicenses: 500,
@@ -96,11 +99,16 @@ const DEFAULT_LIMITS: Record<string, TierLimits> = {
   }
 };
 
+// Helper function to safely get default limits
+const getDefaultLimits = (tier: string): TierLimits => {
+  return DEFAULT_LIMITS[tier] || FREE_TIER_LIMITS;
+};
+
 export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user: authUser } = useAuth();
   const [tier, setTier] = useState<string>(TIERS.FREE);
   const [buildCredits, setBuildCredits] = useState<number>(0);
-  const [limits, setLimits] = useState<TierLimits>(DEFAULT_LIMITS[TIERS.FREE]);
+  const [limits, setLimits] = useState<TierLimits>(FREE_TIER_LIMITS);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Sync pricing data whenever the authenticated user changes
@@ -111,7 +119,7 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!authUser) {
         // No user = reset to free defaults
         setTier(TIERS.FREE);
-        setLimits(DEFAULT_LIMITS[TIERS.FREE]);
+        setLimits(FREE_TIER_LIMITS);
         setBuildCredits(0);
         setLoading(false);
         return;
@@ -138,12 +146,12 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             });
             setBuildCredits(backendLimits.build_credits_remaining || 0);
           } else if (!cancelled) {
-            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setLimits(getDefaultLimits(userPlan));
             setBuildCredits((authUser as User).build_credits || 0);
           }
         } catch {
           if (!cancelled) {
-            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setLimits(getDefaultLimits(userPlan));
             setBuildCredits((authUser as User).build_credits || 0);
           }
         }
@@ -187,7 +195,8 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
    */
   const refreshPricing = useCallback(async () => {
     try {
-      const status: SubscriptionStatus = await subscription.getStatus();
+      const rawStatus = await subscription.getStatus();
+      const status = rawStatus as unknown as SubscriptionStatus;
       if (status) {
         setTier(status.tier || TIERS.FREE);
         setBuildCredits(status.usage?.build_credits_remaining ?? 0);
