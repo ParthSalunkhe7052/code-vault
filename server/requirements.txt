@@ -33,7 +33,7 @@ resend==2.5.1
 python-dotenv==1.0.1
 
 # Payments (Polar)
-polar-sdk==0.18.2
+polar-sdk==0.18.1
 
 # Geolocation (Mission Control Map)
 geoip2==4.8.1
