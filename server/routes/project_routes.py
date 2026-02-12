@@ -87,10 +87,28 @@ async def create_project(
 
         project_id = secrets.token_hex(16)
         signing_secret = secrets.token_hex(32)
+
+        # Generate Ed25519 key pair for asymmetric signature verification
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PrivateFormat, PublicFormat, NoEncryption,
+        )
+
+        ed_private_key = Ed25519PrivateKey.generate()
+        signing_private_key = ed_private_key.private_bytes(
+            encoding=Encoding.PEM,
+            format=PrivateFormat.PKCS8,
+            encryption_algorithm=NoEncryption(),
+        ).decode("utf-8")
+        signing_public_key = ed_private_key.public_key().public_bytes(
+            encoding=Encoding.PEM,
+            format=PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
         await conn.execute(
             """
-            INSERT INTO projects (id, user_id, name, description, language, compiler_options, signing_secret) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO projects (id, user_id, name, description, language, compiler_options, signing_secret, signing_private_key, signing_public_key) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         """,
             project_id,
             user["id"],
@@ -99,6 +117,8 @@ async def create_project(
             data.language,
             json.dumps(data.compiler_options),
             signing_secret,
+            signing_private_key,
+            signing_public_key,
         )
         return {
             "id": project_id,
@@ -107,6 +127,7 @@ async def create_project(
             "language": data.language,
             "compiler_options": data.compiler_options,
             "signing_secret": signing_secret,
+            "signing_public_key": signing_public_key,
             "created_at": utc_now().isoformat(),
             "license_count": 0,
             "local_path": str(LOCAL_UPLOAD_DIR / project_id),
@@ -139,7 +160,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
     conn = await get_db()
     try:
         project = await conn.fetchrow(
-            "SELECT id, name, settings, compiler_options, language, signing_secret FROM projects WHERE id = $1 AND user_id = $2",
+            "SELECT id, name, settings, compiler_options, language, signing_secret, signing_public_key FROM projects WHERE id = $1 AND user_id = $2",
             project_id,
             user["id"],
         )
@@ -188,6 +209,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             "compiler_options": compiler_opts,
             "language": language,
             "signing_secret": signing_secret,
+            "signing_public_key": project.get("signing_public_key"),
             "api_url": api_url,
             "server_url": server_url,
             "selected_license_id": selected_license_id,
@@ -537,5 +559,58 @@ async def upload_project_zip(
         raise HTTPException(
             status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}"
         )
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Binary Hash Registration (SEC2: Binary Integrity Checking)
+# =============================================================================
+
+
+@router.post("/{project_id}/binary-hash")
+async def register_binary_hash(
+    project_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Register a compiled binary's SHA-256 hash for integrity verification.
+
+    Called by the CLI after successful compilation. During license validation,
+    the client can optionally send its own hash — if it doesn't match any
+    registered hash for the project, the response is 'tampered'.
+    """
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        binary_hash = data.get("binary_hash", "")
+        if not binary_hash or len(binary_hash) != 64:
+            raise HTTPException(
+                status_code=400, detail="binary_hash must be a 64-char SHA-256 hex string"
+            )
+
+        hash_id = secrets.token_hex(16)
+        await conn.execute(
+            """
+            INSERT INTO binary_hashes (id, project_id, binary_hash, binary_size, platform, build_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT DO NOTHING
+            """,
+            hash_id,
+            project_id,
+            binary_hash,
+            data.get("binary_size"),
+            data.get("platform"),
+            data.get("build_id"),
+        )
+
+        return {"status": "registered", "binary_hash": binary_hash}
     finally:
         await release_db(conn)

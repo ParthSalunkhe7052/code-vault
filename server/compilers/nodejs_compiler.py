@@ -536,14 +536,14 @@ validateLicense().then(() => {{
             # String protection (good protection, moderate speed)
             "--string-array", "true",
             "--string-array-threshold", "0.75",
-            "--string-array-encoding", "base64",  # Faster than rc4
+            "--string-array-encoding", "rc4",  # Stronger than base64
             "--string-array-shuffle", "true",
             # Identifier obfuscation
             "--identifier-names-generator", "hexadecimal",
-            # Disable slow options for faster builds
-            "--control-flow-flattening", "false",  # Very slow, skip for speed
-            "--dead-code-injection", "false",
-            "--self-defending", "false",
+            # Enable aggressive protection (slower build, maximum security)
+            "--control-flow-flattening", "true",
+            "--dead-code-injection", "true",
+            "--self-defending", "true",
             # Preserve require/import statements
             "--ignore-imports", "true",
         ]

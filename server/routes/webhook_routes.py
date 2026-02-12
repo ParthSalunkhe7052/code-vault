@@ -392,8 +392,7 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
         await release_db(conn)
 
 
-@router.post("")
-@requires_feature("webhooks")
+@router.post("", dependencies=[Depends(requires_feature("webhooks"))])
 async def create_webhook(
     data: WebhookCreateRequest, user: dict = Depends(get_current_user)
 ):

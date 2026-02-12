@@ -456,3 +456,73 @@ async def ban_user(
         return {"message": f"User {user['email']} has been banned"}
     finally:
         await release_db(conn)
+
+
+@router.post("/migrate-signing")
+async def migrate_signing_to_ed25519(
+    admin: dict = Depends(get_current_admin_user),
+):
+    """Admin: Migrate all legacy HMAC projects to Ed25519 asymmetric signing.
+
+    Generates Ed25519 key pairs for projects that don't have them yet.
+    Existing compiled binaries using HMAC will continue to work during
+    a 90-day grace period — the server still accepts HMAC validation
+    but logs deprecation warnings.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        PrivateFormat,
+        PublicFormat,
+        NoEncryption,
+    )
+
+    conn = await get_db()
+    try:
+        # Find projects without Ed25519 keys
+        projects = await conn.fetch(
+            "SELECT id, name FROM projects WHERE signing_private_key IS NULL"
+        )
+
+        if not projects:
+            return {
+                "message": "All projects already have Ed25519 keys",
+                "migrated": 0,
+            }
+
+        migrated = 0
+        for project in projects:
+            private_key = Ed25519PrivateKey.generate()
+            private_pem = private_key.private_bytes(
+                encoding=Encoding.PEM,
+                format=PrivateFormat.PKCS8,
+                encryption_algorithm=NoEncryption(),
+            ).decode("utf-8")
+            public_pem = private_key.public_key().public_bytes(
+                encoding=Encoding.PEM,
+                format=PublicFormat.SubjectPublicKeyInfo,
+            ).decode("utf-8")
+
+            await conn.execute(
+                """
+                UPDATE projects
+                SET signing_private_key = $1,
+                    signing_public_key = $2,
+                    signing_algorithm = 'ed25519'
+                WHERE id = $3
+                """,
+                private_pem,
+                public_pem,
+                project["id"],
+            )
+            migrated += 1
+            logger.info(
+                f"[Ed25519] Migrated project: {project['name']} ({project['id'][:8]}...)"
+            )
+
+        return {
+            "message": f"Migrated {migrated} project(s) to Ed25519 signing",
+            "migrated": migrated,
+        }
+    finally:
+        await release_db(conn)

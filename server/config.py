@@ -49,6 +49,10 @@ CORS_ALLOW_ALL = os.getenv("CORS_ALLOW_ALL", "false").lower() == "true"
 # Environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
+# API Documentation (OpenAPI/Swagger)
+# Set ENABLE_PUBLIC_DOCS=false in production to disable /docs and /redoc
+ENABLE_PUBLIC_DOCS = os.getenv("ENABLE_PUBLIC_DOCS", "true").lower() == "true"
+
 # Redis (Upstash)
 UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
@@ -100,6 +104,10 @@ POLAR_PRODUCT_BUSINESS = os.getenv("POLAR_PRODUCT_BUSINESS", "")
 
 # Google Cloud Build
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "cloudbuild-486309")
+
+# Stripe Configuration
+STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 # =============================================================================
 # SECURITY VALIDATION (Startup Checks)

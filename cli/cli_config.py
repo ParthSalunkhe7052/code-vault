@@ -24,7 +24,9 @@ except ImportError:
 
 
 SCRIPT_DIR = Path(__file__).parent
-CONFIG_FILE = SCRIPT_DIR / "config.json"
+# Store config in user's home directory for better portability and permissions
+CONFIG_DIR = Path.home() / ".codevault"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_API_BASE = "http://localhost:8000/api/v1"
 
 # Keyring service name for CodeVault CLI
@@ -125,8 +127,19 @@ def _load_config_file() -> dict:
     return {}
 
 
+def _ensure_config_dir() -> None:
+    """Ensure the config directory exists."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning(f"Could not create config directory: {e}")
+
+
 def _save_config_file(config: dict) -> None:
     """Save non-sensitive configuration to file."""
+    # Ensure config directory exists
+    _ensure_config_dir()
+    
     # Remove all sensitive keys (api_key and obfuscated variant) before saving
     # Tokens should only be stored via keyring or _save_config_file_with_token()
     sensitive_keys = {"api_key", "_obf_api_key"}
@@ -135,12 +148,30 @@ def _save_config_file(config: dict) -> None:
     _set_restrictive_permissions(CONFIG_FILE)
 
 
+def _migrate_legacy_config() -> None:
+    """Migrate config from old location (cli directory) to new location (home directory)."""
+    old_config = SCRIPT_DIR / "config.json"
+    if old_config.exists() and not CONFIG_FILE.exists():
+        try:
+            import shutil
+            _ensure_config_dir()
+            shutil.copy2(old_config, CONFIG_FILE)
+            logger.info(f"Migrated config from {old_config} to {CONFIG_FILE}")
+            # Optionally remove old config (keep it for safety)
+            # old_config.rename(old_config.with_suffix('.json.backup'))
+        except Exception as e:
+            logger.warning(f"Could not migrate legacy config: {e}")
+
+
 def load_config() -> dict:
     """Load saved configuration.
 
     Non-sensitive settings come from config.json.
     API token comes from OS keyring (with file fallback).
     """
+    # Migrate old config if needed
+    _migrate_legacy_config()
+    
     config = _load_config_file()
 
     # Try keyring first for the token
@@ -204,6 +235,9 @@ def _save_config_file_with_token(config: dict) -> None:
     clear text. Users should install 'keyring' package for secure storage.
     """
     import base64
+
+    # Ensure config directory exists
+    _ensure_config_dir()
 
     # Create a copy to avoid modifying the original
     safe_config = config.copy()

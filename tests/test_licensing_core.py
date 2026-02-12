@@ -53,7 +53,12 @@ class MockDB:
                             "expires_at": l["expires_at"],
                             "max_machines": l["max_machines"],
                             "features": l["features"],
+                            "license_mode": l.get("license_mode", "static"),
+                            "max_concurrent": l.get("max_concurrent", 1),
+                            "project_id": l["project_id"],
                             "signing_secret": project.get("signing_secret") if project else None,
+                            "signing_private_key": project.get("signing_private_key") if project else None,
+                            "user_id": project.get("user_id") if project else "mock_user",
                         }
                 return None
             if "where l.id" in q:

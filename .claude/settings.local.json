@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del:*)",
+      "Bash(set:*)",
+      "Bash(python -m codevault_cli:*)",
+      "Bash(python:*)",
+      "Bash(cat:*)"
+    ]
+  }
+}

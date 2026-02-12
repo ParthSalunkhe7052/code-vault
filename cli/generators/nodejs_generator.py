@@ -95,7 +95,7 @@ def get_nodejs_wrapper(license_key: str, server_url: str, target_filename: str, 
     return "\n".join(wrapper_parts)
 
 
-def get_nodejs_wrapper_inline(license_key: str, server_url: str, lease_enabled: bool = False, show_branding: bool = True) -> tuple[str, str]:
+def get_nodejs_wrapper_inline(license_key: str, server_url: str, lease_enabled: bool = False, show_branding: bool = True, public_key: str = "", heartbeat_interval: int = 300) -> tuple[str, str]:
     """
     Get Node.js license wrapper as prefix/suffix to wrap original code.
 
@@ -104,6 +104,8 @@ def get_nodejs_wrapper_inline(license_key: str, server_url: str, lease_enabled: 
         server_url: The server URL for validation (must be valid http/https URL)
         lease_enabled: Whether offline lease mode is enabled (default: False)
         show_branding: Whether to show CodeVault branding (default: True for free tier)
+        public_key: Ed25519 public key PEM for signature verification (preferred)
+        heartbeat_interval: Interval in seconds for background heartbeat (default: 300)
 
     Returns:
         (prefix, suffix) tuple with validated and escaped values.
@@ -121,16 +123,19 @@ def get_nodejs_wrapper_inline(license_key: str, server_url: str, lease_enabled: 
 
     # Build prefix with optional branding
     prefix_parts = []
-    
+
     # Add branding if free tier
     if show_branding:
         prefix_parts.append(NODEJS_BRANDING_CODE)
-    
-    # PREFIX contains {license_key}, {server_url}, and {lease_enabled}
+
+    # PREFIX contains {license_key}, {server_url}, {lease_enabled}, and {public_key}
     prefix = NODEJS_WRAPPER_PREFIX.replace("{license_key}", safe_license_key)
     prefix = prefix.replace("{server_url}", safe_server_url)
     prefix = prefix.replace("{lease_enabled}", "true" if lease_enabled else "false")
-    
+    prefix = prefix.replace("{heartbeat_interval}", str(heartbeat_interval * 1000)) # JS uses ms
+    # Embed Ed25519 public key for signature verification
+    prefix = prefix.replace("{public_key}", public_key if public_key else "")
+
     prefix_parts.append(prefix)
 
     # SUFFIX is static

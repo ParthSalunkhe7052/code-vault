@@ -5,52 +5,119 @@ import re
 import shutil
 import subprocess
 import time
+import select
+import hashlib
+import threading
+import queue
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
 from terminal import Colors, color_print, print_progress_bar
-from wrappers import get_python_wrapper, get_nodejs_wrapper_inline
+from generators.python_generator import get_python_wrapper
+from generators.nodejs_generator import get_nodejs_wrapper_inline
 from audit import log_build_failure, log_security_event, log_obfuscation_stats
 from compiler_constants import (
     JAVASCRIPT_OBFUSCATOR_VERSION,
     PKG_VERSION,
     OBFUSCATE_TIMEOUT,
-    PARALLEL_WORKERS
+    PARALLEL_WORKERS,
+    COMPILE_TIMEOUT,
+    PKG_TIMEOUT,
 )
+
+
+def _read_output_thread(pipe, output_queue):
+    """Thread function to read from pipe and put lines in queue."""
+    try:
+        for line in iter(pipe.readline, b""):
+            output_queue.put(line)
+    finally:
+        pipe.close()
+
+
+def _wait_for_output_with_timeout(process, timeout=1.0):
+    """Cross-platform way to wait for output with timeout.
+
+    On Unix: uses select.select()
+    On Windows: uses threading and queue
+
+    Returns True if output is available, False otherwise.
+    """
+    if sys.platform == "win32":
+        # On Windows, select.select() doesn't work with pipes
+        # Use a queue-based approach with threads
+        if not hasattr(process, "_output_queue"):
+            process._output_queue = queue.Queue()
+            process._reader_thread = threading.Thread(
+                target=_read_output_thread, args=(process.stdout, process._output_queue)
+            )
+            process._reader_thread.daemon = True
+            process._reader_thread.start()
+
+        # Check if there's data in the queue (non-blocking)
+        return not process._output_queue.empty()
+    else:
+        # On Unix-like systems, use select.select()
+        if process.stdout:
+            readable, _, _ = select.select([process.stdout], [], [], timeout)
+            return bool(readable)
+        return False
+
+
+def _readline_from_process(process):
+    """Cross-platform way to read a line from process stdout."""
+    if sys.platform == "win32":
+        # On Windows, read from the queue
+        if hasattr(process, "_output_queue"):
+            try:
+                return process._output_queue.get(block=False)
+            except queue.Empty:
+                return None
+        return None
+    else:
+        # On Unix-like systems, read directly
+        if process.stdout:
+            return process.stdout.readline()
+        return None
 
 
 # =============================================================================
 # Path Traversal Prevention & Security
 # =============================================================================
 
+
 class PathTraversalError(Exception):
     """Raised when a path traversal attack is detected."""
+
     pass
 
 
 class BuildTimeoutError(Exception):
     """Raised when build exceeds time limit."""
+
     pass
 
 
 # Regex for valid output names: alphanumeric, underscores, hyphens, dots (no path separators)
-OUTPUT_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,99}$')
+OUTPUT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,99}$")
 
 # Dangerous path patterns that could indicate traversal attempts
 DANGEROUS_PATTERNS = [
-    '..',           # Parent directory traversal
-    '//',           # Double slashes
-    '\\\\',         # Double backslashes
-    '\x00',         # Null byte injection
-    '%2e',          # URL-encoded dot
-    '%2f',          # URL-encoded forward slash
-    '%5c',          # URL-encoded backslash
-    '%00',          # URL-encoded null
-    '%c0%ae',       # UTF-8 overlong encoding attack (dot)
-    '%c0%af',       # UTF-8 overlong encoding attack (slash)
+    "..",  # Parent directory traversal
+    "//",  # Double slashes
+    "\\\\",  # Double backslashes
+    "\x00",  # Null byte injection
+    "%2e",  # URL-encoded dot
+    "%2f",  # URL-encoded forward slash
+    "%5c",  # URL-encoded backslash
+    "%00",  # URL-encoded null
+    "%c0%ae",  # UTF-8 overlong encoding attack (dot)
+    "%c0%af",  # UTF-8 overlong encoding attack (slash)
 ]
 
 
-def _handle_security_violation(violation_type: str, details: Dict[str, Any], entry_file: Optional[str] = None) -> None:
+def _handle_security_violation(
+    violation_type: str, details: Dict[str, Any], entry_file: Optional[str] = None
+) -> None:
     """Log security violation and display warning.
 
     Args:
@@ -58,13 +125,15 @@ def _handle_security_violation(violation_type: str, details: Dict[str, Any], ent
         details: Additional details about the violation
         entry_file: Optional entry file name for context
     """
-    log_security_event(violation_type, {
-        **details,
-        "entry_file": entry_file,
-        "source": "cli_compiler"
-    })
-    print(f"\n{Colors.RED}[SECURITY] {violation_type.upper()}: {details.get('message', 'Unknown violation')}{Colors.RESET}")
-    print(f"{Colors.YELLOW}   This event has been logged for security review.{Colors.RESET}\n")
+    log_security_event(
+        violation_type, {**details, "entry_file": entry_file, "source": "cli_compiler"}
+    )
+    print(
+        f"\n{Colors.RED}[SECURITY] {violation_type.upper()}: {details.get('message', 'Unknown violation')}{Colors.RESET}"
+    )
+    print(
+        f"{Colors.YELLOW}   This event has been logged for security review.{Colors.RESET}\n"
+    )
 
 
 def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
@@ -82,9 +151,7 @@ def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
     """
     if not entry_file:
         _handle_security_violation(
-            "empty_entry_file",
-            {"message": "Entry file cannot be empty"},
-            entry_file
+            "empty_entry_file", {"message": "Entry file cannot be empty"}, entry_file
         )
         raise PathTraversalError("Entry file cannot be empty")
 
@@ -94,10 +161,15 @@ def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
         if pattern in entry_lower:
             _handle_security_violation(
                 "traversal_pattern",
-                {"message": f"Contains forbidden pattern '{pattern}'", "pattern": pattern},
-                entry_file
+                {
+                    "message": f"Contains forbidden pattern '{pattern}'",
+                    "pattern": pattern,
+                },
+                entry_file,
             )
-            raise PathTraversalError(f"Invalid entry file path: contains forbidden pattern '{pattern}'")
+            raise PathTraversalError(
+                f"Invalid entry file path: contains forbidden pattern '{pattern}'"
+            )
 
     # Normalize the path
     entry_path = Path(entry_file)
@@ -107,7 +179,7 @@ def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
         _handle_security_violation(
             "absolute_path",
             {"message": "Absolute path not allowed", "path": str(entry_path)},
-            entry_file
+            entry_file,
         )
         raise PathTraversalError("Entry file must be a relative path, not absolute")
 
@@ -121,8 +193,11 @@ def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
     except ValueError:
         _handle_security_violation(
             "path_escape",
-            {"message": "Path resolves outside project directory", "path": str(full_path)},
-            entry_file
+            {
+                "message": "Path resolves outside project directory",
+                "path": str(full_path),
+            },
+            entry_file,
         )
         raise PathTraversalError(
             f"Path traversal detected: entry file '{entry_file}' "
@@ -148,23 +223,25 @@ def validate_output_name(output_name: str) -> str:
         raise PathTraversalError("Output name cannot be empty")
 
     # Strip common path separators first
-    output_name = output_name.replace('/', '').replace('\\', '')
+    output_name = output_name.replace("/", "").replace("\\", "")
 
     # Check for dangerous patterns
     output_lower = output_name.lower()
     for pattern in DANGEROUS_PATTERNS:
         if pattern in output_lower:
-            raise PathTraversalError(f"Invalid output name: contains forbidden pattern '{pattern}'")
+            raise PathTraversalError(
+                f"Invalid output name: contains forbidden pattern '{pattern}'"
+            )
 
     # Auto-sanitize: replace spaces with underscores
     original_name = output_name
-    output_name = output_name.replace(' ', '_')
+    output_name = output_name.replace(" ", "_")
 
     # Replace multiple consecutive underscores with single underscore
-    output_name = re.sub(r'_+', '_', output_name)
+    output_name = re.sub(r"_+", "_", output_name)
 
     # Remove leading/trailing underscores and dots
-    output_name = output_name.strip('_.')
+    output_name = output_name.strip("_.")
 
     # Validate against allowed pattern
     if not OUTPUT_NAME_PATTERN.match(output_name):
@@ -200,13 +277,13 @@ def validate_include_package(package_name: str) -> str:
     module_name = package_name.replace("/", ".").replace("\\", ".")
 
     # Validate: only alphanumeric, dots, underscores
-    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_\.]*$', module_name):
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*$", module_name):
         raise PathTraversalError(
             f"Invalid package name '{package_name}': contains invalid characters"
         )
 
     # Prevent double dots (path traversal attempt)
-    if '..' in module_name:
+    if ".." in module_name:
         raise PathTraversalError(
             f"Invalid package name '{package_name}': contains '..' sequence"
         )
@@ -235,14 +312,16 @@ def safe_resolve_path(base_dir: Path, relative_path: str) -> Path:
     base_resolved = base_dir.resolve()
 
     # Handle empty or current directory references
-    if not relative_path or relative_path in ('.', './'):
+    if not relative_path or relative_path in (".", "./"):
         return base_resolved
 
     # Check for dangerous patterns
     path_lower = relative_path.lower()
     for pattern in DANGEROUS_PATTERNS:
         if pattern in path_lower:
-            raise PathTraversalError(f"Invalid path: contains forbidden pattern '{pattern}'")
+            raise PathTraversalError(
+                f"Invalid path: contains forbidden pattern '{pattern}'"
+            )
 
     # Resolve and validate
     target = (base_resolved / relative_path).resolve()
@@ -256,6 +335,7 @@ def safe_resolve_path(base_dir: Path, relative_path: str) -> Path:
 
     return target
 
+
 def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
     """Inject license validation code into entry file.
 
@@ -267,13 +347,16 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         bool: True if injection successful, False otherwise
     """
     entry_file_path = config.get("entry_file", "")
+    license_key = config.get("license_key", "DEMO")
 
     # Validate entry file path for security
     try:
         entry_file = validate_entry_file(entry_file_path, project_dir)
     except PathTraversalError as e:
         print(f"[ERROR] Security violation: {e}", flush=True)
-        log_security_event("traversal_injection", {"error": str(e), "entry_file": entry_file_path})
+        log_security_event(
+            "traversal_injection", {"error": str(e), "entry_file": entry_file_path}
+        )
         return False
 
     if not entry_file.exists():
@@ -289,18 +372,31 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
 
     try:
         original_code = entry_file.read_text(encoding="utf-8")
-        license_key = config.get("license_key", "DEMO")
         server_url = config.get("server_url", "http://localhost:8000")
         lease_enabled = config.get("lease_enabled", False)
         # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
-        
+
         # Log branding status for debugging
-        branding_status = "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        branding_status = (
+            "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        )
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
+        # Prefer Ed25519 public key (asymmetric, secure) over HMAC secret (legacy)
+        public_key = config.get("signing_public_key") or ""
         secret_key = config.get("signing_secret") or "dev-secret-key"
-        wrapper = get_python_wrapper(license_key, server_url, secret_key, lease_enabled, show_branding)
+        heartbeat_interval = config.get("heartbeat_interval", 300)
+
+        wrapper = get_python_wrapper(
+            license_key,
+            server_url,
+            secret_key,
+            lease_enabled,
+            show_branding,
+            public_key=public_key,
+            heartbeat_interval=heartbeat_interval,
+        )
         entry_file.write_text(wrapper + original_code, encoding="utf-8")
         print(f"[BUILD] Injected wrapper into: {entry_file.name}", flush=True)
         return True
@@ -311,7 +407,7 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
             language="python",
             error_message=f"Wrapper injection failed: {str(e)}",
             error_type="injection_error",
-            license_mode=license_key
+            license_mode=license_key,
         )
         return False
 
@@ -326,6 +422,8 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
     Returns:
         bool: True if injection successful, False otherwise
     """
+    license_key = config.get("license_key", "DEMO")
+
     if not entry_file.exists():
         print(f"[WARN] Entry file not found: {entry_file}", flush=True)
         log_security_event("missing_entry_file_js", {"entry_file": str(entry_file)})
@@ -333,14 +431,15 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
 
     try:
         original_code = entry_file.read_text(encoding="utf-8")
-        license_key = config.get("license_key", "DEMO")
         server_url = config.get("server_url", "http://localhost:8000")
         lease_enabled = config.get("lease_enabled", False)
         # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
-        
+
         # Log branding status for debugging
-        branding_status = "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        branding_status = (
+            "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
+        )
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
         # Strip shebang if present
@@ -352,7 +451,17 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
                 original_code = original_code[first_newline + 1 :]
                 print(f"[BUILD] Stripped shebang: {shebang.strip()}", flush=True)
 
-        prefix, suffix = get_nodejs_wrapper_inline(license_key, server_url, lease_enabled, show_branding)
+        public_key = config.get("signing_public_key") or ""
+        heartbeat_interval = config.get("heartbeat_interval", 300)
+
+        prefix, suffix = get_nodejs_wrapper_inline(
+            license_key,
+            server_url,
+            lease_enabled,
+            show_branding,
+            public_key=public_key,
+            heartbeat_interval=heartbeat_interval,
+        )
         wrapped_code = shebang + prefix + original_code + suffix
         entry_file.write_text(wrapped_code, encoding="utf-8")
         print(f"[BUILD] Injected JS wrapper into: {entry_file.name}", flush=True)
@@ -364,12 +473,14 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
             language="nodejs",
             error_message=f"JS wrapper injection failed: {str(e)}",
             error_type="injection_error",
-            license_mode=license_key
+            license_mode=license_key,
         )
         return False
 
 
-def run_compiler(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[Path]]:
+def run_compiler(
+    project_dir: Path, config: Dict[str, Any]
+) -> Tuple[bool, Optional[Path]]:
     """Dispatch to correct compiler based on language.
 
     Args:
@@ -394,7 +505,7 @@ def run_js_obfuscation(project_dir: Path) -> bool:
     harder to reverse-engineer. Uses optimized settings for faster builds
     while maintaining strong protection.
 
-    ⚠️ SECURITY NOTICE:
+    [WARN] SECURITY NOTICE:
     - Obfuscation does NOT provide strong security - just slows reverse engineering
     - Obfuscator runs locally but downloads from npm if not installed
     - Obfuscation can break code if dependencies are incompatible
@@ -414,35 +525,57 @@ def run_js_obfuscation(project_dir: Path) -> bool:
 
     print(f"   Obfuscating {len(js_files)} JS files in parallel...")
 
-    # Obfuscation settings optimized for speed + protection
-    # Valid options for javascript-obfuscator
+    # Obfuscation settings: AGGRESSIVE profile (SEC5)
+    # Optimized for security over build speed
     obfuscate_args = [
-        # Core obfuscation (fast, good protection)
-        "--compact", "true",
-        "--rename-globals", "true",
-        "--rename-properties", "false",  # Can break code, keep off
-        # String protection (good protection, moderate speed)
-        "--string-array", "true",
-        "--string-array-threshold", "0.75",
-        "--string-array-encoding", "base64",  # Faster than rc4
-        "--string-array-shuffle", "true",
+        "--compact",
+        "true",
+        "--rename-globals",
+        "true",
+        "--rename-properties",
+        "false",  # Can break code, keep off
+        # String protection (aggressive)
+        "--string-array",
+        "true",
+        "--string-array-threshold",
+        "1.0",
+        "--string-array-encoding",
+        "rc4",
+        "--string-array-shuffle",
+        "true",
         # Identifier obfuscation
-        "--identifier-names-generator", "hexadecimal",
-        # Disable slow options for faster builds
-        "--control-flow-flattening", "false",  # Very slow, skip for speed
-        "--dead-code-injection", "false",
-        "--self-defending", "false",
+        "--identifier-names-generator",
+        "hexadecimal",
+        # Advanced protection (Aggressive)
+        "--control-flow-flattening",
+        "true",
+        "--control-flow-flattening-threshold",
+        "0.75",
+        "--dead-code-injection",
+        "true",
+        "--dead-code-injection-threshold",
+        "0.4",
+        "--self-defending",
+        "true",
+        "--split-strings",
+        "true",
+        "--split-strings-chunk-length",
+        "10",
         # Preserve require/import statements
-        "--ignore-imports", "true",
+        "--ignore-imports",
+        "true",
     ]
 
     def _obfuscate_single_file(js_file: Path) -> tuple[Path, bool, str]:
         """Obfuscate a single file, return success status."""
         try:
             cmd = [
-                npx_cmd, "-y", f"javascript-obfuscator@{JAVASCRIPT_OBFUSCATOR_VERSION}",
+                npx_cmd,
+                "-y",
+                f"javascript-obfuscator@{JAVASCRIPT_OBFUSCATOR_VERSION}",
                 str(js_file),
-                "--output", str(js_file),
+                "--output",
+                str(js_file),
             ] + obfuscate_args
 
             result = subprocess.run(
@@ -451,10 +584,14 @@ def run_js_obfuscation(project_dir: Path) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=OBFUSCATE_TIMEOUT,
-                stdin=subprocess.DEVNULL  # Prevent blocking on input prompts
+                stdin=subprocess.DEVNULL,  # Prevent blocking on input prompts
             )
 
-            return (js_file, result.returncode == 0, result.stderr if result.returncode != 0 else "")
+            return (
+                js_file,
+                result.returncode == 0,
+                result.stderr if result.returncode != 0 else "",
+            )
 
         except subprocess.TimeoutExpired:
             return (js_file, False, "Timeout")
@@ -490,9 +627,11 @@ def run_js_obfuscation(project_dir: Path) -> bool:
                 percent = int((completed / total) * 100)
                 bar_length = 25
                 filled = int(bar_length * completed / total)
-                bar = "█" * filled + "░" * (bar_length - filled)
+                bar = "#" * filled + "-" * (bar_length - filled)
 
-                print(f"\r   [{bar}] {percent}% ({completed}/{total})", end="", flush=True)
+                print(
+                    f"\r   [{bar}] {percent}% ({completed}/{total})", end="", flush=True
+                )
 
         duration_ms = int((time.time() - start_time) * 1000)
 
@@ -502,17 +641,19 @@ def run_js_obfuscation(project_dir: Path) -> bool:
         log_obfuscation_stats(
             files_processed=len(js_files),
             files_failed=len(failed_files),
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
         )
 
         if failed_files:
-            print(f"   ⚠️ {len(failed_files)}/{len(js_files)} files had obfuscation warnings")
+            print(
+                f"   [WARN] {len(failed_files)}/{len(js_files)} files had obfuscation warnings"
+            )
             # Only show first 3 errors
             for js_file, error in failed_files[:3]:
                 print(f"   - {js_file.name}: {error[:100]}")
             return len(failed_files) < len(js_files) * 0.5  # Return True if <50% failed
 
-        print(f"   ✅ Obfuscation complete ({duration_ms}ms)")
+        print(f"   [OK] Obfuscation complete ({duration_ms}ms)")
         return True
 
     except ImportError:
@@ -525,9 +666,7 @@ def run_js_obfuscation(project_dir: Path) -> bool:
                 failed_count += 1
 
         log_obfuscation_stats(
-            files_processed=len(js_files),
-            files_failed=failed_count,
-            duration_ms=0
+            files_processed=len(js_files), files_failed=failed_count, duration_ms=0
         )
         return failed_count == 0
 
@@ -546,7 +685,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
     Returns:
         Tuple[bool, Optional[Path]]: (success: bool, build_dir: Path | None)
 
-    ⚠️ SECURITY NOTICE:
+    [WARN] SECURITY NOTICE:
     - pkg bundles Node.js code but does NOT obfuscate by default
     - npm install may download packages from the internet
     - No container isolation - runs directly on your local machine
@@ -559,7 +698,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
     try:
         entry_path = validate_entry_file(entry_file, project_dir)
     except PathTraversalError as e:
-        color_print(f"❌ Security violation: {e}", Colors.RED)
+        color_print(f"[ERROR] Security violation: {e}", Colors.RED)
         return False, None
 
     # Validate output name for security
@@ -567,17 +706,27 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         original_name = output_name
         output_name = validate_output_name(output_name)
         if original_name != output_name:
-            print(f"📝 Output name sanitized: '{original_name}' → '{output_name}'")
+            print(f"[INFO] Output name sanitized: '{original_name}' -> '{output_name}'")
     except PathTraversalError as e:
-        color_print(f"❌ Security violation: {e}", Colors.RED)
+        color_print(f"[ERROR] Security violation: {e}", Colors.RED)
         return False, None
 
     compiler_opts = config.get("compiler_options", {})
-    target = compiler_opts.get("target", "node18-win-x64")
+
+    # B26: Support platform targeting
+    platform_target = config.get("platform")
+    if platform_target:
+        # Map platform to pkg target format
+        platform_map = {"windows": "win", "linux": "linux", "macos": "macos"}
+        platform_code = platform_map.get(platform_target, "win")
+        target = f"node20-{platform_code}-x64"
+        color_print(f"[T] Target platform: {platform_target} ({target})", Colors.CYAN)
+    else:
+        target = compiler_opts.get("target", "node18-win-x64")
 
     # Validate target format (should be like node18-win-x64)
-    if not re.match(r'^node\d+-[a-z]+-[a-z0-9]+$', target):
-        color_print(f"❌ Invalid target format: {target}", Colors.RED)
+    if not re.match(r"^node\d+-[a-z]+-[a-z0-9]+$", target):
+        color_print(f"[ERROR] Invalid target format: {target}", Colors.RED)
         return False, None
 
     # Find package.json
@@ -597,7 +746,9 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         package_json = project_dir / "package.json"
 
     if not package_json:
-        color_print("⚠️ No package.json found - skipping npm install", Colors.YELLOW)
+        color_print(
+            "[WARN] No package.json found - skipping npm install", Colors.YELLOW
+        )
         pkg_cwd = project_dir
     else:
         pkg_cwd = package_json.parent
@@ -621,10 +772,10 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
                     )
                     print("   ⚙️ Downgraded axios to 0.27.2 (pkg compatibility)")
         except Exception as e:
-            print(f"   ⚠️ Could not check axios version: {e}")
+            print(f"   [WARN] Could not check axios version: {e}")
 
         if not node_modules.exists():
-            color_print("📦 Installing npm dependencies...", Colors.CYAN)
+            color_print("[PKG] Installing npm dependencies...", Colors.CYAN)
 
             # Try to detect dependency count for estimation
             try:
@@ -636,81 +787,139 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
 
             npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
             try:
-                # Use subprocess with real-time output for progress
+                # B16: Use --prefer-offline --no-audit --no-fund for faster installs
+                # B15: Add timeout to prevent hanging
+                from compiler_constants import PKG_TIMEOUT
+
                 process = subprocess.Popen(
-                    [npm_cmd, "install", "--production"],
+                    [
+                        npm_cmd,
+                        "install",
+                        "--production",
+                        "--prefer-offline",
+                        "--no-audit",
+                        "--no-fund",
+                    ],
                     cwd=pkg_cwd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL,  # Prevent blocking on input prompts
+                    stdin=subprocess.DEVNULL,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
                 )
 
-                # Parse output for progress indicators
+                # Parse output for progress indicators with timeout
                 spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
                 spinner_idx = 0
                 last_update = time.time()
+                start_time = time.time()
+                last_output_time = time.time()
+                no_output_timeout = 60  # Kill if no output for 60 seconds
 
                 while True:
-                    line = process.stdout.readline()
-                    if not line and process.poll() is not None:
-                        break
+                    # B15: Check for timeout
+                    elapsed = time.time() - start_time
+                    if elapsed > PKG_TIMEOUT:
+                        process.kill()
+                        raise subprocess.TimeoutExpired(process.args, PKG_TIMEOUT)
+
+                    # Check for no-output timeout (critical fix)
+                    time_since_output = time.time() - last_output_time
+                    if time_since_output > no_output_timeout:
+                        print(
+                            f"\n[ERROR] No output for {no_output_timeout}s - npm may be stuck"
+                        )
+                        process.kill()
+                        raise subprocess.TimeoutExpired(process.args, no_output_timeout)
+
+                    # NON-BLOCKING read with cross-platform helper
+                    if _wait_for_output_with_timeout(process, timeout=1.0):
+                        line = _readline_from_process(process)
+                        if line:
+                            last_output_time = time.time()  # Reset timer
+                            line_str = (
+                                line.decode("utf-8", errors="replace")
+                                if isinstance(line, bytes)
+                                else line
+                            )
+                            # Look for progress indicators in npm output
+                            if (
+                                "added" in line_str.lower()
+                                or "removed" in line_str.lower()
+                            ):
+                                print(
+                                    f"\r   [OK] {line_str.strip()[:80]}",
+                                    end="",
+                                    flush=True,
+                                )
 
                     # Show spinner while processing
                     current_time = time.time()
                     if current_time - last_update > 0.2:
                         spinner_idx = (spinner_idx + 1) % len(spinner)
-                        print(f"\r   {spinner[spinner_idx]} Installing... ", end="", flush=True)
+                        print(
+                            f"\r   {spinner[spinner_idx]} Installing... ",
+                            end="",
+                            flush=True,
+                        )
                         last_update = current_time
 
-                    # Look for progress indicators in npm output
-                    if "added" in line.lower() or "removed" in line.lower():
-                        print(f"\r   ✅ {line.strip()[:80]}", end="", flush=True)
+                    if process.poll() is not None:
+                        break
 
                 process.wait()
 
                 if process.returncode == 0:
-                    print(f"\r   ✅ Dependencies installed{' ' * 40}")
+                    print(f"\r   [OK] Dependencies installed{' ' * 40}")
                 else:
-                    print(f"\r   ⚠️ npm install completed with warnings{' ' * 40}")
+                    print(f"\r   [WARN] npm install completed with warnings{' ' * 40}")
 
             except subprocess.TimeoutExpired:
-                color_print("\n❌ npm install timed out", Colors.RED)
+                color_print(
+                    f"\n[ERROR] npm install timed out after {PKG_TIMEOUT}s", Colors.RED
+                )
                 return False, None
             except FileNotFoundError:
-                color_print("\n❌ npm not found. Install Node.js.", Colors.RED)
+                color_print("\n[ERROR] npm not found. Install Node.js.", Colors.RED)
                 return False, None
         else:
-            print("   ✅ node_modules already exists")
-            
+            print("   [OK] node_modules already exists")
+
         # Add pkg config for ESM/CJS...
         try:
             pkg_json_content = json.loads(package_json.read_text(encoding="utf-8"))
             if "pkg" not in pkg_json_content:
                 pkg_json_content["pkg"] = {}
-            pkg_json_content["pkg"]["scripts"] = pkg_json_content["pkg"].get("scripts", [])
-            pkg_json_content["pkg"]["assets"] = pkg_json_content["pkg"].get("assets", [])
-            
+            pkg_json_content["pkg"]["scripts"] = pkg_json_content["pkg"].get(
+                "scripts", []
+            )
+            pkg_json_content["pkg"]["assets"] = pkg_json_content["pkg"].get(
+                "assets", []
+            )
+
             for pat in ["node_modules/**/*.cjs", "node_modules/**/*.json"]:
-                 if pat not in pkg_json_content["pkg"]["assets"]:
-                     pkg_json_content["pkg"]["assets"].append(pat)
-                     
-            package_json.write_text(json.dumps(pkg_json_content, indent=2), encoding="utf-8")
+                if pat not in pkg_json_content["pkg"]["assets"]:
+                    pkg_json_content["pkg"]["assets"].append(pat)
+
+            package_json.write_text(
+                json.dumps(pkg_json_content, indent=2), encoding="utf-8"
+            )
         except Exception:
             pass
 
     # Run obfuscation if enabled in project settings
     obfuscate_enabled = config.get("obfuscate_enabled", False)
     if obfuscate_enabled:
-        color_print("🔒 Obfuscating JavaScript code...", Colors.CYAN)
+        color_print("[SEC] Obfuscating JavaScript code...", Colors.CYAN)
         if run_js_obfuscation(pkg_cwd):
-            color_print("   ✅ Obfuscation complete", Colors.GREEN)
+            color_print("   [OK] Obfuscation complete", Colors.GREEN)
         else:
-            color_print("   ⚠️ Continuing without obfuscation...", Colors.YELLOW)
+            color_print("   [WARN] Continuing without obfuscation...", Colors.YELLOW)
     elif config.get("fast_build"):
-        print(f"   {Colors.DIM}[FAST MODE] Skipping obfuscation for faster build{Colors.RESET}")
+        print(
+            f"   {Colors.DIM}[FAST MODE] Skipping obfuscation for faster build{Colors.RESET}"
+        )
     else:
         # Check if fast_build is explicitly false (user wants normal obfuscation but it's off)
         print(f"   {Colors.DIM}[INFO] Obfuscation disabled in settings{Colors.RESET}")
@@ -722,11 +931,18 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         entry_path_rel = entry_file
 
     # Build pkg command with optimizations
+    # Using @yao-pkg/pkg (maintained fork of archived vercel/pkg)
     cmd = [
-        npx_cmd, "-y", f"pkg@{PKG_VERSION}", str(entry_path_rel),
-        "--targets", target,
-        "--output", str(pkg_cwd / output_name),
-        "--compress", "GZip",  # Optimization: Compress for smaller output
+        npx_cmd,
+        "-y",
+        "@yao-pkg/pkg",
+        str(entry_path_rel),
+        "--targets",
+        target,
+        "--output",
+        str(pkg_cwd / output_name),
+        "--compress",
+        "GZip",  # Optimization: Compress for smaller output
     ]
 
     # Debug mode: show less verbose output for cleaner logs
@@ -738,7 +954,9 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
 
     # Show time warning for large builds
     if not config.get("fast_build"):
-        print(f"\n   {Colors.YELLOW}⏱️  This may take 2-5 minutes depending on project size{Colors.RESET}")
+        print(
+            f"\n   {Colors.YELLOW}[T]️  This may take 2-5 minutes depending on project size{Colors.RESET}"
+        )
 
     try:
         # Use real-time streaming for pkg progress
@@ -752,23 +970,59 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
             stdin=subprocess.DEVNULL,  # Prevent blocking on input prompts
             text=True,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
 
         spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         spinner_idx = 0
         last_update = time.time()
         start_time = time.time()
+        last_output_time = time.time()
         current_phase = "analyzing"
+        no_output_timeout = 60  # Kill if no output for 60 seconds
+
+        print(f"[pkg] Started with PID {process.pid}")
+        print(f"[pkg] Working directory: {pkg_cwd}")
+        print("[pkg] Waiting for output...")
 
         while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
+            elapsed = time.time() - start_time
+
+            # Check for no-output timeout (critical fix)
+            time_since_output = time.time() - last_output_time
+            if time_since_output > no_output_timeout:
+                print(
+                    f"\n[ERROR] No output for {no_output_timeout}s - pkg may be stuck"
+                )
+                process.kill()
+                raise subprocess.TimeoutExpired(process.args, no_output_timeout)
+
+            # NON-BLOCKING read with cross-platform helper
+            line = None
+            if _wait_for_output_with_timeout(process, timeout=1.0):
+                line = _readline_from_process(process)
+                if line:
+                    last_output_time = time.time()
+                    line_str = (
+                        line.decode("utf-8", errors="replace")
+                        if isinstance(line, bytes)
+                        else line
+                    )
+
+                    # Parse pkg output for phase detection
+                    if ">>> Bundling" in line_str or "bundling" in line_str.lower():
+                        current_phase = "bundling"
+                    elif "compil" in line_str.lower():
+                        current_phase = "compiling"
+                    elif "pack" in line_str.lower():
+                        current_phase = "packaging"
+
+            if process.poll() is not None:
                 break
 
             current_time = time.time()
-            elapsed = int(current_time - start_time)
-            mins, secs = divmod(elapsed, 60)
+            elapsed_int = int(current_time - start_time)
+            mins, secs = divmod(elapsed_int, 60)
             elapsed_str = f"{mins}m{secs}s"
 
             # Estimate progress based on time (pkg doesn't output percentages)
@@ -781,14 +1035,19 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
                 last_update = current_time
 
                 # Show progress bar with estimated progress
-                print_progress_bar(estimated_percent, width=30, phase=current_phase, elapsed_time=elapsed_str)
+                print_progress_bar(
+                    estimated_percent,
+                    width=30,
+                    phase=current_phase,
+                    elapsed_time=elapsed_str,
+                )
 
             # Parse pkg output for phase detection
-            if ">>> Bundling" in line or "bundling" in line.lower():
+            if line and (">>> Bundling" in line or "bundling" in line.lower()):
                 current_phase = "bundling"
-            elif "compil" in line.lower():
+            elif line and "compil" in line.lower():
                 current_phase = "compiling"
-            elif "pack" in line.lower():
+            elif line and "pack" in line.lower():
                 current_phase = "packaging"
 
         process.wait()
@@ -796,55 +1055,67 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
 
         if process.returncode != 0:
             # Double bell for error
-            sys.stdout.write('\a\a')
+            sys.stdout.write("\a\a")
             sys.stdout.flush()
-            color_print(f"❌ pkg failed with exit code {process.returncode}", Colors.RED)
+            color_print(
+                f"[ERROR] pkg failed with exit code {process.returncode}", Colors.RED
+            )
             return False, None
 
-        color_print("✅ pkg completed successfully", Colors.GREEN)
+        color_print("[OK] pkg completed successfully", Colors.GREEN)
 
         # Verify the output file exists
         expected_exe = pkg_cwd / f"{output_name}.exe"
-        print(f"   🔍 Checking for: {expected_exe}")
+        print(f"   [S] Checking for: {expected_exe}")
 
         if not expected_exe.exists():
             # Try alternative name patterns (pkg sometimes uses different naming)
             for p in pkg_cwd.glob(f"{output_name}*.exe"):
                 expected_exe = p
-                print(f"   ⚠️ Found alternative: {expected_exe}")
+                print(f"   [WARN] Found alternative: {expected_exe}")
                 break
         if not expected_exe.exists():
             # Also check for file without .exe extension (pkg might name it differently)
             for p in pkg_cwd.glob("*.exe"):
                 if output_name.lower() in p.stem.lower():
                     expected_exe = p
-                    print(f"   ⚠️ Found partial match: {expected_exe}")
+                    print(f"   [WARN] Found partial match: {expected_exe}")
                     break
         if not expected_exe.exists():
             # Last resort: search entire parent temp directory
             temp_search = []
             for parent in list(pkg_cwd.parents)[:4]:  # Search up 4 levels
-                if 'temp' in str(parent).lower() or 'tmp' in str(parent).lower():
+                if "temp" in str(parent).lower() or "tmp" in str(parent).lower():
                     for p in parent.rglob("*.exe"):
-                        if output_name.lower() in p.stem.lower() or "node" in p.stem.lower():
+                        if (
+                            output_name.lower() in p.stem.lower()
+                            or "node" in p.stem.lower()
+                        ):
                             temp_search.append(p)
 
             if temp_search:
-                color_print(f"⚠️ Found exe elsewhere: {temp_search[0].name}", Colors.YELLOW)
+                color_print(
+                    f"[WARN] Found exe elsewhere: {temp_search[0].name}", Colors.YELLOW
+                )
                 expected_exe = temp_search[0]
             else:
-                color_print("❌ pkg succeeded but output file not found", Colors.RED)
+                color_print(
+                    "[ERROR] pkg succeeded but output file not found", Colors.RED
+                )
                 color_print(f"   Expected: {pkg_cwd / output_name}.exe", Colors.YELLOW)
                 color_print(f"   Search dir: {pkg_cwd}", Colors.YELLOW)
                 exe_files = list(pkg_cwd.glob("*.exe"))
                 if exe_files:
-                    color_print(f"   Found exe files: {[p.name for p in exe_files]}", Colors.YELLOW)
+                    color_print(
+                        f"   Found exe files: {[p.name for p in exe_files]}",
+                        Colors.YELLOW,
+                    )
                 return False, None
 
-        color_print(f"   ✅ Output found: {expected_exe.name}", Colors.GREEN)
+        color_print(f"   [OK] Output found: {expected_exe.name}", Colors.GREEN)
         return True, pkg_cwd
     except FileNotFoundError:
-        color_print("❌ npx/pkg not found. Install Node.js.", Colors.RED)
+        color_print("[ERROR] npx/pkg not found. Install Node.js.", Colors.RED)
         return False, None
 
 
@@ -865,7 +1136,7 @@ def detect_heavy_dependencies(project_dir: Path) -> bool:
     for py_file in py_files:
         if py_file.exists():
             try:
-                content = py_file.read_text(encoding='utf-8', errors='ignore').lower()
+                content = py_file.read_text(encoding="utf-8", errors="ignore").lower()
                 check_files.append(content)
             except (OSError, UnicodeDecodeError):
                 # Skip files that can't be read or decoded
@@ -873,15 +1144,21 @@ def detect_heavy_dependencies(project_dir: Path) -> bool:
 
     # Look for heavy dependency imports
     heavy_patterns = [
-        'import numpy', 'from numpy',
-        'import pandas', 'from pandas',
-        'import sklearn', 'from sklearn',
-        'import tensorflow', 'from tensorflow',
-        'import torch', 'from torch',
-        'import scipy', 'from scipy',
+        "import numpy",
+        "from numpy",
+        "import pandas",
+        "from pandas",
+        "import sklearn",
+        "from sklearn",
+        "import tensorflow",
+        "from tensorflow",
+        "import torch",
+        "from torch",
+        "import scipy",
+        "from scipy",
     ]
 
-    content_text = '\n'.join(check_files)
+    content_text = "\n".join(check_files)
     return any(pattern in content_text for pattern in heavy_patterns)
 
 
@@ -895,21 +1172,23 @@ def detect_heavy_deps_detailed(project_dir: Path) -> list:
         list: List of detected heavy dependency names
     """
     heavy_map = {
-        'numpy': ['numpy'],
-        'pandas': ['pandas'],
-        'scipy': ['scipy'],
-        'sklearn': ['sklearn', 'scikit-learn'],
-        'tensorflow': ['tensorflow'],
-        'torch': ['torch', 'pytorch'],
+        "numpy": ["numpy"],
+        "pandas": ["pandas"],
+        "scipy": ["scipy"],
+        "sklearn": ["sklearn", "scikit-learn"],
+        "tensorflow": ["tensorflow"],
+        "torch": ["torch", "pytorch"],
     }
 
     found = []
-    py_files = [f for f in project_dir.rglob("*.py") if f.is_file()][:10]  # Check first 10
+    py_files = [f for f in project_dir.rglob("*.py") if f.is_file()][
+        :10
+    ]  # Check first 10
 
     for dep_name, import_patterns in heavy_map.items():
         for py_file in py_files:
             try:
-                content = py_file.read_text(encoding='utf-8', errors='ignore').lower()
+                content = py_file.read_text(encoding="utf-8", errors="ignore").lower()
                 if any(pattern in content for pattern in import_patterns):
                     if dep_name not in found:
                         found.append(dep_name)
@@ -931,7 +1210,7 @@ def parse_nuitka_percent(line: str) -> int | None:
         The extracted percentage as an integer, or None if no percentage found
     """
     if "%" in line:
-        match = re.search(r'(\d+)%', line)
+        match = re.search(r"(\d+)%", line)
         if match:
             return int(match.group(1))
     return None
@@ -960,7 +1239,7 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
     Returns:
         bool: True if compilation successful
 
-    ⚠️ SECURITY NOTICE:
+    [WARN] SECURITY NOTICE:
     - Nuitka may download packages from the internet during compilation
     - Use --assume-yes-for-downloads which can install untrusted packages
     - Only compile trusted code
@@ -976,7 +1255,9 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         entry_path = validate_entry_file(entry_file, project_dir)
     except PathTraversalError as e:
         print(f"[ERROR] Security violation: {e}", flush=True)
-        log_security_event("traversal_compiler", {"error": str(e), "entry_file": entry_file})
+        log_security_event(
+            "traversal_compiler", {"error": str(e), "entry_file": entry_file}
+        )
         return False
 
     # Validate output name for security
@@ -984,10 +1265,15 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         original_name = output_name
         output_name = validate_output_name(output_name)
         if original_name != output_name:
-            print(f"[BUILD] Output name sanitized: '{original_name}' → '{output_name}'", flush=True)
+            print(
+                f"[BUILD] Output name sanitized: '{original_name}' -> '{output_name}'",
+                flush=True,
+            )
     except PathTraversalError as e:
         print(f"[ERROR] Security violation: {e}", flush=True)
-        log_security_event("invalid_output_name", {"error": str(e), "output_name": original_name})
+        log_security_event(
+            "invalid_output_name", {"error": str(e), "output_name": original_name}
+        )
         return False
 
     if not entry_path.exists():
@@ -1002,10 +1288,16 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
 
     # SECURITY WARNING: Nuitka with --assume-yes-for-downloads can download packages
     # Add warning if this is a first-time compilation
-    print(f"\n{Colors.YELLOW}[SECURITY] Nuitka will compile Python to machine code.{Colors.RESET}")
-    print(f"{Colors.YELLOW}    ⚠️  Network access may be used to download dependencies{Colors.RESET}")
-    print(f"{Colors.YELLOW}    ⚠️  Only compile code you trust{Colors.RESET}")
-    print(f"{Colors.YELLOW}    ⚠️  No container isolation - runs directly on your system{Colors.RESET}\n")
+    print(
+        f"\n{Colors.YELLOW}[SECURITY] Nuitka will compile Python to machine code.{Colors.RESET}"
+    )
+    print(
+        f"{Colors.YELLOW}    [WARN]  Network access may be used to download dependencies{Colors.RESET}"
+    )
+    print(f"{Colors.YELLOW}    [WARN]  Only compile code you trust{Colors.RESET}")
+    print(
+        f"{Colors.YELLOW}    [WARN]  No container isolation - runs directly on your system{Colors.RESET}\n"
+    )
 
     # CPU core detection and optimization
     cpu_count = os.cpu_count() or 4
@@ -1028,7 +1320,9 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
 
     # Build command based on mode
     cmd = [
-        sys.executable, "-m", "nuitka",
+        sys.executable,
+        "-m",
+        "nuitka",
     ]
 
     # Base Nuitka options (common for both modes)
@@ -1048,28 +1342,46 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         "--nofollow-import-to=setuptools",
     ]
 
+    # B26: Support platform targeting for cross-compilation
+    platform_target = config.get("platform")
+    if platform_target:
+        color_print(f"[T] Target platform: {platform_target}", Colors.CYAN)
+        if platform_target == "linux":
+            base_options.append("--target=linux")
+        elif platform_target == "macos":
+            base_options.append("--target=macos")
+        # Windows is default
+
     # Add fast-build specific optimizations
     if fast_build:
         # Fast mode: no --onefile, use --jobs
         print(f"{Colors.YELLOW}[FAST MODE]{Colors.RESET} Compiling without --onefile")
-        print(f"{Colors.YELLOW}[FAST MODE]{Colors.RESET} Output will be a folder, not single .exe\n")
+        print(
+            f"{Colors.YELLOW}[FAST MODE]{Colors.RESET} Output will be a folder, not single .exe\n"
+        )
 
         cmd.extend(base_options)
-        cmd.extend([
-            f"--jobs={max_jobs}",
-            f"--output-directory={project_dir / 'build'}",
-        ])
+        cmd.extend(
+            [
+                f"--jobs={max_jobs}",
+                f"--output-dir={project_dir / 'build'}",
+            ]
+        )
     else:
         # Standard mode: add --onefile for single executable output
         print(f"{Colors.YELLOW}[STANDARD MODE]{Colors.RESET} Compiling with --onefile")
-        print(f"{Colors.YELLOW}[STANDARD MODE]{Colors.RESET} Output will be a single .exe file\n")
+        print(
+            f"{Colors.YELLOW}[STANDARD MODE]{Colors.RESET} Output will be a single .exe file\n"
+        )
 
         cmd.extend(base_options)
-        cmd.extend([
-            "--onefile",
-            f"--jobs={max_jobs}",
-            f"--output-filename={output_name}.exe",
-        ])
+        cmd.extend(
+            [
+                "--onefile",
+                f"--jobs={max_jobs}",
+                f"--output-filename={output_name}.exe",
+            ]
+        )
 
         # For very large projects, disable console window (runs as background process)
         if has_heavy_deps or cpu_count >= 8:
@@ -1089,10 +1401,16 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
     cmd.append(str(entry_path))
 
     # Print optimization info
-    print(f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Using {max_jobs} CPU cores for parallel compilation")
+    print(
+        f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Using {max_jobs} CPU cores for parallel compilation"
+    )
     if has_heavy_deps:
-        print(f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Heavy dependencies detected - applying speed optimizations")
-    print(f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Expected speedup: 2-4x vs. current build\n")
+        print(
+            f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Heavy dependencies detected - applying speed optimizations"
+        )
+    print(
+        f"{Colors.CYAN}[OPTIMIZATION]{Colors.RESET} Expected speedup: 2-4x vs. current build\n"
+    )
     print(f"[NUITKA] Starting compilation: {entry_path.name}", flush=True)
 
     try:
@@ -1100,12 +1418,21 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         env["PYTHONUNBUFFERED"] = "1"
         creationflags = 0
         if sys.platform == "win32":
-            creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
+            creationflags = (
+                subprocess.CREATE_NO_WINDOW
+                if hasattr(subprocess, "CREATE_NO_WINDOW")
+                else 0x08000000
+            )
 
         process = subprocess.Popen(
-            cmd, cwd=project_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cmd,
+            cwd=project_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,  # Prevent blocking on input prompts
-            bufsize=0, env=env, creationflags=creationflags,
+            bufsize=0,
+            env=env,
+            creationflags=creationflags,
         )
 
         spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -1114,43 +1441,125 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         last_percent = 0
         last_phase = "starting"
         start_time = time.time()
+        last_output_time = time.time()
+        no_output_timeout = 60  # Kill if no output for 60 seconds
+        heartbeat_interval = 30  # Log heartbeat every 30 seconds
+
+        print(f"[Nuitka] Started with PID {process.pid}")
+        print(f"[Nuitka] Working directory: {project_dir}")
+        print(f"[Nuitka] Command: {' '.join(cmd[:5])}...")
+        print("[Nuitka] Waiting for output...")
 
         while True:
-            line_bytes = process.stdout.readline()
-            if not line_bytes and process.poll() is not None:
-                break
+            # B15: Check for compile timeout
+            elapsed = time.time() - start_time
+            if elapsed > COMPILE_TIMEOUT:
+                process.kill()
+                print(
+                    f"\n{Colors.RED}[TIMEOUT] Compilation exceeded {COMPILE_TIMEOUT}s limit{Colors.RESET}"
+                )
+                raise BuildTimeoutError(
+                    f"Nuitka compilation timed out after {COMPILE_TIMEOUT} seconds"
+                )
 
-            elapsed = int(time.time() - start_time)
-            mins, secs = divmod(elapsed, 60)
-            elapsed_str = f"{mins}m{secs}s"
+            # Check for no-output timeout (critical fix for hanging)
+            time_since_output = time.time() - last_output_time
+            if time_since_output > no_output_timeout:
+                print(
+                    f"\n[ERROR] No output for {no_output_timeout}s - compiler may be stuck"
+                )
+                print("[ERROR] Killing process...")
+                process.kill()
+                raise BuildTimeoutError(f"No output for {no_output_timeout} seconds")
+
+            # Heartbeat logging every 30 seconds
+            if (
+                int(elapsed) % heartbeat_interval == 0
+                and int(elapsed) > 0
+                and int(elapsed) != last_update
+            ):
+                mins, secs = divmod(int(elapsed), 60)
+                print(f"\n[ALIVE] Compiler still running ({mins}m {secs}s elapsed)")
+
+            # NON-BLOCKING read with cross-platform helper
+            # Wait up to 1 second for output before checking timeout again
+            if _wait_for_output_with_timeout(process, timeout=1.0):
+                line_bytes = _readline_from_process(process)
+                if line_bytes:
+                    last_output_time = time.time()  # Reset output timer
+                    if isinstance(line_bytes, bytes):
+                        line = line_bytes.decode("utf-8", errors="replace").strip()
+                    else:
+                        line = (
+                            line_bytes.strip()
+                            if isinstance(line_bytes, str)
+                            else str(line_bytes).strip()
+                        )
+
+                    # Parse progress from Nuitka output
+                    percent = parse_nuitka_percent(line)
+                    if percent:
+                        last_percent = percent
+                        last_phase = parse_nuitka_phase(line)
+                        # Show visual progress bar with phase and time
+                        elapsed_int = int(elapsed)
+                        mins, secs = divmod(elapsed_int, 60)
+                        elapsed_str = f"{mins}m{secs}s"
+                        print_progress_bar(
+                            percent,
+                            width=30,
+                            phase=last_phase,
+                            elapsed_time=elapsed_str,
+                        )
+
+                    # Log errors/warnings but don't spam output
+                    if "error" in line.lower() and "no errors" not in line.lower():
+                        print(f"\n[ERROR] {line}", flush=True)
+                    elif (
+                        "warning" in line.lower() and "no warnings" not in line.lower()
+                    ):
+                        print(f"\n[WARN] {line}", flush=True)
 
             # Update display every second
-            if elapsed != last_update:
-                last_update = elapsed
+            elapsed_int = int(elapsed)
+            if elapsed_int != last_update:
+                last_update = elapsed_int
                 spinner_idx = (spinner_idx + 1) % len(spinner)
 
                 # Use progress bar if we have percent, otherwise use spinner
                 if last_percent > 0:
-                    print_progress_bar(last_percent, width=30, phase=last_phase, elapsed_time=elapsed_str)
+                    mins, secs = divmod(elapsed_int, 60)
+                    elapsed_str = f"{mins}m{secs}s"
+                    print_progress_bar(
+                        last_percent,
+                        width=30,
+                        phase=last_phase,
+                        elapsed_time=elapsed_str,
+                    )
                 else:
-                    print(f"\r{spinner[spinner_idx]} Starting compilation... {elapsed_str}  ", end="", flush=True)
+                    print(
+                        f"\r{spinner[spinner_idx]} Starting compilation... {elapsed_str}  ",
+                        end="",
+                        flush=True,
+                    )
 
-            if line_bytes:
-                line = line_bytes.decode("utf-8", errors="replace").strip()
-
-                # Parse progress from Nuitka output
-                percent = parse_nuitka_percent(line)
-                if percent:
-                    last_percent = percent
-                    last_phase = parse_nuitka_phase(line)
-                    # Show visual progress bar with phase and time
-                    print_progress_bar(percent, width=30, phase=last_phase, elapsed_time=elapsed_str)
-
-                # Log errors/warnings but don't spam output
-                if "error" in line.lower() and "no errors" not in line.lower():
-                    print(f"\n[ERROR] {line}", flush=True)
-                elif "warning" in line.lower() and "no warnings" not in line.lower():
-                    print(f"\n[WARN] {line}", flush=True)
+            if process.poll() is not None:
+                # Process finished, drain remaining output
+                if process.stdout:
+                    remaining = process.stdout.read()
+                    if remaining:
+                        for line in (
+                            remaining.decode("utf-8", errors="replace")
+                            .strip()
+                            .split("\n")
+                        ):
+                            if line:
+                                if (
+                                    "error" in line.lower()
+                                    and "no errors" not in line.lower()
+                                ):
+                                    print(f"\n[ERROR] {line}", flush=True)
+                break
 
         # Clear line at end
         print("\r" + " " * 60 + "\r", end="", flush=True)
@@ -1160,13 +1569,15 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
             return True
         else:
             # Error notification (double bell)
-            sys.stdout.write('\a\a')
+            sys.stdout.write("\a\a")
             sys.stdout.flush()
-            print(f"\n{Colors.RED}[NUITKA ERROR] Compilation failed with exit code {process.returncode}{Colors.RESET}")
+            print(
+                f"\n{Colors.RED}[NUITKA ERROR] Compilation failed with exit code {process.returncode}{Colors.RESET}"
+            )
             return False
 
     except Exception as e:
-        sys.stdout.write('\a\a')
+        sys.stdout.write("\a\a")
         sys.stdout.flush()
         print(f"\n{Colors.RED}[ERROR] Nuitka error: {e}{Colors.RESET}")
         return False
@@ -1184,9 +1595,9 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
     """
     language = config.get("language", "python")
 
-    print(f"\n{Colors.CYAN}{'='*60}{Colors.RESET}")
+    print(f"\n{Colors.CYAN}{'=' * 60}{Colors.RESET}")
     print(f"{Colors.CYAN}📊 PROJECT ANALYSIS{Colors.RESET}")
-    print(f"{Colors.CYAN}{'='*60}{Colors.RESET}\n")
+    print(f"{Colors.CYAN}{'=' * 60}{Colors.RESET}\n")
 
     if language == "python":
         # Count files
@@ -1197,7 +1608,9 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         total_lines = 0
         for f in sample_files:
             try:
-                total_lines += len(f.read_text(encoding='utf-8', errors='ignore').splitlines())
+                total_lines += len(
+                    f.read_text(encoding="utf-8", errors="ignore").splitlines()
+                )
             except (OSError, UnicodeDecodeError) as e:
                 # Skip files that can't be read or decoded, but log for debugging
                 print(f"[DEBUG] Could not read {f.name}: {e}", flush=True)
@@ -1214,7 +1627,9 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
 
         if heavy_deps:
             heavy_names = ", ".join(heavy_deps)
-            print(f"  {Colors.RED}⚠️  Heavy dependencies: {heavy_names}{Colors.RESET}")
+            print(
+                f"  {Colors.RED}[WARN]  Heavy dependencies: {heavy_names}{Colors.RESET}"
+            )
 
         # Time estimation
         base_time = 30  # Base 30 seconds
@@ -1234,7 +1649,7 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         # Nuitka --onefile adds 2-3x overhead
         est_onefile = est_seconds * 2.5
 
-        print(f"\n  {Colors.YELLOW}⏱️  ESTIMATED BUILD TIME:{Colors.RESET}")
+        print(f"\n  {Colors.YELLOW}[T]️  ESTIMATED BUILD TIME:{Colors.RESET}")
 
         # Show both modes if fast_build is available
         if not config.get("fast_build"):
@@ -1244,24 +1659,33 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
             print(f"     Fast mode:         {est_seconds // 60}m {est_seconds % 60}s")
 
         if est_onefile > 1200:  # 20 minutes
-            print(f"\n  {Colors.RED}⚠️  WARNING: This is a large project!{Colors.RESET}")
+            print(
+                f"\n  {Colors.RED}[WARN]  WARNING: This is a large project!{Colors.RESET}"
+            )
             print(f"  {Colors.RED}     Build may take 20-60 minutes{Colors.RESET}")
             print(f"\n  {Colors.YELLOW}💡 Tips to speed up:{Colors.RESET}")
-            print("     • Add --fast-build flag (no onefile, ~15m)")
-            print("     • Add --jobs=8 (use all CPU cores)")
-            print("     • Build once, cache for future iterations")
+            print("     - Add --fast-build flag (no onefile, ~15m)")
+            print("     - Add --jobs=8 (use all CPU cores)")
+            print("     - Build once, cache for future iterations")
 
             # Check if running in interactive mode
             if sys.stdin.isatty():
-                print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
+                print(
+                    f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}",
+                    end="",
+                )
                 response = input().strip().lower()
-                if response in ['n', 'no']:
+                if response in ["n", "no"]:
                     print("  Build cancelled.")
                     return False
             else:
                 # Non-interactive environment (CI/CD, scripts)
-                print(f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}")
-                print(f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}")
+                print(
+                    f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}"
+                )
+                print(
+                    f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}"
+                )
 
         return True
 
@@ -1270,6 +1694,7 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
         pkg_json = project_dir / "package.json"
         if pkg_json.exists():
             import json
+
             try:
                 deps = json.loads(pkg_json.read_text()).get("dependencies", {})
                 dep_count = len(deps)
@@ -1278,36 +1703,114 @@ def analyze_and_warn_project(project_dir: Path, config: dict) -> bool:
                 # Estimate: npm install ~2s per dep, pkg ~30-60s
                 est_seconds = dep_count * 2 + 45
 
-                print(f"\n  {Colors.YELLOW}⏱️  ESTIMATED BUILD TIME: {est_seconds // 60}m{Colors.RESET}")
+                print(
+                    f"\n  {Colors.YELLOW}[T]️  ESTIMATED BUILD TIME: {est_seconds // 60}m{Colors.RESET}"
+                )
 
                 if dep_count > 20:
-                    print(f"\n  {Colors.RED}⚠️  Large number of dependencies!{Colors.RESET}")
-                    print(f"  {Colors.YELLOW}     Consider: --fast-build to skip obfuscation{Colors.RESET}")
+                    print(
+                        f"\n  {Colors.RED}[WARN]  Large number of dependencies!{Colors.RESET}"
+                    )
+                    print(
+                        f"  {Colors.YELLOW}     Consider: --fast-build to skip obfuscation{Colors.RESET}"
+                    )
 
                     # Check if running in interactive mode
                     if sys.stdin.isatty():
-                        print(f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}", end="")
+                        print(
+                            f"\n  {Colors.YELLOW}Continue with build? [Y/n]: {Colors.RESET}",
+                            end="",
+                        )
                         response = input().strip().lower()
-                        if response in ['n', 'no']:
+                        if response in ["n", "no"]:
                             print("  Build cancelled.")
                             return False
                     else:
                         # Non-interactive environment (CI/CD, scripts)
-                        print(f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}")
-                        print(f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}")
+                        print(
+                            f"\n  {Colors.YELLOW}Non-interactive mode detected - continuing build{Colors.RESET}"
+                        )
+                        print(
+                            f"  {Colors.DIM}Tip: Use --yes flag to auto-confirm in scripts{Colors.RESET}"
+                        )
             except json.JSONDecodeError as e:
-                print(f"  {Colors.YELLOW}⚠️  Warning: Could not parse package.json: {e}{Colors.RESET}")
-                print(f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}")
+                print(
+                    f"  {Colors.YELLOW}[WARN]  Warning: Could not parse package.json: {e}{Colors.RESET}"
+                )
+                print(
+                    f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}"
+                )
             except OSError as e:
-                print(f"  {Colors.YELLOW}⚠️  Warning: Could not read package.json: {e}{Colors.RESET}")
-                print(f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}")
+                print(
+                    f"  {Colors.YELLOW}[WARN]  Warning: Could not read package.json: {e}{Colors.RESET}"
+                )
+                print(
+                    f"  {Colors.YELLOW}     Skipping dependency analysis{Colors.RESET}"
+                )
 
         return True
 
     return True
 
 
-def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, custom_output: Optional[str] = None, build_dir: Optional[Path] = None) -> None:
+def calculate_file_sha256(file_path: Path) -> str:
+    """Calculate SHA-256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+
+def register_binary_hash_with_server(
+    project_id: str, binary_path: Path, config: Dict[str, Any]
+) -> bool:
+    """Register a compiled binary's hash with the server."""
+    if not binary_path.exists():
+        return False
+
+    binary_hash = calculate_file_sha256(binary_path)
+    binary_size = binary_path.stat().st_size
+    server_url = config.get("server_url", "http://localhost:8000")
+    api_key = config.get("api_key")
+
+    if not api_key:
+        # Don't warn for demo/local builds without api key
+        return False
+
+    try:
+        import requests
+
+        payload = {
+            "binary_hash": binary_hash,
+            "binary_size": binary_size,
+            "platform": config.get("platform", "windows"),
+            "build_id": config.get("build_id", ""),
+        }
+        headers = {"X-API-Key": api_key}
+        # Path: /api/v1/projects/{project_id}/binary-hash
+        resp = requests.post(
+            f"{server_url}/api/v1/projects/{project_id}/binary-hash",
+            json=payload,
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            print(f"   [SEC] Binary integrity hash registered: {binary_hash[:12]}...")
+            return True
+        else:
+            return False
+    except Exception:
+        return False
+
+
+def copy_output(
+    project_dir: Path,
+    config: Dict[str, Any],
+    license_key: str,
+    custom_output: Optional[str] = None,
+    build_dir: Optional[Path] = None,
+) -> None:
     """Copy compiled output to Desktop or custom path.
 
     Optimized output detection with minimal fallbacks for better reliability.
@@ -1375,13 +1878,20 @@ def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, cus
                 break
 
     if exe_path and exe_path.exists():
+        # Register binary hash for integrity checking (SEC2)
+        project_id = config.get("project_id")
+        if project_id:
+            register_binary_hash_with_server(project_id, exe_path, config)
+
         if custom_output:
             final_path = Path(custom_output)
             final_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             home = Path.home()
             desktop_paths = [home / "OneDrive" / "Desktop", home / "Desktop"]
-            output_dir = next((d for d in desktop_paths if d.exists()), Path.cwd() / "output")
+            output_dir = next(
+                (d for d in desktop_paths if d.exists()), Path.cwd() / "output"
+            )
             if not output_dir.exists():
                 output_dir.mkdir(exist_ok=True)
             final_path = output_dir / exe_name
@@ -1391,12 +1901,13 @@ def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, cus
 
         # Terminal bell for success
         import sys
-        sys.stdout.write('\a')
+
+        sys.stdout.write("\a")
         sys.stdout.flush()
 
         print()
         color_print(f"{'=' * 60}", Colors.GREEN)
-        color_print("  ✅ BUILD SUCCESSFUL!", Colors.GREEN)
+        color_print("  [OK] BUILD SUCCESSFUL!", Colors.GREEN)
         color_print(f"{'=' * 60}", Colors.GREEN)
         print(f"\n  Output: {Colors.CYAN}{final_path}{Colors.RESET}")
         print(f"  Size: {size_mb:.1f} MB")
@@ -1404,15 +1915,20 @@ def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, cus
             mode = "Runtime prompt" if license_key == "GENERIC_BUILD" else license_key
             print(f"  License: {mode}")
         print()
-        print(f"{Colors.DIM}Tip: Terminal bell played. Press Windows+V to view clipboard history{Colors.RESET}")
+        print(
+            f"{Colors.DIM}Tip: Terminal bell played. Press Windows+V to view clipboard history{Colors.RESET}"
+        )
         print()
     else:
         # Double bell for error
         import sys
-        sys.stdout.write('\a\a')
+
+        sys.stdout.write("\a\a")
         sys.stdout.flush()
 
-        color_print("⚠️  Compilation succeeded but output file not found.", Colors.YELLOW)
+        color_print(
+            "[WARN]  Compilation succeeded but output file not found.", Colors.YELLOW
+        )
         # Show debug info
         print("\n  Debug Info:")
         print(f"    Output name: {output_name}")
@@ -1422,7 +1938,9 @@ def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, cus
 
         # Show what exe files were found in immediate locations
         found_exes = []
-        search_dirs = [d for d in [build_dir, project_dir, project_dir.parent] if d and d.exists()]
+        search_dirs = [
+            d for d in [build_dir, project_dir, project_dir.parent] if d and d.exists()
+        ]
         for parent in search_dirs:
             for p in parent.glob("*.exe"):
                 found_exes.append(f"      {p.relative_to(parent)} (in {parent.name})")
@@ -1432,9 +1950,13 @@ def copy_output(project_dir: Path, config: Dict[str, Any], license_key: str, cus
             for exe in found_exes:
                 print(exe)
 
-            print(f"\n  {Colors.YELLOW}Suggestion:{Colors.RESET} The exe might have a different name.")
+            print(
+                f"\n  {Colors.YELLOW}Suggestion:{Colors.RESET} The exe might have a different name."
+            )
             print(f"  Try: Search manually in {project_dir}")
         else:
             print("    No .exe files found in expected locations")
 
-        print(f"\n  {Colors.YELLOW}This is a bug - please report with the above debug info!{Colors.RESET}")
+        print(
+            f"\n  {Colors.YELLOW}This is a bug - please report with the above debug info!{Colors.RESET}"
+        )

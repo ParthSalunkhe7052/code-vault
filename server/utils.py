@@ -239,6 +239,33 @@ def generate_license_key(prefix: str = "LIC") -> str:
     return "-".join(parts)
 
 
+def analyze_hwid(hwid: str) -> Optional[str]:
+    """Analyze HWID for suspicious patterns.
+    Returns a reason string if suspicious, None if clean.
+    """
+    if not hwid:
+        return "empty"
+    
+    if len(hwid) < 12:
+        return "too_short"
+    
+    # Check for all zeros or all identical characters
+    if len(set(hwid)) <= 1:
+        return "identical_chars"
+    
+    # Check for common generic/VM/test HWIDs
+    generic_patterns = [
+        "00000000", "ffffffff", "12345678",
+        "unknown", "test", "demo", "machine", "none", "null"
+    ]
+    hwid_lower = hwid.lower()
+    for pattern in generic_patterns:
+        if pattern in hwid_lower:
+            return "generic_pattern"
+            
+    return None
+
+
 def generate_api_key() -> str:
     """Generate an API key for user authentication."""
     return f"lw_{secrets.token_hex(24)}"
@@ -257,19 +284,18 @@ def hash_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
-def compute_signature(data: dict, secret: str) -> str:
-    """Compute HMAC-SHA256 signature for license validation response.
+def _build_signature_message(data: dict) -> str:
+    """Build the canonical pipe-delimited message for signing.
 
-    Includes all critical fields to prevent tempering:
+    Includes all critical fields to prevent tampering:
     status, expires_at, features, variables, client_nonce, server_nonce, timestamp, server_time.
     """
     import json
 
-    # Sort keys for consistent JSON representation of dicts/lists
     features_json = json.dumps(sorted(data.get("features", [])), sort_keys=True)
     variables_json = json.dumps(data.get("variables", {}), sort_keys=True)
 
-    message = "|".join(
+    return "|".join(
         str(v)
         for v in [
             data.get("status", ""),
@@ -282,7 +308,32 @@ def compute_signature(data: dict, secret: str) -> str:
             data.get("server_time", ""),
         ]
     )
+
+
+def compute_signature(data: dict, secret: str) -> str:
+    """Compute HMAC-SHA256 signature (legacy, for projects without Ed25519 keys)."""
+    message = _build_signature_message(data)
     return hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+def compute_ed25519_signature(data: dict, private_key_pem: str) -> str:
+    """Compute Ed25519 signature for license validation response.
+
+    Signs the same canonical message as HMAC but with Ed25519 asymmetric keys.
+    Returns a base64-encoded signature string.
+
+    The client only needs the PUBLIC key to verify — the private key never
+    leaves the server. This eliminates the "skeleton key" vulnerability where
+    an attacker could extract the shared secret from a compiled binary.
+    """
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    message = _build_signature_message(data)
+    private_key = load_pem_private_key(private_key_pem.encode(), password=None)
+    signature_bytes = private_key.sign(message.encode())
+    return base64.b64encode(signature_bytes).decode()
 
 
 def create_jwt_token(user_id: str, email: str) -> str:
@@ -371,15 +422,16 @@ def create_validation_response(
     features: Optional[List[str]] = None,
     variables: Optional[dict] = None,
     secret: Optional[str] = None,
+    private_key_pem: Optional[str] = None,
 ) -> LicenseValidationResponse:
-    """Create a signed license validation response."""
+    """Create a signed license validation response.
+
+    Uses Ed25519 asymmetric signing when private_key_pem is provided (new projects).
+    Falls back to HMAC-SHA256 with shared secret for legacy projects.
+    """
     server_nonce = generate_nonce()
     timestamp = int(time.time())
     server_time = timestamp  # Current server time for offline lease validation
-
-    # Use provided secret or fallback to global
-
-    active_secret = secret or SECRET_KEY
 
     response_data = {
         "status": status,
@@ -391,7 +443,22 @@ def create_validation_response(
         "timestamp": timestamp,
         "server_time": server_time,
     }
-    signature = compute_signature(response_data, active_secret)
+
+    # Prefer Ed25519 signing (new projects), fall back to HMAC (legacy)
+    if private_key_pem:
+        signature = compute_ed25519_signature(response_data, private_key_pem)
+    else:
+        # DEPRECATED: HMAC signing is a security risk — the shared secret can be
+        # extracted from compiled binaries, allowing attackers to forge responses.
+        # Projects should be migrated to Ed25519 via POST /api/v1/admin/migrate-signing.
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "[SECURITY] HMAC fallback used for validation response. "
+            "Migrate this project to Ed25519 signing for stronger security."
+        )
+        active_secret = secret or SECRET_KEY
+        signature = compute_signature(response_data, active_secret)
+
     return LicenseValidationResponse(
         status=status,
         message=message,

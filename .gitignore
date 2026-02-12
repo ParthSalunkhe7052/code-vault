@@ -88,3 +88,6 @@ _backup*/
 !frontend/src/**/*.d.ts
 
 .vercel
+nul
+cli/nul
+test_output/
