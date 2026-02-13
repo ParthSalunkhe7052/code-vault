@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { Shield, Timer, Unlock, Sparkles, Users, Key, ArrowRight, Info, CheckCircle, AlertTriangle } from 'lucide-react';
 
 /**
@@ -26,7 +26,7 @@ const BrandingNotice = memo(({ isPro, canRemoveBranding }) => {
                 <span className="font-medium">Free Tier Branding</span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
-                Your compiled applications will show a "Protected by CodeVault" splash screen on startup.
+                Your compiled applications will show a &quot;Protected by CodeVault&quot; splash screen on startup.
             </p>
             <a 
                 href="/pricing" 
@@ -50,7 +50,7 @@ const Step4License = memo(({
     protectionMode = 'generic',
     setProtectionMode,
     // Demo mode settings
-    demoMode = false,
+    demoMode: _demoMode = false,
     setDemoMode,
     demoDuration = 60,
     setDemoDuration,

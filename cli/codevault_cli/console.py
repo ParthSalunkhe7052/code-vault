@@ -5,7 +5,6 @@ This module provides a single, consistent interface for all terminal output,
 replacing the old dual terminal.py/terminal_rich.py system.
 """
 
-import sys
 from typing import Optional
 from rich.console import Console
 from rich.theme import Theme

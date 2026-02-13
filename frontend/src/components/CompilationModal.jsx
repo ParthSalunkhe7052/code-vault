@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { X, Terminal, CheckCircle, XCircle, Loader2, FolderOpen } from 'lucide-react';
 
 // Check if we're in Tauri
@@ -13,7 +13,6 @@ const CompilationModal = ({
     outputDir,
     licenseKey,
     showConsole = true,
-    onComplete,
     // New build options
     bundleRequirements = false,
     envValues = null,

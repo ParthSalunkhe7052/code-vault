@@ -2,14 +2,18 @@
 """Script to upgrade user to admin with enterprise tier."""
 
 import asyncio
+import os
 import asyncpg
 
-# Database URL from Heroku config
-DATABASE_URL = "postgresql://neondb_owner:npg_E7W1VshlrmqO@ep-solitary-lab-a15xogjj-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
-
+# Load from environment
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def upgrade_user():
     """Upgrade parth.ajit7052@gmail.com to admin with enterprise tier."""
+    if not DATABASE_URL:
+        print("ERROR: DATABASE_URL environment variable not set.")
+        return
+
     conn = await asyncpg.connect(DATABASE_URL)
 
     try:
@@ -59,7 +63,7 @@ async def upgrade_user():
         # Verify update
         updated_user = await conn.fetchrow(select_query, "parth.ajit7052@gmail.com")
 
-        print(f"\nUser upgraded successfully!")
+        print("\nUser upgraded successfully!")
         print(f"New role: {updated_user['role']}")
         if "tier" in column_names:
             print(f"New tier: {updated_user['tier']}")

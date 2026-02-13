@@ -4,7 +4,6 @@ Authentication commands for CodeVault CLI.
 Replaces the old commands/auth.py with modern Typer-based commands.
 """
 
-import sys
 import typer
 from typing import Optional
 from rich.panel import Panel

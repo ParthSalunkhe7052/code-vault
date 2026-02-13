@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Upload, FolderTree, Settings, Shield, Hammer, CheckCircle, Circle } from 'lucide-react';
 
 const WizardSidebar = memo(({ currentStep, completedSteps = [] }) => {

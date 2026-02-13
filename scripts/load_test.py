@@ -99,7 +99,7 @@ class LoadTester:
         print(f"Successful: {successes} ({100 * successes / len(results):.1f}%)")
         print(f"Failed: {failures} ({100 * failures / len(results):.1f}%)")
         print()
-        print(f"Response Times (seconds):")
+        print("Response Times (seconds):")
         print(f"  Min: {min(response_times):.3f}s")
         print(f"  Max: {max(response_times):.3f}s")
         print(f"  Mean: {statistics.mean(response_times):.3f}s")
@@ -127,7 +127,7 @@ class LoadTester:
                 error_codes[code] = error_codes.get(code, 0) + 1
 
         if error_codes:
-            print(f"\nError Breakdown:")
+            print("\nError Breakdown:")
             for code, count in error_codes.items():
                 print(f"  Status {code}: {count} requests")
 

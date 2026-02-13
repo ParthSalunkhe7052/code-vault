@@ -9,14 +9,14 @@ import secrets
 import hashlib
 import hmac
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional, Dict, Any
 import logging
 
 import httpx
 
 from database import get_db, release_db
-from utils import utc_now, sanitize_log_message
+from utils import utc_now
 from routes.webhook_routes import validate_webhook_url
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ class WebhookRetryQueue:
 
         conn = await get_db()
         try:
-            result = await conn.execute(
+            await conn.execute(
                 """
                 DELETE FROM webhook_retries 
                 WHERE status IN ('completed', 'failed') 
@@ -188,7 +188,7 @@ class WebhookRetryQueue:
             """,
                 days,
             )
-            logger.info(f"[WebhookRetry] Cleaned up old retry records")
+            logger.info("[WebhookRetry] Cleaned up old retry records")
         finally:
             await release_db(conn)
 

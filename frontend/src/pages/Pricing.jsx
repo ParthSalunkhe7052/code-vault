@@ -271,14 +271,14 @@ const Pricing = () => {
                         </div>
                         <div>
                             <h3 className="text-lg font-semibold text-white mb-2">What are Cloud Builds?</h3>
-                            <p className="text-slate-400 text-sm">Cloud builds compile your project on our servers so you don't need local compilers. Pro gets 25/month, Business gets 100/month.</p>
+                            <p className="text-slate-400 text-sm">Cloud builds compile your project on our servers so you don&apos;t need local compilers. Pro gets 25/month, Business gets 100/month.</p>
                         </div>
                         <div>
                             <h3 className="text-lg font-semibold text-white mb-2">Can I cancel anytime?</h3>
-                            <p className="text-slate-400 text-sm">Yes. You can cancel from your Polar billing portal at any time. You'll keep access until the end of your billing period.</p>
+                            <p className="text-slate-400 text-sm">Yes. You can cancel from your Polar billing portal at any time. You&apos;ll keep access until the end of your billing period.</p>
                         </div>
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">What does "build once, distribute unlimited" mean?</h3>
+                            <h3 className="text-lg font-semibold text-white mb-2">What does &quot;build once, distribute unlimited&quot; mean?</h3>
                             <p className="text-slate-400 text-sm">One cloud build produces a protected executable. You can then issue as many unique license keys as your plan allows to distribute it to different users.</p>
                         </div>
                     </div>

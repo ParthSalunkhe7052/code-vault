@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Inbox, Plus } from 'lucide-react';
 
 const EmptyState = ({

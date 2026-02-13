@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Folder, MoreVertical, Edit, Trash2, Shield, Cpu, Activity, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useProjectBuild } from '../../contexts/BuildContext';
 

@@ -10,7 +10,6 @@ import time
 import secrets
 import sys
 import os
-from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))

@@ -7,7 +7,7 @@ B29: Disk space pre-check
 import shutil
 import sys
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 def check_disk_space(path: Path, required_mb: int = 2048) -> Tuple[bool, int]:

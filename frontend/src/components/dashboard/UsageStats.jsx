@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Link } from 'react-router-dom';
 import { BarChart, Lock } from 'lucide-react';
 import { usePricing, TIERS } from '../../contexts/PricingContext';

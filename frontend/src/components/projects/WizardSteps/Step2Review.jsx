@@ -1,4 +1,4 @@
-import React, { useMemo, memo } from 'react';
+import { useMemo, memo } from 'react';
 import { FolderTree, FileCode, Package, CheckCircle, AlertCircle, FileText, Layers, GitBranch } from 'lucide-react';
 
 /**
@@ -75,7 +75,7 @@ const Step2Review = memo(({ fileTree, files = [], entryPoint, entryPointConfiden
             <div className="text-left shrink-0">
                 <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Structure Review</h2>
                 <p className="text-slate-400">
-                    We've analyzed your project. Please confirm the structure and entry point detection.
+                    We&apos;ve analyzed your project. Please confirm the structure and entry point detection.
                 </p>
             </div>
 

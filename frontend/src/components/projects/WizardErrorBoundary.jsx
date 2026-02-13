@@ -12,7 +12,7 @@ class WizardErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
         console.error('Wizard Error:', error, errorInfo);
     }
   }

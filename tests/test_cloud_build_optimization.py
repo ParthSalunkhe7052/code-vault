@@ -8,7 +8,6 @@ and other improvements made to the Cloud Build system.
 import pytest
 import yaml
 from pathlib import Path
-from datetime import datetime, timezone
 
 
 class TestCloudBuildYAMLStructure:

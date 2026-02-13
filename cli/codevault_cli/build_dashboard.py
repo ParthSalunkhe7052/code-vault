@@ -4,14 +4,12 @@ Live build dashboard for CodeVault CLI.
 Provides real-time build monitoring with Rich components.
 """
 
-import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from rich.live import Live
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
-from rich.table import Table
 from rich.console import Group
 from rich.text import Text
 

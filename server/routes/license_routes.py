@@ -163,8 +163,6 @@ async def validate_license(
             # Extract signing info safely (handles migration gaps and mocks)
             signing_secret = SECRET_KEY
             signing_private_key = None
-            license_mode = "static"
-            max_concurrent = 1
             project_id = None
             user_id = None
 
@@ -172,14 +170,14 @@ async def validate_license(
                 try:
                     signing_secret = license_row["signing_secret"] or SECRET_KEY
                     signing_private_key = license_row["signing_private_key"]
-                    license_mode = license_row.get("license_mode", "static") if hasattr(license_row, "get") else license_row["license_mode"]
-                    max_concurrent = license_row.get("max_concurrent", 1) if hasattr(license_row, "get") else license_row["max_concurrent"]
                     project_id = license_row["project_id"]
                     user_id = license_row["user_id"]
                 except (KeyError, TypeError):
                     # Fallback for old schema or incomplete mocks
-                    if not project_id and "project_id" in license_row: project_id = license_row["project_id"]
-                    if not user_id and "user_id" in license_row: user_id = license_row["user_id"]
+                    if not project_id and "project_id" in license_row:
+                        project_id = license_row["project_id"]
+                    if not user_id and "user_id" in license_row:
+                        user_id = license_row["user_id"]
 
             if not license_row:
                 result_status = "invalid"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Loader, Package, Terminal, Copy, Check } from 'lucide-react';
 import api from '../../services/api';
 
@@ -122,7 +122,7 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                 </div>
 
                 <div className="mt-3 text-xs text-slate-500">
-                    Don't have the CLI?{' '}
+                    Don&apos;t have the CLI?{' '}
                     <code className="bg-white/10 px-1.5 py-0.5 rounded">pip install codevault-cli</code>
                 </div>
             </div>
@@ -135,7 +135,7 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                     </div>
                     <div>
                         <h3 className="font-semibold text-white">Alternative: Download Bundle</h3>
-                        <p className="text-xs text-slate-400">Manual download if CLI isn't working</p>
+                        <p className="text-xs text-slate-400">Manual download if CLI isn&apos;t working</p>
                     </div>
                 </div>
 

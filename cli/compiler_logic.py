@@ -18,11 +18,9 @@ from url_utils import normalize_server_url
 from audit import log_build_failure, log_security_event, log_obfuscation_stats
 from compiler_constants import (
     JAVASCRIPT_OBFUSCATOR_VERSION,
-    PKG_VERSION,
     OBFUSCATE_TIMEOUT,
     PARALLEL_WORKERS,
     COMPILE_TIMEOUT,
-    PKG_TIMEOUT,
 )
 
 

@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Search, Filter, Download, Ban, Trash2, CheckCircle, XCircle, AlertTriangle, Key, Calendar, Monitor, Copy, Folder, ChevronLeft, ChevronRight } from 'lucide-react';
 import { licenses as licenseApi, projects as projectApi } from '../services/api';
 import { CreateLicenseModal, BindingsModal } from '../components/licenses';
 import { useToast } from '../components/Toast';
-import { usePricing } from '../contexts/PricingContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const Licenses = () => {
     const toast = useToast();
-    const { canCreateLicense } = usePricing();
+    
     const [licenses, setLicenses] = useState([]);
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);

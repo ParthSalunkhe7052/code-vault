@@ -2,8 +2,6 @@
 Project management commands for CodeVault CLI.
 """
 
-import sys
-import time
 import typer
 from typing import Optional, Tuple
 from datetime import datetime
@@ -14,20 +12,17 @@ from rich import box
 
 from codevault_cli.console import (
     get_console,
-    print_success,
     print_error,
     print_info,
     print_header,
 )
 from codevault_cli.interactive import (
     select_project,
-    select_license,
     select_build_mode,
     confirm_action,
 )
 from codevault_cli.build_dashboard import (
     BuildDashboard,
-    BuildProgressTracker,
     show_build_summary,
 )
 from codevault_cli.build_runner import (
@@ -137,7 +132,7 @@ def list() -> None:
                     (datetime.now(upload_dt.tzinfo) - upload_dt).total_seconds() / 3600
                 )
                 if hours_ago < 1:
-                    upload_status = f"✓ Ready (<1h ago)"
+                    upload_status = "✓ Ready (<1h ago)"
                 elif hours_ago < 24:
                     upload_status = f"✓ Ready ({hours_ago}h ago)"
                 else:

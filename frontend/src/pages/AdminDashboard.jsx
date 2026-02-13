@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Users, Database, Key, Activity, CheckCircle, RefreshCw,
@@ -56,8 +56,8 @@ const AdminDashboard = () => {
             setAnalytics(analyticsData);
             setRevenue(revenueData);
             setSystemHealth(healthData);
-        } catch (error) {
-            console.error('Failed to fetch admin data:', error);
+        } catch (_error) {
+            console.error('Failed to fetch admin data:', _error);
             showToast('Failed to load admin data. Please try again.', 'error');
         } finally {
             setLoading(false);
@@ -76,7 +76,7 @@ const AdminDashboard = () => {
             // Refresh users list
             const usersData = await admin.getUsers();
             setUsers(usersData);
-        } catch (error) {
+        } catch (_error) {
             showToast('Failed to update user plan', 'error');
         } finally {
             setActionLoading(null);
@@ -90,7 +90,7 @@ const AdminDashboard = () => {
             showToast(`User role updated to ${newRole}`, 'success');
             const usersData = await admin.getUsers();
             setUsers(usersData);
-        } catch (error) {
+        } catch (_error) {
             showToast('Failed to update user role', 'error');
         } finally {
             setActionLoading(null);

@@ -13,19 +13,15 @@ import time
 import shutil
 import subprocess
 import tempfile
-import select
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any, Callable
-from datetime import datetime, timedelta
-from rich.console import Console
-from rich.text import Text
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import existing compiler logic
 from compiler_logic import (
-    run_compiler as _run_compiler_legacy,
     inject_license_wrapper,
     inject_js_wrapper,
     validate_entry_file,
@@ -95,7 +91,7 @@ class BuildRunner:
                     nuitka_version = result.stdout.strip().split("\n")[0]
                     console.print(f"  [CHECK] Nuitka installed: {nuitka_version} ✓")
                 else:
-                    console.print(f"  [CHECK] Nuitka installed: ✗ (not found)")
+                    console.print("  [CHECK] Nuitka installed: ✗ (not found)")
                     checks_passed = False
             except Exception as e:
                 console.print(f"  [CHECK] Nuitka installed: ✗ ({e})")
@@ -296,7 +292,6 @@ class BuildRunner:
     ) -> Tuple[bool, Optional[Path]]:
         """Run Nuitka with real-time progress parsing."""
         import subprocess
-        import os
 
         entry_file = config.get("entry_file", "")
         output_name = (
@@ -653,7 +648,7 @@ class BuildRunner:
                 shutil.copy2(exe_file, dst)
                 return dst
 
-        raise FileNotFoundError(f"Could not find output executable")
+        raise FileNotFoundError("Could not find output executable")
 
     def _make_progress_callback(self, phase: str) -> Callable[[int], None]:
         """Create a progress callback for download operations."""
@@ -728,13 +723,6 @@ def run_remote_build(
     3. Download bundle from API (with retries)
     4. If download fails, prompt user to select source manually
     """
-    import requests
-    import zipfile
-    from codevault_cli.file_browser import (
-        prompt_for_source,
-        check_and_use_local_path,
-        extract_or_use_source,
-    )
 
     runner = BuildRunner(dashboard)
     project_name = config.get("project_name", project_id[:8])

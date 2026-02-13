@@ -1,11 +1,9 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBuild } from '../contexts/BuildContext';
-import { Loader2, CheckCircle, XCircle, X } from 'lucide-react';
 
 const GlobalBuildStatus = () => {
     const navigate = useNavigate();
-    const { builds, updateBuild } = useBuild();
+    const { builds } = useBuild();
 
     // Find the most recent active or recently finished build
     // Prioritize running builds

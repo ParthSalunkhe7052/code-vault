@@ -23,7 +23,6 @@ Usage:
     )
 """
 
-import json
 
 UNIFIED_LICENSE_WRAPPER_TEMPLATE = r'''# ============ CODEVAULT LICENSE PROTECTION ============
 # This code protects your application with license validation

@@ -8,14 +8,13 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel, validator
-from typing import Optional, List, Dict
+from typing import Optional, List
 import logging
 import os
 import json
 import hmac
 import hashlib
 import secrets
-import re
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
@@ -37,8 +36,6 @@ from routes.cloud_build_websocket import (
 )
 from routes.cloud_build_utils import (
     validate_safe_path,
-    verify_webhook_signature as verify_webhook_signature_util,
-    invalidate_cached_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,8 +176,6 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
             # Go up 2 levels to reach project root: server/routes -> server -> root
             project_root = Path(__file__).parent.parent.parent
             script_source = project_root / ".github" / "scripts" / "cloud_runner.py"
-            patcher_source = project_root / ".github" / "scripts" / "nuitka_patch.py"
-
             logger.info(f"[Upload] Looking for cloud_runner.py at: {script_source}")
 
             # If not found, try alternative paths
@@ -192,7 +187,6 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                     logger.info(f"[Upload] Found cloud_runner.py at cwd: {alt_source}")
 
             script_dest = source_dir / ".github" / "scripts" / "cloud_runner.py"
-            patcher_dest = source_dir / ".github" / "scripts" / "nuitka_patch.py"
 
             if script_source.exists():
                 script_dest.parent.mkdir(parents=True, exist_ok=True)

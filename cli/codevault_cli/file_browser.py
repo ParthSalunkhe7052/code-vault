@@ -4,10 +4,9 @@ File browser and selection utilities for CodeVault CLI.
 Provides both CLI prompts and GUI file dialogs for selecting source files/folders.
 """
 
-import sys
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List
-from codevault_cli.console import get_console, print_info, print_error
+from codevault_cli.console import get_console, print_error
 
 console = get_console()
 
@@ -354,7 +353,7 @@ def check_and_use_local_path(
     if not path.exists():
         return None
 
-    console.print(f"\n[OK] Found local project files:")
+    console.print("\n[OK] Found local project files:")
     console.print(f"   Location: {path}")
     console.print()
 
@@ -395,7 +394,7 @@ def extract_or_use_source(
 
         elif source_path.is_dir():
             # Copy folder to temp location
-            console.print(f"[INFO] Copying project folder...")
+            console.print("[INFO] Copying project folder...")
             dest_dir = temp_dir / "project"
 
             def ignore_patterns(path, names):

@@ -187,7 +187,6 @@ async def register_binary_hash(
             return True
 
         # Register with database
-        import asyncpg
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """

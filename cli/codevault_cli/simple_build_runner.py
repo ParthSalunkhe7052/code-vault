@@ -13,10 +13,9 @@ import time
 import shutil
 import subprocess
 import tempfile
-import select
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any, Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -28,7 +27,6 @@ from compiler_logic import (
     validate_entry_file,
     validate_output_name,
     PathTraversalError,
-    run_nuitka,
     _wait_for_output_with_timeout,
     _readline_from_process,
 )
@@ -38,7 +36,6 @@ from compiler_constants import COMPILE_TIMEOUT
 from codevault_cli.simple_build_display import (
     create_display,
     BuildPhase,
-    SimpleBuildDisplay,
 )
 from codevault_cli.build_logger import create_logger, get_logger
 
@@ -761,7 +758,7 @@ class SimpleBuildRunner:
                     self._log("INFO", f"Output: {project_folder}")
                     self._log("INFO", f"  {output_name}.exe  (main executable)")
                     self._log("INFO", f"  Run {output_name}.bat  (launcher)")
-                    self._log("INFO", f"  _runtime/  (dependencies)")
+                    self._log("INFO", "  _runtime/  (dependencies)")
                     return top_exe
                 else:
                     # No exe found, just copy dist as-is

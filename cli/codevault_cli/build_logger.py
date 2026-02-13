@@ -4,14 +4,13 @@ Debug logging system for CodeVault CLI builds.
 Provides comprehensive logging with automatic rotation (keeps last 5 builds).
 """
 
-import os
 import sys
 import json
 import time
 import traceback
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 from enum import Enum
 
 

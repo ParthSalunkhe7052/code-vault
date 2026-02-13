@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,6 @@ A realistic bot that customers might want to license and protect
 import discord
 from discord.ext import commands
 import asyncio
-import json
 from datetime import datetime, timedelta
 import os
 

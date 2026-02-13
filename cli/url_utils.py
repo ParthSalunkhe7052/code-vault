@@ -94,4 +94,6 @@ def get_api_url(server_url: str, endpoint: str = "") -> str:
 
 # Backward compatibility aliases
 normalize_api_url = normalize_server_url
-strip_api_suffix = lambda url: normalize_server_url(url, ensure_no_api_suffix=True)
+
+def strip_api_suffix(url):
+    return normalize_server_url(url, ensure_no_api_suffix=True)

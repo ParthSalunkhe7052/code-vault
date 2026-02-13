@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { CheckCircle, XCircle, AlertTriangle, Globe } from 'lucide-react';
 
 const ActivityItem = ({ activity }) => {
