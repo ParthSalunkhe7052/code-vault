@@ -1,5 +1,4 @@
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -9,8 +8,7 @@ sys.path.append(str(Path(__file__).parent.parent / "server"))
 
 from config import (
     GITHUB_TOKEN, GITHUB_REPO, BUILD_CALLBACK_SECRET,
-    R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET_NAME,
-    DATABASE_URL
+    R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT
 )
 from database import init_database, close_database, get_db, release_db
 
@@ -20,12 +18,18 @@ async def check_setup():
     # 1. Check Environment Variables
     print("1. Checking Environment Variables...")
     missing = []
-    if not GITHUB_TOKEN: missing.append("GITHUB_TOKEN")
-    if not GITHUB_REPO: missing.append("GITHUB_REPO")
-    if not BUILD_CALLBACK_SECRET: missing.append("BUILD_CALLBACK_SECRET")
-    if not R2_ACCESS_KEY_ID: missing.append("R2_ACCESS_KEY_ID")
-    if not R2_SECRET_ACCESS_KEY: missing.append("R2_SECRET_ACCESS_KEY")
-    if not R2_ENDPOINT: missing.append("R2_ENDPOINT")
+    if not GITHUB_TOKEN:
+        missing.append("GITHUB_TOKEN")
+    if not GITHUB_REPO:
+        missing.append("GITHUB_REPO")
+    if not BUILD_CALLBACK_SECRET:
+        missing.append("BUILD_CALLBACK_SECRET")
+    if not R2_ACCESS_KEY_ID:
+        missing.append("R2_ACCESS_KEY_ID")
+    if not R2_SECRET_ACCESS_KEY:
+        missing.append("R2_SECRET_ACCESS_KEY")
+    if not R2_ENDPOINT:
+        missing.append("R2_ENDPOINT")
     
     if missing:
         print(f"❌ Missing environment variables: {', '.join(missing)}")

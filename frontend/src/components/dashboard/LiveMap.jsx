@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { Globe, MapPin, RefreshCw } from 'lucide-react';
 import { stats } from '../../services/api';

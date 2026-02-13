@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X } from 'lucide-react';
 import api from '../services/api';
 import { useProjectBuild } from '../contexts/BuildContext';
@@ -200,8 +200,7 @@ export function CloudBuildButton({
             download_key,  // Backward compatibility
             error: buildError,
             artifacts,  // Also check artifacts for error/download
-            stage: buildStage,
-            synced
+            stage: buildStage
           } = response.data;
           
           setProgress(buildProgress || 0);

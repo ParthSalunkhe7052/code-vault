@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader, Hammer, FolderOpen, CheckCircle, XCircle, AlertCircle, Download, Settings, ChevronDown, ChevronUp, FileText, Lock } from 'lucide-react';
 import { auth } from '../../services/api';
 import { useToast } from '../Toast';
@@ -92,21 +92,21 @@ const DirectBuildSection = ({
                 try {
                     const nodeStatus = await invoke('check_node_installed');
                     nodeVersion = nodeStatus.installed ? nodeStatus.version : null;
-                } catch (e) {
+                } catch (_e) {
                     nodeVersion = null;
                 }
 
                 try {
                     const npmStatus = await invoke('check_npm_installed');
                     npmVersion = npmStatus.installed ? npmStatus.version : null;
-                } catch (e) {
+                } catch (_e) {
                     npmVersion = null;
                 }
 
                 try {
                     const pkgStatus = await invoke('check_pkg_installed');
                     pkgVersion = pkgStatus.installed ? (pkgStatus.version || 'via npx') : null;
-                } catch (e) {
+                } catch (_e) {
                     pkgVersion = null;
                 }
 
@@ -127,11 +127,11 @@ const DirectBuildSection = ({
                 try {
                     nuitkaVersion = await invoke('get_nuitka_version');
                     pythonOk = true;
-                } catch (e) {
+                } catch (_e) {
                     try {
                         await invoke('check_nuitka_installed');
                         pythonOk = true;
-                    } catch (e2) {
+                    } catch (_e2) {
                         pythonOk = false;
                     }
                 }
@@ -179,9 +179,9 @@ const DirectBuildSection = ({
                 try {
                     const envVals = await invoke('read_env_file_values', { projectPath: path });
                     setEnvValues(envVals);
-                } catch (e) {
+                } catch (_e) {
                     if (import.meta.env.DEV) {
-                        console.error('Failed to read .env:', e);
+                        console.error('Failed to read .env:', _e);
                     }
                 }
             }
@@ -365,7 +365,7 @@ const DirectBuildSection = ({
                 {hasUploadedFiles && !downloadedPath && (
                     <div className="mb-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                         <p className="text-xs text-blue-300">
-                            <strong>Tip:</strong> Use "Download & Prepare for Build" above to get your server files, or select a local folder here.
+                            <strong>Tip:</strong> Use &quot;Download &amp; Prepare for Build&quot; above to get your server files, or select a local folder here.
                         </p>
                     </div>
                 )}
@@ -578,7 +578,7 @@ const DirectBuildSection = ({
                                 onChange={(e) => setFrontendHandling(e.target.value)}
                                 className="input w-full text-sm py-2"
                             >
-                                <option value="skip">Skip - Don't include frontend</option>
+                                <option value="skip">Skip - Don&apos;t include frontend</option>
                                 <option value="bundle">Bundle - Include as static files in backend</option>
                                 <option value="separate">Separate - Create launcher for both (recommended)</option>
                             </select>

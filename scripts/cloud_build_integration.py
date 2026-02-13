@@ -7,7 +7,6 @@ import json
 import os
 import re
 import yaml
-import base64
 from typing import Dict, Any, Optional
 from google.cloud.devtools import cloudbuild_v1
 from google.oauth2 import service_account
@@ -97,9 +96,9 @@ class CloudBuildClient:
         source_url = build_config.get("source_url", "")
         config = build_config.get("config", {})
         callback_url = build_config.get("callback_url", "")
-        plan_tier = build_config.get("plan_tier", "free")
-        compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
-        fast_build = str(build_config.get("fast_build", False)).lower()
+        _plan_tier = build_config.get("plan_tier", "free")
+        _compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
+        _fast_build = str(build_config.get("fast_build", False)).lower()
 
         # Create build object
         build = cloudbuild_v1.Build()
@@ -312,7 +311,7 @@ def example_usage():
         # Trigger the build
         result = cloud_build.trigger_build(build_config)
 
-        print(f"Build started!")
+        print("Build started!")
         print(f"  Build ID: {result['build_id']}")
         print(f"  Status: {result['status']}")
         print(f"  Logs: {result['logs_url']}")

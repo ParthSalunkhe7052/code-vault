@@ -6,17 +6,13 @@ Standalone script to execute optimized Nuitka builds in CI/CD environments.
 
 import os
 import sys
-import shutil
-import tempfile
 import logging
 import multiprocessing
 import subprocess
 import argparse
 import json
 import re
-import time
 from pathlib import Path
-from typing import Optional, List
 
 # Configure logging
 logging.basicConfig(

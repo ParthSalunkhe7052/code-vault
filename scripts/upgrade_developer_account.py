@@ -76,7 +76,7 @@ async def upgrade_developer():
                 """,
                 user_id
             )
-            print(f"[OK] Updated subscription to enterprise (lifetime)")
+            print("[OK] Updated subscription to enterprise (lifetime)")
         else:
             # Create new enterprise subscription
             import uuid
@@ -88,7 +88,7 @@ async def upgrade_developer():
                 """,
                 sub_id, user_id
             )
-            print(f"[OK] Created enterprise subscription (lifetime)")
+            print("[OK] Created enterprise subscription (lifetime)")
         
         # 4. Verify changes
         updated_user = await conn.fetchrow(

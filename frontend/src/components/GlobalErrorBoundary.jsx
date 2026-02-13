@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
@@ -24,7 +25,7 @@ class GlobalErrorBoundary extends React.Component {
             <AlertTriangle size={48} className="text-red-400 mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
             <p className="text-slate-400 mb-6">
-              We're sorry for the inconvenience. Please try refreshing the page.
+              We&apos;re sorry for the inconvenience. Please try refreshing the page.
             </p>
             <button
               onClick={() => window.location.reload()}

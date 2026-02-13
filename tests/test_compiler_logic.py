@@ -8,10 +8,9 @@ output detection, and build configuration handling.
 import pytest
 import sys
 import os
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cli"))
 

@@ -3,14 +3,13 @@ import { Plus, Folder } from 'lucide-react';
 import { projects as projectApi, compile as compileApi, licenses as licensesApi } from '../services/api';
 import { ProjectCard, CreateProjectModal, ProjectWizard } from '../components/projects';
 import { useToast } from '../components/Toast';
-import { usePricing } from '../contexts/PricingContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import Spinner from '../components/Spinner';
 
 const Projects = () => {
     const toast = useToast();
-    const { canCreateProject } = usePricing();
+    
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);

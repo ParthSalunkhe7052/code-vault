@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
@@ -16,7 +17,7 @@ class ErrorBoundary extends React.Component {
         };
     }
 
-    static getDerivedStateFromError(error) {
+    static getDerivedStateFromError(_error) {
         // Update state so the next render shows the fallback UI
         return { hasError: true };
     }
@@ -60,7 +61,7 @@ class ErrorBoundary extends React.Component {
                             Something went wrong
                         </h1>
                         <p className="text-slate-400 mb-6">
-                            An unexpected error occurred. Don't worry, your data is safe.
+                            An unexpected error occurred. Don&apos;t worry, your data is safe.
                             Please try refreshing the page or go back to the dashboard.
                         </p>
 

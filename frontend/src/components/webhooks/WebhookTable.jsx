@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Webhook, Plus, CheckCircle2, AlertTriangle } from 'lucide-react';
 import WebhookRow from './WebhookRow';
 

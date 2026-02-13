@@ -64,6 +64,15 @@ export const POLAR_PRODUCTS: Record<string, string> = {
   [TIERS.BUSINESS]: 'd5781651-cff8-44ed-8a3c-7cf42a6512f5',
 };
 
+// Default free tier limits
+const FREE_TIER_LIMITS: TierLimits = {
+  maxProjects: 1,
+  maxLicenses: 50,
+  buildCredits: 0,
+  canCloudBuild: false,
+  offlineLease: false
+};
+
 // Default limits (fallback only - real limits come from backend)
 const DEFAULT_LIMITS: Record<string, TierLimits> = {
   [TIERS.FREE]: {
@@ -111,7 +120,7 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!authUser) {
         // No user = reset to free defaults
         setTier(TIERS.FREE);
-        setLimits(DEFAULT_LIMITS[TIERS.FREE]);
+        setLimits(FREE_TIER_LIMITS);
         setBuildCredits(0);
         setLoading(false);
         return;

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Monitor, Terminal, Lock, Check, ExternalLink } from 'lucide-react';
 
 /**
@@ -192,7 +192,7 @@ const PlatformSelector = ({
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
           <p className="text-sm text-blue-300">
             <strong>Multi-platform build:</strong> Your project will be compiled separately for each platform. 
-            You'll get individual download links when complete.
+            You&apos;ll get individual download links when complete.
           </p>
         </div>
       )}

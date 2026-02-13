@@ -327,7 +327,6 @@ def compute_ed25519_signature(data: dict, private_key_pem: str) -> str:
     an attacker could extract the shared secret from a compiled binary.
     """
     import base64
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
     message = _build_signature_message(data)

@@ -5,7 +5,6 @@ This is the new entry point that provides a modern, rich CLI experience.
 """
 
 import typer
-from rich.markdown import Markdown
 from codevault_cli import __version__, __description__
 from codevault_cli.console import get_console, print_welcome_banner
 from codevault_cli.commands import auth, projects, system

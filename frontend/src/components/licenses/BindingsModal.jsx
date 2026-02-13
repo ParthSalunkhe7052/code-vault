@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Monitor, Cpu, Globe, Clock, Trash2, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 import Modal from '../Modal';
 

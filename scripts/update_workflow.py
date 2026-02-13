@@ -1,4 +1,3 @@
-import os
 
 file_path = '.github/workflows/cloud-compile.yml'
 

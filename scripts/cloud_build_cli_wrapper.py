@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import shutil
-import base64
 from typing import Dict, Any
 
 
@@ -71,9 +70,9 @@ class CloudBuildClient:
         source_url = build_config.get("source_url", "")
         config = build_config.get("config", {})
         callback_url = build_config.get("callback_url", "")
-        plan_tier = build_config.get("plan_tier", "free")
-        compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
-        fast_build = str(build_config.get("fast_build", False)).lower()
+        _plan_tier = build_config.get("plan_tier", "free")
+        _compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
+        _fast_build = str(build_config.get("fast_build", False)).lower()
 
         # Upload config to GCS to avoid 8KB substitution limit
         # Cloud Build has an 8KB limit on substitution variable values
@@ -86,7 +85,7 @@ class CloudBuildClient:
             json.dumps(config), content_type="application/json"
         )
         config_url = f"gs://codevault-builds/builds/{build_id}/config.json"
-        callback_secret = build_config.get("callback_secret", "")
+        _callback_secret = build_config.get("callback_secret", "")
 
         substitutions = [
             f"_BUILD_ID={build_id}",
@@ -96,7 +95,7 @@ class CloudBuildClient:
             f"_SOURCE_URL={source_url}",
             f"_CONFIG_URL={config_url}",
             f"_CALLBACK_URL={callback_url}",
-            f"_CALLBACK_SECRET=",  # Provided via Secret Manager in YAML, but needs default for API
+            "_CALLBACK_SECRET=",  # Provided via Secret Manager in YAML, but needs default for API
             f"_OUTPUT_NAME={config.get('output_name', 'app')}",
         ]
 

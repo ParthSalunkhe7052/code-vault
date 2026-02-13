@@ -1,8 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, XCircle, Loader2, Download, AlertTriangle, ExternalLink } from 'lucide-react';
-
-// Check if we're in Tauri
-const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
 /**
  * PrerequisitesCheck - Modal component to verify build requirements
@@ -39,7 +36,7 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
                         ...prev,
                         runtime: { loading: false, ...nodeResult }
                     }));
-                } catch (e) {
+                } catch (_e) {
                     // Node.js check failed - mark as not installed
                     setStatus(prev => ({
                         ...prev,
@@ -54,7 +51,7 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
                         ...prev,
                         compiler: { loading: false, ...pkgResult }
                     }));
-                } catch (e) {
+                } catch (_e) {
                     // Fallback check
                     setStatus(prev => ({
                         ...prev,
@@ -84,7 +81,7 @@ const PrerequisitesCheck = ({ isOpen, onReady, onDismiss, language = 'python' })
                     ...prev,
                     nsis: { loading: false, ...nsisResult }
                 }));
-            } catch (e) {
+            } catch (_e) {
                 // NSIS check failed - mark as not installed
                 setStatus(prev => ({
                     ...prev,

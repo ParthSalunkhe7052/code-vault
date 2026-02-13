@@ -1,11 +1,9 @@
 import pytest
 import time
-import secrets
-import json
 import sys
 import os
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 # Ensure server is in path (like conftest does)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))

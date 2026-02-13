@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 // Base Skeleton Component
 const Skeleton = ({ className = '' }) => (

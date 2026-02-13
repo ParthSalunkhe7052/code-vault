@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Cpu, Globe } from 'lucide-react';
 
 const MachinesList = ({ machines }) => {

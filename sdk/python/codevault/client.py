@@ -5,9 +5,8 @@ import urllib.request
 import threading
 import base64
 import platform
-import os
 import atexit
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 try:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey

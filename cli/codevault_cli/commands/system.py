@@ -12,9 +12,6 @@ from rich.tree import Tree
 
 from codevault_cli.console import (
     get_console,
-    print_success,
-    print_error,
-    print_warning,
     print_info,
     print_header,
 )

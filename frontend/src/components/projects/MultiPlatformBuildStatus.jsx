@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, RefreshCw, X, RotateCcw } from 'lucide-react';
 import { cloudBuild } from '../../services/api';
 

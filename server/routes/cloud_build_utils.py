@@ -4,7 +4,6 @@ CodeVault Cloud Build - Utility Functions
 Common utility functions for the cloud build system.
 """
 
-import json
 import os
 import re
 import hmac
@@ -14,8 +13,6 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException
-from database import get_db, release_db
-from config import GCP_PROJECT_ID
 from storage_service import storage_service
 
 logger = logging.getLogger(__name__)
@@ -86,7 +83,6 @@ def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> boo
 
 async def invalidate_cached_source(project_id: str) -> None:
     """Invalidate cached source for a project when files are uploaded/changed."""
-    from storage_service import storage_service
 
     if not storage_service.is_cloud_enabled() or not storage_service.client:
         return

@@ -8,8 +8,7 @@ Uses simple text output by default, with optional Rich dashboard.
 import time
 import sys
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import timedelta
 from enum import Enum
 
 

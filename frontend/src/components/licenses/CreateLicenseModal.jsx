@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import Modal from '../Modal';
@@ -33,7 +32,7 @@ const CreateLicenseModal = ({
                     </div>
                     <h3 className="text-xl font-bold text-white mb-2">Unlock Unlimited Licenses</h3>
                     <p className="text-slate-400 mb-6">
-                        You've reached the limit of {licenseCount} license(s) on the {tier} plan.
+                        You&apos;ve reached the limit of {licenseCount} license(s) on the {tier} plan.
                         Upgrade to Pro to create more licenses.
                     </p>
                     <div className="flex gap-4 w-full">

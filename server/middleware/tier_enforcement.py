@@ -3,7 +3,7 @@ Tier enforcement middleware for CodeVault API.
 Checks usage limits and subscription status (MON5).
 """
 
-from fastapi import Request, HTTPException, Depends
+from fastapi import HTTPException, Depends
 from utils import get_current_user, get_user_tier_limits
 from database import get_db, release_db
 

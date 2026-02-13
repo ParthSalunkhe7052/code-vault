@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, memo } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap, Box, Layers, Code, Cpu } from 'lucide-react';
 
 // Check if we're in Tauri

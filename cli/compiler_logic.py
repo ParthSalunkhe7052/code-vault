@@ -14,14 +14,13 @@ from typing import Tuple, Optional, Dict, Any
 from terminal import Colors, color_print, print_progress_bar
 from generators.python_generator import get_python_wrapper
 from generators.nodejs_generator import get_nodejs_wrapper_inline
+from url_utils import normalize_server_url
 from audit import log_build_failure, log_security_event, log_obfuscation_stats
 from compiler_constants import (
     JAVASCRIPT_OBFUSCATOR_VERSION,
-    PKG_VERSION,
     OBFUSCATE_TIMEOUT,
     PARALLEL_WORKERS,
     COMPILE_TIMEOUT,
-    PKG_TIMEOUT,
 )
 
 
@@ -373,6 +372,7 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
     try:
         original_code = entry_file.read_text(encoding="utf-8")
         server_url = config.get("server_url", "http://localhost:8000")
+        server_url = normalize_server_url(server_url)
         lease_enabled = config.get("lease_enabled", False)
         # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
@@ -432,6 +432,7 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
     try:
         original_code = entry_file.read_text(encoding="utf-8")
         server_url = config.get("server_url", "http://localhost:8000")
+        server_url = normalize_server_url(server_url)
         lease_enabled = config.get("lease_enabled", False)
         # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
