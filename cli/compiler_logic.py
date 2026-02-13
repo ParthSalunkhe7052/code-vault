@@ -526,8 +526,8 @@ def run_js_obfuscation(project_dir: Path) -> bool:
 
     print(f"   Obfuscating {len(js_files)} JS files in parallel...")
 
-    # Obfuscation settings: AGGRESSIVE profile (SEC5)
-    # Optimized for security over build speed
+    # Obfuscation settings: BALANCED profile (SEC5)
+    # Optimized for security with reasonable build time
     obfuscate_args = [
         "--compact",
         "true",
@@ -535,31 +535,31 @@ def run_js_obfuscation(project_dir: Path) -> bool:
         "true",
         "--rename-properties",
         "false",  # Can break code, keep off
-        # String protection (aggressive)
+        # String protection (balanced)
         "--string-array",
         "true",
         "--string-array-threshold",
         "1.0",
         "--string-array-encoding",
-        "rc4",
+        "base64",  # Changed from "rc4" - rc4 is weak, base64 is sufficient
         "--string-array-shuffle",
         "true",
         # Identifier obfuscation
         "--identifier-names-generator",
         "hexadecimal",
-        # Advanced protection (Aggressive)
+        # Advanced protection (balanced)
         "--control-flow-flattening",
         "true",
         "--control-flow-flattening-threshold",
-        "0.75",
+        "0.5",  # Was 0.75 - reduced for better performance
         "--dead-code-injection",
         "true",
         "--dead-code-injection-threshold",
-        "0.4",
+        "0.2",  # Was 0.4 - reduced for better performance
         "--self-defending",
         "true",
         "--split-strings",
-        "true",
+        "false",  # Disabled for better performance
         "--split-strings-chunk-length",
         "10",
         # Preserve require/import statements

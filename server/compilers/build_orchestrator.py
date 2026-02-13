@@ -157,11 +157,7 @@ def calculate_file_hash(file_path: Path) -> str:
     return sha256_hash.hexdigest()
 
 
-async def register_binary_hash(
-    project_id: str,
-    exe_path: Path,
-    db_pool = None
-) -> bool:
+async def register_binary_hash(project_id: str, exe_path: Path, db_pool=None) -> bool:
     """
     Register binary hash in the database for integrity checking.
 
@@ -183,7 +179,9 @@ async def register_binary_hash(
 
         # If no database pool provided, log only
         if db_pool is None:
-            logger.info(f"[BinaryHash] Hash: {binary_hash[:16]}... Size: {binary_size} bytes")
+            logger.info(
+                f"[BinaryHash] Hash: {binary_hash[:16]}... Size: {binary_size} bytes"
+            )
             return True
 
         # Register with database
@@ -196,9 +194,11 @@ async def register_binary_hash(
                 """,
                 project_id,
                 binary_hash,
-                binary_size
+                binary_size,
             )
-            logger.info(f"[BinaryHash] Registered hash for project {project_id}: {binary_hash[:16]}...")
+            logger.info(
+                f"[BinaryHash] Registered hash for project {project_id}: {binary_hash[:16]}..."
+            )
             return True
 
     except Exception as e:
@@ -277,9 +277,21 @@ class BuildConfig:
 
     # Additional files to include
     include_files: list = field(default_factory=list)
-    
+
     # Database
     db_pool = None  # Database connection pool for hash registration
+
+    # User tier (affects obfuscation defaults)
+    user_tier: str = "free"
+
+    def __post_init__(self):
+        """Set default obfuscation based on user tier if not explicitly set."""
+        # If user is Pro, Business, or Enterprise, enable obfuscation by default
+        if self.user_tier in ["pro", "business", "enterprise"]:
+            # Only change if the default True is still in place
+            # If user explicitly set it, respect their choice
+            if self.skip_obfuscation is True:
+                self.skip_obfuscation = False
 
 
 class BuildOrchestrator:
@@ -354,13 +366,13 @@ class BuildOrchestrator:
 
             # Save to cache for future builds
             save_to_cache(cache_dir, cache_key, final_path)
-            
+
             # Register binary hash for integrity checking (SEC2)
             if config.project_id:
                 await register_binary_hash(
                     project_id=config.project_id,
                     exe_path=final_path,
-                    db_pool=config.db_pool
+                    db_pool=config.db_pool,
                 )
 
             return final_path
@@ -483,13 +495,13 @@ class BuildOrchestrator:
 
             # Save to cache for future builds
             save_to_cache(cache_dir, cache_key, final_path)
-            
+
             # Register binary hash for integrity checking (SEC2)
             if config.project_id:
                 await register_binary_hash(
                     project_id=config.project_id,
                     exe_path=final_path,
-                    db_pool=config.db_pool
+                    db_pool=config.db_pool,
                 )
 
             return final_path

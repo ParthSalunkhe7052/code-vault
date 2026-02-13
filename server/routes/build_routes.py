@@ -485,3 +485,175 @@ async def get_build_bundle(
         raise HTTPException(status_code=400, detail="Invalid project ID format")
     finally:
         await release_db(conn)
+
+
+# =============================================================================
+# Build Protection Report Endpoints
+# =============================================================================
+
+
+class ProtectionReportData(BaseModel):
+    """Data for generating a protection report"""
+
+    build_id: str
+    project_id: Optional[str] = None
+    protection_level: str  # 'basic', 'standard', 'advanced', 'enterprise'
+    protection_layers: list = Field(default_factory=list)
+    estimated_reversal_difficulty: str  # 'easy', 'moderate', 'hard', 'very_hard'
+    obfuscation_enabled: bool = False
+    ed25519_signatures: bool = False
+    binary_hash_verification: bool = False
+    hwid_binding_enabled: bool = False
+    offline_lease_enabled: bool = False
+    heartbeat_enabled: bool = False
+    license_type: str  # 'fixed', 'generic', 'demo', 'floating'
+    license_tier: str  # 'free', 'pro', 'business', 'enterprise'
+
+
+@router.post("/build/protection-report")
+async def create_protection_report(
+    data: ProtectionReportData,
+    user: dict = Depends(get_current_user),
+):
+    """Generate and store a build protection report."""
+    conn = await get_db()
+    try:
+        # Build the report data
+        report_data = {
+            "summary": {
+                "protection_level": data.protection_level,
+                "difficulty": data.estimated_reversal_difficulty,
+                "total_layers": len(data.protection_layers),
+            },
+            "layers": data.protection_layers,
+            "security_features": {
+                "obfuscation": data.obfuscation_enabled,
+                "ed25519_signatures": data.ed25519_signatures,
+                "binary_hash_verification": data.binary_hash_verification,
+                "hwid_binding": data.hwid_binding_enabled,
+                "offline_lease": data.offline_lease_enabled,
+                "heartbeat": data.heartbeat_enabled,
+            },
+            "license_info": {"type": data.license_type, "tier": data.license_tier},
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+        }
+
+        # Insert into database
+        await conn.execute(
+            """
+            INSERT INTO build_protection_reports (
+                build_id, project_id, user_id, protection_level, protection_layers,
+                estimated_reversal_difficulty, obfuscation_enabled, ed25519_signatures,
+                binary_hash_verification, hwid_binding_enabled, offline_lease_enabled,
+                heartbeat_enabled, license_type, license_tier, report_data
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            """,
+            data.build_id,
+            data.project_id,
+            user["id"],
+            data.protection_level,
+            json.dumps(data.protection_layers),
+            data.estimated_reversal_difficulty,
+            data.obfuscation_enabled,
+            data.ed25519_signatures,
+            data.binary_hash_verification,
+            data.hwid_binding_enabled,
+            data.offline_lease_enabled,
+            data.heartbeat_enabled,
+            data.license_type,
+            data.license_tier,
+            json.dumps(report_data),
+        )
+
+        logger.info(f"[Protection Report] Created report for build {data.build_id}")
+        return {"status": "success", "build_id": data.build_id}
+    finally:
+        await release_db(conn)
+
+
+@router.get("/build/protection-report/{build_id}")
+async def get_protection_report(
+    build_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Retrieve a build protection report."""
+    conn = await get_db()
+    try:
+        report = await conn.fetchrow(
+            """
+            SELECT * FROM build_protection_reports 
+            WHERE build_id = $1 AND user_id = $2
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            build_id,
+            user["id"],
+        )
+
+        if not report:
+            raise HTTPException(status_code=404, detail="Protection report not found")
+
+        return {
+            "build_id": report["build_id"],
+            "project_id": report["project_id"],
+            "created_at": report["created_at"],
+            "protection_level": report["protection_level"],
+            "estimated_reversal_difficulty": report["estimated_reversal_difficulty"],
+            "protection_layers": report["protection_layers"],
+            "security_features": {
+                "obfuscation": report["obfuscation_enabled"],
+                "ed25519_signatures": report["ed25519_signatures"],
+                "binary_hash_verification": report["binary_hash_verification"],
+                "hwid_binding": report["hwid_binding_enabled"],
+                "offline_lease": report["offline_lease_enabled"],
+                "heartbeat": report["heartbeat_enabled"],
+            },
+            "license_info": {
+                "type": report["license_type"],
+                "tier": report["license_tier"],
+            },
+            "report_data": report["report_data"],
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.get("/build/protection-reports")
+async def list_protection_reports(
+    project_id: Optional[str] = None,
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """List protection reports for the user."""
+    conn = await get_db()
+    try:
+        if project_id:
+            reports = await conn.fetch(
+                """
+                SELECT build_id, project_id, created_at, protection_level, 
+                       estimated_reversal_difficulty, license_tier
+                FROM build_protection_reports 
+                WHERE user_id = $1 AND project_id = $2
+                ORDER BY created_at DESC
+                LIMIT $3
+                """,
+                user["id"],
+                project_id,
+                limit,
+            )
+        else:
+            reports = await conn.fetch(
+                """
+                SELECT build_id, project_id, created_at, protection_level, 
+                       estimated_reversal_difficulty, license_tier
+                FROM build_protection_reports 
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                user["id"],
+                limit,
+            )
+
+        return {"reports": [dict(r) for r in reports]}
+    finally:
+        await release_db(conn)

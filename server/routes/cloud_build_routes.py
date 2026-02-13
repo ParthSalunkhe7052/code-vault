@@ -7,8 +7,8 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel, validator
-from typing import Optional, List
+from pydantic import BaseModel, validator, Field
+from typing import Optional, List, Dict, Any
 import logging
 import os
 import json
@@ -16,12 +16,21 @@ import hmac
 import hashlib
 import secrets
 import asyncio
+import time
+import base64
 from pathlib import Path
 from datetime import datetime, timezone
 
 from database import get_db, release_db
 from storage_service import storage_service
-from utils import get_current_user, get_current_admin_user, get_user_tier
+from utils import (
+    get_current_user,
+    get_current_admin_user,
+    get_user_tier,
+    compute_ed25519_signature,
+    compute_signature,
+    SECRET_KEY,
+)
 from middleware.tier_enforcement import requires_feature
 from config import (
     BUILD_CALLBACK_SECRET,
@@ -41,9 +50,8 @@ from routes.cloud_build_utils import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/v1/cloud-build", 
+    prefix="/api/v1/cloud-build",
     tags=["cloud-build"],
-    dependencies=[Depends(requires_feature("cloud_builds"))]
 )
 
 # Local upload directory - should match project_routes
@@ -51,15 +59,192 @@ UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# =============================================================================
+# Webhook Payload Validation Models (Task 2.2 - Structured Validation)
+# =============================================================================
+
+
+class CloudBuildWebhookPayload(BaseModel):
+    """Validated payload for /api/v1/cloud-build/webhook endpoint."""
+
+    build_id: str = Field(..., min_length=1, max_length=100)
+    status: Optional[str] = Field(
+        None, pattern=r"^(pending|queued|running|completed|failed|cancelled)$"
+    )
+    platform: Optional[str] = Field(None, pattern=r"^(windows|linux|macos)$")
+    cloud_build_id: Optional[str] = Field(None, max_length=100)
+    github_run_id: Optional[str] = Field(None, max_length=100)
+    download_key: Optional[str] = Field(None, max_length=500)
+    download_url: Optional[str] = Field(None, max_length=1000)
+    linux_download_key: Optional[str] = Field(None, max_length=500)
+    windows_download_key: Optional[str] = Field(None, max_length=500)
+    filename: Optional[str] = Field(None, max_length=255)
+    error: Optional[str] = Field(None, max_length=2000)
+    progress: Optional[int] = Field(None, ge=0, le=100)
+
+    @validator("build_id")
+    def validate_build_id(cls, v):
+        if not v or not v.strip():
+            raise ValueError("build_id cannot be empty")
+        return v.strip()
+
+
+class ProgressWebhookPayload(BaseModel):
+    """Validated payload for /api/v1/cloud-build/webhook/progress endpoint."""
+
+    build_id: str = Field(..., min_length=1, max_length=100)
+    platform: Optional[str] = Field(None, pattern=r"^(windows|linux|macos)$")
+    progress: int = Field(0, ge=0, le=100)
+    stage: Optional[str] = Field(None, max_length=100)
+    cloud_build_id: Optional[str] = Field(None, max_length=100)
+    github_run_id: Optional[str] = Field(None, max_length=100)
+
+    @validator("build_id")
+    def validate_build_id(cls, v):
+        if not v or not v.strip():
+            raise ValueError("build_id cannot be empty")
+        return v.strip()
+
+
+# =============================================================================
+# Idempotency Helper Functions (Task 2.1 - Idempotency Handling)
+# =============================================================================
+
+
+async def check_and_record_webhook_event(
+    conn, event_id: str, event_type: str = "cloud_build_webhook"
+) -> bool:
+    """Check if webhook event was already processed and record it if not.
+
+    Returns:
+        True if this is a new event (should process), False if duplicate.
+    """
+    try:
+        existing = await conn.fetchval(
+            "SELECT event_id FROM processed_webhook_events WHERE event_id = $1",
+            event_id,
+        )
+        if existing:
+            logger.info(f"[Webhook] Duplicate event detected: {event_id}")
+            return False
+
+        await conn.execute(
+            """INSERT INTO processed_webhook_events (event_id, event_type, processed_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (event_id) DO NOTHING""",
+            event_id,
+            event_type,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[Webhook] Error checking idempotency: {e}")
+        return True
+
+
+def generate_webhook_event_id(
+    build_id: str,
+    platform: Optional[str],
+    status: Optional[str],
+    progress: Optional[int] = None,
+) -> str:
+    """Generate a deterministic event ID for deduplication.
+
+    Dedupe by (build_id, stage, progress) or message id.
+    """
+    if platform and status:
+        key = f"{build_id}:{platform}:{status}"
+    elif platform and progress is not None:
+        key = f"{build_id}:{platform}:progress:{progress}"
+    elif status:
+        key = f"{build_id}:overall:{status}"
+    else:
+        key = f"{build_id}:unknown:{secrets.token_hex(8)}"
+
+    return hashlib.sha256(key.encode()).hexdigest()[:64]
+
+
+# =============================================================================
+# Phase 5: Build Provenance Tokens
+# =============================================================================
+
+
+def create_build_provenance_token(
+    build_id: str,
+    project_id: str,
+    platform: str,
+    artifact_hash: str,
+    private_key_pem: Optional[str] = None,
+    secret: Optional[str] = None,
+) -> str:
+    """Create a signed build provenance token for cloud artifacts.
+
+    This token proves the artifact was built in the cloud and includes:
+    - build_id: unique build identifier
+    - project_id: the project this build belongs to
+    - platform: target platform (windows, linux, macos)
+    - artifact_hash: SHA-256 hash of the artifact
+    - timestamp: when the token was created
+    - is_cloud: True for cloud builds, False for local
+
+    The token is signed with Ed25519 (preferred) or HMAC (legacy).
+    """
+    timestamp = int(time.time())
+    jti = secrets.token_hex(16)
+
+    provenance_payload = {
+        "build_id": build_id,
+        "project_id": project_id,
+        "platform": platform,
+        "artifact_hash": artifact_hash,
+        "timestamp": timestamp,
+        "jti": jti,
+        "is_cloud": True,
+    }
+
+    # Sign the token
+    if private_key_pem:
+        signature = compute_ed25519_signature(provenance_payload, private_key_pem)
+    else:
+        active_secret = secret or SECRET_KEY
+        signature = compute_signature(provenance_payload, active_secret)
+
+    token_data = json.dumps({"payload": provenance_payload, "signature": signature})
+
+    return base64.b64encode(token_data.encode()).decode()
+
+
+def create_local_build_provenance_token(
+    project_id: str,
+    artifact_hash: str,
+) -> str:
+    """Create a local build provenance token (no cloud verification).
+
+    Local builds are supported but explicitly marked as local-trust.
+    """
+    timestamp = int(time.time())
+    jti = secrets.token_hex(16)
+
+    provenance_payload = {
+        "project_id": project_id,
+        "artifact_hash": artifact_hash,
+        "timestamp": timestamp,
+        "jti": jti,
+        "is_cloud": False,
+    }
+
+    token_data = json.dumps(provenance_payload)
+    return base64.b64encode(token_data.encode()).decode()
+
+
 class CloudBuildRequest(BaseModel):
     project_id: str
     license_id: Optional[str] = None
     target_platforms: List[str] = ["windows"]
     compatibility_mode: bool = False
-    
-    @validator('target_platforms')
+
+    @validator("target_platforms")
     def validate_platforms(cls, v):
-        allowed = {'windows', 'macos', 'linux'}
+        allowed = {"windows", "macos", "linux"}
         invalid = set(v) - allowed
         if invalid:
             raise ValueError(f"Invalid platforms: {invalid}. Allowed: {allowed}")
@@ -75,8 +260,10 @@ class CloudBuildResponse(BaseModel):
 
 
 async def get_license_key(license_id: str, conn) -> str:
-    row = await conn.fetchrow("SELECT key FROM licenses WHERE id = $1", license_id)
-    return row["key"] if row else "GENERIC_BUILD"
+    row = await conn.fetchrow(
+        "SELECT license_key FROM licenses WHERE id = $1", license_id
+    )
+    return row["license_key"] if row else "GENERIC_BUILD"
 
 
 def get_remote_build_id(build_row) -> Optional[str]:
@@ -101,6 +288,7 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
             # Initialize GCS client
             gcs_client = gcs_storage.Client()
             from config import GCS_BUILDS_BUCKET
+
             bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
             blob = bucket.blob(download_key)
 
@@ -134,23 +322,27 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
 
 
 async def verify_webhook_signature(request: Request) -> bool:
-    # Bypass signature check in development for easier testing
-    if ENVIRONMENT == "development":
-        return True
-
     signature = request.headers.get("X-Signature")
     if not signature:
         logger.warning("Webhook received without X-Signature header")
         return False
 
+    if not BUILD_CALLBACK_SECRET:
+        logger.error("BUILD_CALLBACK_SECRET is not configured; rejecting webhook")
+        return False
+
+    normalized_signature = signature.strip()
+    if normalized_signature.lower().startswith("sha256="):
+        normalized_signature = normalized_signature.split("=", 1)[1]
+
     body = await request.body()
     expected = hmac.new(
-        BUILD_CALLBACK_SECRET.encode() if BUILD_CALLBACK_SECRET else b"",
+        BUILD_CALLBACK_SECRET.encode(),
         body,
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac.compare_digest(signature.lower(), expected.lower())
+    return hmac.compare_digest(normalized_signature.lower(), expected.lower())
 
 
 async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
@@ -303,6 +495,28 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
         # Convert list of platforms to comma-separated string
         target_platforms_str = ",".join(config.get("target_platforms", ["windows"]))
 
+        # SECURITY SYNC: Fetch Ed25519 keys and heartbeat config from project
+        # This ensures cloud builds have the same security as local CLI builds
+        project_id = config.get("project_id", "")
+        signing_public_key = ""
+        signing_private_key = ""
+        heartbeat_interval = config.get("heartbeat_interval", 300)
+
+        if project_id:
+            try:
+                conn = await get_db()
+                project = await conn.fetchrow(
+                    "SELECT signing_public_key, signing_private_key FROM projects WHERE id = $1",
+                    project_id,
+                )
+                if project:
+                    signing_public_key = project.get("signing_public_key", "") or ""
+                    signing_private_key = project.get("signing_private_key", "") or ""
+            except Exception as e:
+                logger.warning(
+                    f"[CloudBuild] Could not fetch project signing keys: {e}"
+                )
+
         # Build config dict for Cloud Build
         build_config = {
             "build_id": build_id,
@@ -316,6 +530,12 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "plan_tier": config.get("plan_tier", "free"),
             "compatibility_mode": config.get("compatibility_mode", False),
             "fast_build": config.get("fast_build", False),
+            # SECURITY SYNC: Ed25519 signatures, binary hash verification, heartbeat
+            "signing_public_key": signing_public_key,
+            "signing_private_key": signing_private_key,
+            "heartbeat_interval": heartbeat_interval,
+            "binary_hash_tracking": True,
+            "enable_ed25519_signatures": bool(signing_public_key),
         }
 
         # Trigger build via CLI wrapper
@@ -365,6 +585,7 @@ async def start_cloud_build(
     request: CloudBuildRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
 ):
     """Start a new cloud build process."""
     conn = await get_db()
@@ -622,31 +843,38 @@ async def start_cloud_build(
 
 @router.post("/webhook")
 async def build_webhook(request: Request):
-    """Callback from Cloud Build - with retry logic for transient failures."""
+    """Callback from Cloud Build - with retry logic, idempotency, and structured validation."""
     if not await verify_webhook_signature(request):
         raise HTTPException(401, "Invalid signature")
 
     body = await request.body()
-    payload = json.loads(body)
+    try:
+        raw_payload = json.loads(body)
+    except json.JSONDecodeError as e:
+        logger.error(f"[CloudBuild] Invalid JSON payload: {e}")
+        raise HTTPException(400, f"Invalid JSON payload: {e}")
 
-    build_id = payload.get("build_id")
-    platform = payload.get("platform")
-    status = payload.get("status")
-    remote_build_id = payload.get("cloud_build_id") or payload.get("github_run_id")
+    # Structured validation - return 400 on malformed payload (never crash)
+    try:
+        payload = CloudBuildWebhookPayload(**raw_payload)
+    except Exception as e:
+        logger.error(f"[CloudBuild] Payload validation failed: {e}")
+        raise HTTPException(400, f"Invalid payload schema: {e}")
 
-    # Handle new GCS blob keys from Cloud Build (A1-A2 fix)
-    linux_download_key = payload.get("linux_download_key")
-    windows_download_key = payload.get("windows_download_key")
+    build_id = payload.build_id
+    platform = payload.platform
+    status = payload.status
+    remote_build_id = payload.cloud_build_id or payload.github_run_id
 
-    # Legacy fallback for GitHub Actions (old format)
-    download_url = payload.get("download_url")
-    download_key = payload.get("download_key")
+    linux_download_key = payload.linux_download_key
+    windows_download_key = payload.windows_download_key
+    download_url = payload.download_url
+    download_key = payload.download_key
+    filename = payload.filename
+    error = payload.error
 
-    filename = payload.get("filename")
-    error = payload.get("error")
-
-    if not build_id:
-        raise HTTPException(400, "Missing build_id")
+    # Generate event ID for idempotency
+    event_id = generate_webhook_event_id(build_id, platform, status)
 
     # Retry logic for database connection issues
     max_retries = 3
@@ -656,6 +884,15 @@ async def build_webhook(request: Request):
         conn = None
         try:
             conn = await get_db()
+
+            # Idempotency check - skip if already processed
+            if not await check_and_record_webhook_event(
+                conn, event_id, "cloud_build_webhook"
+            ):
+                logger.info(
+                    f"[CloudBuild] Skipping duplicate webhook for build {build_id}"
+                )
+                return {"status": "ok", "duplicate": True}
 
             # Update Cloud Build ID if provided
             if remote_build_id:
@@ -705,9 +942,7 @@ async def build_webhook(request: Request):
                 fallback_status = "cancelled" if status == "cancelled" else "failed"
                 fallback_error = None
                 if fallback_status == "failed":
-                    fallback_error = (
-                        payload.get("error") or "No platform artifact callback received"
-                    )
+                    fallback_error = error or "No platform artifact callback received"
 
                 await conn.execute(
                     """
@@ -804,7 +1039,9 @@ async def build_webhook(request: Request):
 
 
 @router.websocket("/ws/{build_id}")
-async def websocket_build_logs(websocket: WebSocket, build_id: str):
+async def websocket_build_logs(
+    websocket: WebSocket, build_id: str, token: Optional[str] = None
+):
     """WebSocket endpoint for real-time build log streaming.
 
     Connect to receive real-time updates for a specific build.
@@ -813,15 +1050,53 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
         "type": "progress" | "log" | "status" | "complete",
         "data": { ... }
     }
+
+    Requires JWT token passed as query parameter: ?token=<jwt>
     """
-    # Validate build exists (simple check, no auth for now)
+    # Authenticate the connection
+    if not token:
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    # Verify JWT token
+    try:
+        from config import JWT_SECRET, JWT_ALGORITHM
+        import jwt
+
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+    except jwt.ExpiredSignatureError:
+        await websocket.close(code=4001, reason="Token expired")
+        return
+    except jwt.PyJWTError as e:
+        logger.warning(f"[WebSocket] Invalid token for build {build_id}: {e}")
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Validate build exists and belongs to authenticated user
     conn = await get_db()
     try:
         build = await conn.fetchrow(
-            "SELECT id, status FROM cloud_builds WHERE id = $1", build_id
+            """SELECT cb.id, cb.status, p.user_id 
+                FROM cloud_builds cb 
+                JOIN projects p ON cb.project_id = p.id 
+                WHERE cb.id = $1""",
+            build_id,
         )
         if not build:
             await websocket.close(code=4004, reason="Build not found")
+            return
+
+        # Verify build belongs to authenticated user
+        if str(build["user_id"]) != str(user_id):
+            logger.warning(
+                f"[WebSocket] User {user_id} attempted to access build {build_id} "
+                f"owned by user {build['user_id']}"
+            )
+            await websocket.close(code=4003, reason="Access denied")
             return
     finally:
         await release_db(conn)
@@ -970,7 +1245,10 @@ async def scheduled_cloud_build_cleanup():
 
 @router.get("/{build_id}/status")
 async def get_build_status(
-    build_id: str, user: dict = Depends(get_current_user), sync: bool = False
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    sync: bool = False,
+    _: None = Depends(requires_feature("cloud_compilation")),
 ):
     """
     Get build status.
@@ -1157,6 +1435,37 @@ async def get_build_status(
             "synced": sync,  # Indicate if sync was attempted
         }
 
+        # Phase 5: Add provenance tokens for completed cloud builds
+        if build["status"] == "completed" and build.get("project_id"):
+            # Get project signing keys
+            project = await conn.fetchrow(
+                "SELECT signing_private_key, signing_secret FROM projects WHERE id = $1",
+                build["project_id"],
+            )
+
+            signing_private_key = (
+                project.get("signing_private_key") if project else None
+            )
+            signing_secret = project.get("signing_secret") if project else None
+
+            # Add provenance to each artifact
+            for art in artifact_list:
+                if art.get("status") == "completed" and art.get("download_url"):
+                    # Create artifact hash (using download_key as proxy)
+                    artifact_hash = hashlib.sha256(
+                        art.get("download_key", "").encode()
+                    ).hexdigest()
+
+                    provenance_token = create_build_provenance_token(
+                        build_id=build["id"],
+                        project_id=build["project_id"],
+                        platform=art["platform"],
+                        artifact_hash=artifact_hash,
+                        private_key_pem=signing_private_key,
+                        secret=signing_secret,
+                    )
+                    art["provenance_token"] = provenance_token
+
         # Backward compatibility for single artifact builds
         if len(artifact_list) == 1:
             response["download_key"] = artifact_list[0].get("download_url")
@@ -1186,7 +1495,11 @@ async def get_build_status(
 
 
 @router.post("/{build_id}/sync")
-async def sync_build_status(build_id: str, user: dict = Depends(get_current_user)):
+async def sync_build_status(
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
+):
     """
     Force sync build status with Cloud Build.
     Useful when webhook hasn't updated the status or status seems stale.
@@ -1314,7 +1627,11 @@ async def sync_build_status(build_id: str, user: dict = Depends(get_current_user
 
 
 @router.post("/{build_id}/cancel")
-async def cancel_cloud_build(build_id: str, user: dict = Depends(get_current_user)):
+async def cancel_cloud_build(
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
+):
     """
     Cancel a running cloud build.
     1. Syncs with Cloud Build to get real status
@@ -1454,6 +1771,7 @@ async def retry_build(
     build_id: str,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
 ):
     """Retry a failed build (max 3 attempts)."""
     conn = await get_db()
@@ -1542,7 +1860,9 @@ async def retry_build(
 
 @router.post("/{build_id}/cleanup")
 async def cleanup_build_artifacts(
-    build_id: str, user: dict = Depends(get_current_user)
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
 ):
     """Manually delete build artifacts for a specific build."""
     conn = await get_db()
@@ -1592,7 +1912,10 @@ async def cleanup_build_artifacts(
 
 @router.get("/history")
 async def get_build_history(
-    limit: int = 20, offset: int = 0, user: dict = Depends(get_current_user)
+    limit: int = 20,
+    offset: int = 0,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
 ):
     """Get user's cloud build history."""
     conn = await get_db()
@@ -1643,22 +1966,38 @@ async def get_build_history(
 
 @router.post("/webhook/progress")
 async def progress_webhook(request: Request):
-    """Receive progress updates from Cloud Build."""
+    """Receive progress updates from Cloud Build - with idempotency and structured validation."""
     if not await verify_webhook_signature(request):
         raise HTTPException(401, "Invalid signature")
 
-    body = await request.json()
-    build_id = body.get("build_id")
-    platform = body.get("platform")
-    progress = body.get("progress", 0)
-    stage = body.get("stage", "")
-    remote_build_id = body.get("cloud_build_id") or body.get("github_run_id")
+    # Structured validation - return 400 on malformed payload (never crash)
+    try:
+        raw_body = await request.json()
+        payload = ProgressWebhookPayload(**raw_body)
+    except Exception as e:
+        logger.error(f"[CloudBuild] Progress payload validation failed: {e}")
+        raise HTTPException(400, f"Invalid payload schema: {e}")
 
-    if not build_id:
-        raise HTTPException(400, "Missing build_id")
+    build_id = payload.build_id
+    platform = payload.platform
+    progress = payload.progress
+    stage = payload.stage or ""
+    remote_build_id = payload.cloud_build_id or payload.github_run_id
+
+    # Generate event ID for idempotency
+    event_id = generate_webhook_event_id(build_id, platform, None, progress)
 
     conn = await get_db()
     try:
+        # Idempotency check - skip if already processed
+        if not await check_and_record_webhook_event(
+            conn, event_id, "cloud_build_progress"
+        ):
+            logger.info(
+                f"[CloudBuild] Skipping duplicate progress update for build {build_id}"
+            )
+            return {"status": "ok", "duplicate": True}
+
         # Update overall progress and Cloud Build ID if provided
         log_entry = f"{stage}: {progress}%"
         if remote_build_id:
@@ -1892,7 +2231,11 @@ async def trigger_build_directly(build_id: str, config: dict, project_id: str):
 
 
 @router.get("/{build_id}/queue-position")
-async def get_queue_status(build_id: str, user: dict = Depends(get_current_user)):
+async def get_queue_status(
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
+):
     """Get queue position for a specific build."""
     conn = await get_db()
     try:

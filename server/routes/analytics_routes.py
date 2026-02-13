@@ -4,10 +4,11 @@ Extracted from main.py for modularity.
 """
 
 from datetime import timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
-from utils import get_current_user, utc_now
+from utils import get_current_user, utc_now, get_user_tier
 from database import get_db, release_db
 
 router = APIRouter(prefix="/api/v1", tags=["Analytics"])
@@ -130,9 +131,7 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
             "result": row["result"],
             "client_name": row["client_name"],
             "ip_address": row["ip_address"],
-            "created_at": row["created_at"].isoformat()
-            if row["created_at"]
-            else None,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }
         for row in recent_activity_rows
     ]
@@ -142,9 +141,7 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
             "id": str(row["id"]),
             "license_key": row["license_key"],
             "client_name": row["client_name"],
-            "expires_at": row["expires_at"].isoformat()
-            if row["expires_at"]
-            else None,
+            "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
             "project_name": row["project_name"],
         }
         for row in expiring_soon_rows
@@ -246,3 +243,170 @@ async def get_map_data(user: dict = Depends(get_current_user)):
         ]
     finally:
         await release_db(conn)
+
+
+@router.get("/analytics/licenses")
+async def get_license_analytics(
+    user: dict = Depends(get_current_user),
+    project_id: Optional[str] = Query(None, description="Filter by project ID"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+):
+    """
+    Get detailed license analytics.
+
+    Includes validation trends, geography distribution, and usage patterns.
+    Advanced analytics available for Pro+ tiers.
+    """
+    conn = await get_db()
+    try:
+        # Check user tier
+        tier = await get_user_tier(user["id"], conn)
+        is_pro_tier = tier in ["pro", "business", "enterprise"]
+
+        now = utc_now()
+        start_date = now - timedelta(days=days)
+        user_id = user["id"]
+
+        # Base WHERE clause
+        where_clause = "p.user_id = $1 AND vl.created_at > $2"
+        params = [user_id, start_date]
+
+        if project_id:
+            where_clause += " AND p.id = $" + str(len(params) + 1)
+            params.append(project_id)
+
+        # 1. Validation trends (basic for all, extended for Pro+)
+        validation_trends = await conn.fetch(
+            f"""
+            SELECT 
+                DATE(vl.created_at) as date,
+                COUNT(*) as total,
+                SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as valid,
+                SUM(CASE WHEN vl.result = 'invalid' THEN 1 ELSE 0 END) as invalid,
+                SUM(CASE WHEN vl.result = 'expired' THEN 1 ELSE 0 END) as expired,
+                SUM(CASE WHEN vl.result = 'revoked' THEN 1 ELSE 0 END) as revoked,
+                SUM(CASE WHEN vl.result = 'tampered' THEN 1 ELSE 0 END) as tampered
+            FROM validation_logs vl
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE {where_clause}
+            GROUP BY DATE(vl.created_at)
+            ORDER BY date DESC
+            """,
+            *params,
+        )
+
+        # 2. Country distribution (Pro+ only)
+        country_distribution = []
+        if is_pro_tier:
+            country_rows = await conn.fetch(
+                f"""
+                SELECT 
+                    COALESCE(vl.country, 'Unknown') as country,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as valid_count
+                FROM validation_logs vl
+                JOIN licenses l ON vl.license_id = l.id
+                JOIN projects p ON l.project_id = p.id
+                WHERE {where_clause}
+                GROUP BY vl.country
+                ORDER BY count DESC
+                LIMIT 20
+                """,
+                *params,
+            )
+            country_distribution = [
+                {
+                    "country": row["country"],
+                    "count": row["count"],
+                    "valid_count": row["valid_count"],
+                }
+                for row in country_rows
+            ]
+
+        # 3. Top licenses by usage
+        top_licenses = await conn.fetch(
+            f"""
+            SELECT 
+                l.license_key,
+                l.client_name,
+                p.name as project_name,
+                COUNT(*) as validation_count,
+                SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as valid_count,
+                MAX(vl.created_at) as last_validated
+            FROM validation_logs vl
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE {where_clause}
+            GROUP BY l.id, l.license_key, l.client_name, p.name
+            ORDER BY validation_count DESC
+            LIMIT 10
+            """,
+            *params,
+        )
+
+        # 4. Summary stats
+        summary = await conn.fetchrow(
+            f"""
+            SELECT 
+                COUNT(DISTINCT l.id) as total_licenses,
+                COUNT(*) as total_validations,
+                SUM(CASE WHEN vl.result = 'valid' THEN 1 ELSE 0 END) as successful_validations,
+                COUNT(DISTINCT vl.hwid) as unique_machines,
+                COUNT(DISTINCT vl.ip_address) as unique_ips
+            FROM validation_logs vl
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE {where_clause}
+            """,
+            *params,
+        )
+
+    finally:
+        await release_db(conn)
+
+    return {
+        "summary": {
+            "total_licenses": summary["total_licenses"] or 0,
+            "total_validations": summary["total_validations"] or 0,
+            "successful_validations": summary["successful_validations"] or 0,
+            "unique_machines": summary["unique_machines"] or 0,
+            "unique_ips": summary["unique_ips"] or 0,
+            "success_rate": round(
+                (summary["successful_validations"] or 0)
+                / max(summary["total_validations"] or 1, 1)
+                * 100,
+                2,
+            ),
+        },
+        "trends": [
+            {
+                "date": row["date"].isoformat() if row["date"] else None,
+                "total": row["total"],
+                "valid": row["valid"],
+                "invalid": row["invalid"],
+                "expired": row["expired"],
+                "revoked": row["revoked"],
+                "tampered": row["tampered"],
+            }
+            for row in validation_trends
+        ],
+        "geography": country_distribution
+        if is_pro_tier
+        else {"message": "Upgrade to Pro for advanced geography analytics"},
+        "top_licenses": [
+            {
+                "license_key": row["license_key"],
+                "client_name": row["client_name"],
+                "project_name": row["project_name"],
+                "validation_count": row["validation_count"],
+                "valid_count": row["valid_count"],
+                "last_validated": row["last_validated"].isoformat()
+                if row["last_validated"]
+                else None,
+            }
+            for row in top_licenses
+        ],
+        "tier": tier,
+        "advanced_available": is_pro_tier,
+    }

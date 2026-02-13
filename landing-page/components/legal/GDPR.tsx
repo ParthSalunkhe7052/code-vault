@@ -18,7 +18,7 @@ const GDPR: React.FC = () => {
           <h2 className="text-2xl font-semibold text-white mt-8 mb-4">1. Data Controller</h2>
           <p className="text-slate-300">
             CodeVault operates as the data controller for personal information collected through our platform. 
-            For inquiries regarding data protection, contact us at parth.ajit7052@gmail.com.
+            For inquiries regarding data protection, contact us at contact@codevault.com.
           </p>
 
           <h2 className="text-2xl font-semibold text-white mt-8 mb-4">2. Legal Basis for Processing</h2>
@@ -66,7 +66,7 @@ const GDPR: React.FC = () => {
           <p className="text-slate-300">
             For GDPR-related inquiries, contact our data protection team:
             <br />
-            Email: parth.ajit7052@gmail.com
+            Email: contact@codevault.com
           </p>
 
           <h2 className="text-2xl font-semibold text-white mt-8 mb-4">7. Complaints</h2>

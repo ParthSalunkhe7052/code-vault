@@ -375,7 +375,7 @@ def _lw_validate_lease(license_key):
     print(f"[License Wrapper] Offline lease valid ({hours}h {mins}m remaining)")
     return True, "Lease valid"
 
-def _lw_start_heartbeat(license_key, hwid, server_url, interval):
+def _lw_start_heartbeat(license_key, hwid, server_url, interval, session_token=None):
     """Start background heartbeat thread (SEC4)."""
     try:
         import threading as _lw_thread
@@ -388,12 +388,17 @@ def _lw_start_heartbeat(license_key, hwid, server_url, interval):
                     import json as _json
 
                     nonce = _lw_hash.sha256(str(_lw_time.time()).encode()).hexdigest()[:32]
-                    payload = _json.dumps({
+                    payload_data = {
                         "license_key": license_key,
                         "hwid": hwid,
                         "nonce": nonce,
                         "timestamp": int(_lw_time.time())
-                    }).encode('utf-8')
+                    }
+                    # Phase 3: Include session_token for floating license heartbeat
+                    if session_token:
+                        payload_data["session_token"] = session_token
+                    
+                    payload = _json.dumps(payload_data).encode('utf-8')
 
                     req = urllib.request.Request(
                         server_url + "/api/v1/license/heartbeat",
@@ -552,21 +557,47 @@ def _lw_validate():
             # Verify using Ed25519 public key (private key NEVER leaves the server)
             import base64 as _lw_b64
             _LW_PUBLIC_KEY = """{public_key}"""
+            _lw_sig_valid = False
             try:
                 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
                 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
+                if not _LW_PUBLIC_KEY or not _LW_PUBLIC_KEY.strip():
+                    raise ValueError("No public key configured")
+
                 pub_key = load_pem_public_key(_LW_PUBLIC_KEY.encode())
                 sig_bytes = _lw_b64.b64decode(server_sig)
                 pub_key.verify(sig_bytes, msg.encode())
+                _lw_sig_valid = True
             except Exception as _lw_verify_err:
                 _lw_show_error("SECURITY ERROR", "Server signature mismatch.", "The response from the license server appears to be tampered with or forged.")
+
+            # SECURITY: Block if signature verification failed (fail closed)
+            if not _lw_sig_valid:
+                return False
+
+            # Protocol v2: Verify response freshness
+            issued_at = result.get("issued_at")
+            if issued_at:
+                current_time = int(_lw_time.time())
+                response_age = current_time - issued_at
+                if response_age > 300:
+                    _lw_show_error("SECURITY ERROR", "Response expired.", f"Server response is too old ({response_age}s). Possible replay attack.")
+                    return False
+                if response_age < -60:
+                    _lw_show_error("SECURITY ERROR", "Response from future.", "Clock skew detected. Please correct your system time.")
+                    return False
+            
+            # Protocol v2: Require jti for replay protection
+            if not result.get("jti"):
+                _lw_show_error("SECURITY ERROR", "Missing replay protection.", "Server response missing jti (replay protection ID).")
+                return False
 
             if result.get("status") == "valid":
                 print("[OK] License validated online")
 
                 # SEC4: Start heartbeat
-                _lw_start_heartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval})
+                _lw_start_heartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval}, _LW_SESSION_TOKEN)
 
                 # MON2: Capture floating session token
                 _LW_SESSION_TOKEN = result.get("variables", {}).get("_cv_session_token")

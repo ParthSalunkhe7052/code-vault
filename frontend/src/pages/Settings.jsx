@@ -187,7 +187,7 @@ const Settings = () => {
 
                 <pre className="bg-slate-900/50 rounded-lg p-4 overflow-x-auto">
                     <code className="text-sm text-slate-300">
-                        {`curl -X POST https://your-server.com/api/v1/license/validate \\
+                        {`curl -X POST ${import.meta.env.VITE_API_URL || 'https://api.codevault.com'}/api/v1/license/validate \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${apiKey || 'your-api-key'}" \\
   -d '{"license_key": "...", "hwid": "..."}'`}

@@ -42,7 +42,7 @@ interface BackendLimits {
 }
 
 interface SubscriptionStatus {
-  tier?: string;
+  plan_tier?: string;
   usage?: {
     build_credits_remaining?: number;
   };
@@ -198,15 +198,16 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const status: SubscriptionStatus = await subscription.getStatus();
       if (status) {
-        setTier(status.tier || TIERS.FREE);
+        const resolvedTier = status.plan_tier || TIERS.FREE;
+        setTier(resolvedTier);
         setBuildCredits(status.usage?.build_credits_remaining ?? 0);
         if (status.limits) {
           setLimits({
             maxProjects: status.limits.max_projects === -1 ? Infinity : status.limits.max_projects,
             maxLicenses: status.limits.max_licenses_per_project === -1 ? Infinity : status.limits.max_licenses_per_project,
             buildCredits: status.limits.cloud_builds_per_month === -1 ? Infinity : status.limits.cloud_builds_per_month,
-            canCloudBuild: status.limits.can_cloud_build ?? (status.tier !== TIERS.FREE),
-            offlineLease: status.tier !== TIERS.FREE,
+            canCloudBuild: status.limits.can_cloud_build ?? (resolvedTier !== TIERS.FREE),
+            offlineLease: resolvedTier !== TIERS.FREE,
             analytics: status.limits.analytics,
             webhooks: status.limits.webhooks,
             nodeSupport: status.limits.node_support,

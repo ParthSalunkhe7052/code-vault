@@ -27,7 +27,7 @@ from storage_service import (
 )
 from models import ProjectCreateRequest, ProjectConfigRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
-from routes.cloud_build_routes import invalidate_cached_source
+from routes.cloud_build_utils import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,10 @@ async def create_project(
         # Generate Ed25519 key pair for asymmetric signature verification
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives.serialization import (
-            Encoding, PrivateFormat, PublicFormat, NoEncryption,
+            Encoding,
+            PrivateFormat,
+            PublicFormat,
+            NoEncryption,
         )
 
         ed_private_key = Ed25519PrivateKey.generate()
@@ -100,10 +103,14 @@ async def create_project(
             format=PrivateFormat.PKCS8,
             encryption_algorithm=NoEncryption(),
         ).decode("utf-8")
-        signing_public_key = ed_private_key.public_key().public_bytes(
-            encoding=Encoding.PEM,
-            format=PublicFormat.SubjectPublicKeyInfo,
-        ).decode("utf-8")
+        signing_public_key = (
+            ed_private_key.public_key()
+            .public_bytes(
+                encoding=Encoding.PEM,
+                format=PublicFormat.SubjectPublicKeyInfo,
+            )
+            .decode("utf-8")
+        )
 
         await conn.execute(
             """
@@ -593,7 +600,8 @@ async def register_binary_hash(
         binary_hash = data.get("binary_hash", "")
         if not binary_hash or len(binary_hash) != 64:
             raise HTTPException(
-                status_code=400, detail="binary_hash must be a 64-char SHA-256 hex string"
+                status_code=400,
+                detail="binary_hash must be a 64-char SHA-256 hex string",
             )
 
         hash_id = secrets.token_hex(16)

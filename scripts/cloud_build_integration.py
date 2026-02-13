@@ -100,6 +100,13 @@ class CloudBuildClient:
         _compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
         _fast_build = str(build_config.get("fast_build", False)).lower()
 
+        # SECURITY FEATURES: Ed25519 signatures, binary hash verification, heartbeat
+        # These are synced with CLI wrapper features
+        signing_public_key = build_config.get("signing_public_key", "")
+        signing_private_key = build_config.get("signing_private_key", "")
+        heartbeat_interval = build_config.get("heartbeat_interval", 300)
+        binary_hash = build_config.get("binary_hash", "")
+
         # Create build object
         build = cloudbuild_v1.Build()
 
@@ -162,6 +169,14 @@ class CloudBuildClient:
         # Upload config to GCS to avoid substitution size limits (8KB max)
         # Cloud Build substitutions have an 8KB limit, so we store large configs in GCS
         from google.cloud import storage as gcs_storage
+
+        # SECURITY SYNC: Add Ed25519, binary hash, and heartbeat config (synced with CLI wrapper)
+        config["signing_public_key"] = signing_public_key
+        config["signing_private_key"] = signing_private_key
+        config["heartbeat_interval"] = heartbeat_interval
+        config["binary_hash_tracking"] = True
+        config["binary_hash"] = binary_hash
+        config["enable_ed25519_signatures"] = bool(signing_public_key)
 
         gcs_client = gcs_storage.Client()
         config_bucket = gcs_client.bucket("codevault-builds")
@@ -229,14 +244,14 @@ class CloudBuildClient:
         """
         try:
             build = self.client.get_build(project_id=self.project_id, id=build_id)
-            
+
             # Helper to safely convert timestamps
             def format_time(ts):
                 if not ts:
                     return None
-                if hasattr(ts, 'isoformat'):
+                if hasattr(ts, "isoformat"):
                     return ts.isoformat()
-                if hasattr(ts, 'ToJsonString'):
+                if hasattr(ts, "ToJsonString"):
                     return ts.ToJsonString()
                 return str(ts)
 

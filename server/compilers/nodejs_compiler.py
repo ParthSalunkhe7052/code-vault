@@ -117,7 +117,9 @@ class NodeJSCompiler:
             # Stream output with timeout per line
             while True:
                 try:
-                    line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
+                    line = await asyncio.wait_for(
+                        process.stdout.readline(), timeout=10.0
+                    )
                     if not line:
                         break
                     decoded_line = line.decode("utf-8", errors="replace").rstrip()
@@ -251,7 +253,7 @@ class NodeJSCompiler:
                 from server.utils import validate_safe_path
 
             entry_path = validate_safe_path(source_dir, entry_file)
-            
+
             if not entry_path.exists():
                 raise Exception("Entry file not found")
 
@@ -408,8 +410,6 @@ validateLicense().then(() => {{
                 target,
                 "--output",
                 str(output_exe),
-                "--public",
-                "--no-bytecode",
                 "--compress",
                 "GZip",
             ]
@@ -530,22 +530,34 @@ validateLicense().then(() => {{
         # Valid options for javascript-obfuscator (v5.x in package.json)
         obfuscate_args = [
             # Core obfuscation (fast, good protection)
-            "--compact", "true",
-            "--rename-globals", "true",
-            "--rename-properties", "false",  # Can break code, keep off
+            "--compact",
+            "true",
+            "--rename-globals",
+            "true",
+            "--rename-properties",
+            "false",  # Can break code, keep off
             # String protection (good protection, moderate speed)
-            "--string-array", "true",
-            "--string-array-threshold", "0.75",
-            "--string-array-encoding", "rc4",  # Stronger than base64
-            "--string-array-shuffle", "true",
+            "--string-array",
+            "true",
+            "--string-array-threshold",
+            "0.75",
+            "--string-array-encoding",
+            "rc4",  # Stronger than base64
+            "--string-array-shuffle",
+            "true",
             # Identifier obfuscation
-            "--identifier-names-generator", "hexadecimal",
+            "--identifier-names-generator",
+            "hexadecimal",
             # Enable aggressive protection (slower build, maximum security)
-            "--control-flow-flattening", "true",
-            "--dead-code-injection", "true",
-            "--self-defending", "true",
+            "--control-flow-flattening",
+            "true",
+            "--dead-code-injection",
+            "true",
+            "--self-defending",
+            "true",
             # Preserve require/import statements
-            "--ignore-imports", "true",
+            "--ignore-imports",
+            "true",
         ]
 
         failed_files = []
@@ -556,14 +568,15 @@ validateLicense().then(() => {{
                 if idx % 10 == 0:
                     await self.log(
                         f"   Progress: {idx}/{len(js_files)} files processed",
-                        log_callback
+                        log_callback,
                     )
 
                 # Build command: javascript-obfuscator <input> --output <output> <options>
                 cmd = [
                     str(self.obfuscator_bin),
                     str(js_file),  # Input file
-                    "--output", str(js_file),  # Output (in-place obfuscation)
+                    "--output",
+                    str(js_file),  # Output (in-place obfuscation)
                 ] + obfuscate_args
 
                 try:
@@ -571,14 +584,13 @@ validateLicense().then(() => {{
                         *cmd,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
-                        cwd=str(build_dir)
+                        cwd=str(build_dir),
                     )
 
                     # Wait with timeout (30 seconds per file)
                     try:
                         stdout, stderr = await asyncio.wait_for(
-                            process.communicate(),
-                            timeout=30.0
+                            process.communicate(), timeout=30.0
                         )
 
                         if process.returncode != 0:
@@ -587,20 +599,22 @@ validateLicense().then(() => {{
                             if len(failed_files) <= 3:
                                 await self.log(
                                     f"   Warning: Failed to obfuscate {js_file.name}",
-                                    log_callback
+                                    log_callback,
                                 )
                                 # Show error details for debugging
                                 if stderr:
                                     error_msg = stderr.decode("utf-8", errors="replace")
                                     if len(error_msg) > 200:
                                         error_msg = error_msg[:200] + "... (truncated)"
-                                    await self.log(f"      Error: {error_msg}", log_callback)
+                                    await self.log(
+                                        f"      Error: {error_msg}", log_callback
+                                    )
                     except asyncio.TimeoutError:
                         failed_files.append(js_file.name)
                         process.kill()
                         await self.log(
                             f"   Warning: Timeout obfuscating {js_file.name}",
-                            log_callback
+                            log_callback,
                         )
 
                 except Exception as file_error:
@@ -608,14 +622,14 @@ validateLicense().then(() => {{
                     if len(failed_files) <= 3:
                         await self.log(
                             f"   Warning: Error obfuscating {js_file.name}: {file_error}",
-                            log_callback
+                            log_callback,
                         )
 
             # Report summary
             if failed_files:
                 await self.log(
                     f"   {len(failed_files)}/{len(js_files)} files had obfuscation warnings",
-                    log_callback
+                    log_callback,
                 )
 
             await self.log("✓ Obfuscation complete", log_callback)

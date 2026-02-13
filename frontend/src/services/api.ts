@@ -236,6 +236,9 @@ export const stats = {
     getDashboard: (): Promise<DashboardStats> => api.get('/stats/dashboard').then(res => res.data),
     // Mission Control Live Map
     getMapData: (): Promise<MapDataPoint[]> => api.get('/analytics/map-data').then(res => res.data),
+    // License Analytics (Pro+ tier)
+    getLicenseAnalytics: (projectId?: string, days: number = 30): Promise<any> => 
+        api.get('/analytics/licenses', { params: { project_id: projectId, days } }).then(res => res.data),
 };
 
 // Admin API (admin role required)

@@ -66,6 +66,8 @@ test_projects/
 # ----- Logs -----
 *.log
 logs/
+server.log
+frontend.log
 
 # ----- Testing -----
 .coverage

@@ -120,7 +120,7 @@ const steps: FeatureStep[] = [
     id: 'profit',
     title: 'Air-Gapped Revenue',
     benefit: 'Sell to enterprise, offline.',
-    description: 'Issue cryptographically signed leases that allow applications to run offline for up to 365 days. Manage everything from a single dashboard.',
+    description: 'Issue cryptographically signed leases that allow applications to run offline for up to 24 hours. Manage everything from a single dashboard.',
     icon: <DollarSign className="w-5 h-5" />,
     renderVisual: () => (
       <div className="relative w-full h-full flex items-center justify-center">

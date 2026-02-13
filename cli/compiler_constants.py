@@ -36,3 +36,42 @@ MAX_BUILD_ATTEMPTS = 3
 
 # Resource warnings
 MEMORY_WARNING_MB = 2048  # Warn if system memory is below this
+
+# Obfuscation presets
+OBFUSCATE_PRESET_FAST = {
+    "compact": True,
+    "rename_globals": True,
+    "string_array": True,
+    "string_array_threshold": 0.8,
+    "string_array_encoding": "base64",  # Was "rc4" (weak)
+    "control_flow_flattening": False,
+    "dead_code_injection": False,
+    "self_defending": False,
+}
+
+OBFUSCATE_PRESET_BALANCED = {
+    "compact": True,
+    "rename_globals": True,
+    "string_array": True,
+    "string_array_threshold": 1.0,
+    "string_array_encoding": "base64",
+    "control_flow_flattening": True,
+    "control_flow_flattening_threshold": 0.5,
+    "dead_code_injection": True,
+    "dead_code_injection_threshold": 0.2,
+    "self_defending": True,
+}
+
+OBFUSCATE_PRESET_MAX = {
+    "compact": True,
+    "rename_globals": True,
+    "string_array": True,
+    "string_array_threshold": 1.0,
+    "string_array_encoding": "rc4",
+    "control_flow_flattening": True,
+    "control_flow_flattening_threshold": 0.75,
+    "dead_code_injection": True,
+    "dead_code_injection_threshold": 0.4,
+    "self_defending": True,
+    "split_strings": True,
+}
