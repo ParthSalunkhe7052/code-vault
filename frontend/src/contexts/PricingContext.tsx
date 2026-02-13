@@ -41,14 +41,6 @@ interface BackendLimits {
   build_credits_remaining?: number;
 }
 
-interface SubscriptionStatus {
-  plan_tier?: string;
-  usage?: {
-    build_credits_remaining?: number;
-  };
-  limits?: BackendLimits;
-}
-
 const PricingContext = createContext<PricingContextType | undefined>(undefined);
 
 export const TIERS = {
@@ -109,7 +101,7 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const { user: authUser } = useAuth();
   const [tier, setTier] = useState<string>(TIERS.FREE);
   const [buildCredits, setBuildCredits] = useState<number>(0);
-  const [limits, setLimits] = useState<TierLimits>(DEFAULT_LIMITS[TIERS.FREE]);
+  const [limits, setLimits] = useState<TierLimits>(DEFAULT_LIMITS[TIERS.FREE] as TierLimits);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Sync pricing data whenever the authenticated user changes
@@ -147,12 +139,12 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             });
             setBuildCredits(backendLimits.build_credits_remaining || 0);
           } else if (!cancelled) {
-            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setLimits((DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]) as TierLimits);
             setBuildCredits((authUser as User).build_credits || 0);
           }
         } catch {
           if (!cancelled) {
-            setLimits(DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]);
+            setLimits((DEFAULT_LIMITS[userPlan] || DEFAULT_LIMITS[TIERS.FREE]) as TierLimits);
             setBuildCredits((authUser as User).build_credits || 0);
           }
         }
@@ -196,21 +188,27 @@ export const PricingProvider: React.FC<{ children: React.ReactNode }> = ({ child
    */
   const refreshPricing = useCallback(async () => {
     try {
-      const status: SubscriptionStatus = await subscription.getStatus();
+      // Use the generic type from API but cast it if needed to match local logic
+      const status = await subscription.getStatus();
       if (status) {
         const resolvedTier = status.plan_tier || TIERS.FREE;
         setTier(resolvedTier);
-        setBuildCredits(status.usage?.build_credits_remaining ?? 0);
-        if (status.limits) {
+        
+        // Handle potential different structures of status.usage
+        const usage = (status as any).usage;
+        setBuildCredits(usage?.build_credits_remaining ?? 0);
+        
+        const backendLimits = status.limits as unknown as BackendLimits;
+        if (backendLimits) {
           setLimits({
-            maxProjects: status.limits.max_projects === -1 ? Infinity : status.limits.max_projects,
-            maxLicenses: status.limits.max_licenses_per_project === -1 ? Infinity : status.limits.max_licenses_per_project,
-            buildCredits: status.limits.cloud_builds_per_month === -1 ? Infinity : status.limits.cloud_builds_per_month,
-            canCloudBuild: status.limits.can_cloud_build ?? (resolvedTier !== TIERS.FREE),
+            maxProjects: backendLimits.max_projects === -1 ? Infinity : backendLimits.max_projects,
+            maxLicenses: backendLimits.max_licenses_per_project === -1 ? Infinity : backendLimits.max_licenses_per_project,
+            buildCredits: backendLimits.cloud_builds_per_month === -1 ? Infinity : backendLimits.cloud_builds_per_month,
+            canCloudBuild: backendLimits.can_cloud_build ?? (resolvedTier !== TIERS.FREE),
             offlineLease: resolvedTier !== TIERS.FREE,
-            analytics: status.limits.analytics,
-            webhooks: status.limits.webhooks,
-            nodeSupport: status.limits.node_support,
+            analytics: backendLimits.analytics,
+            webhooks: backendLimits.webhooks,
+            nodeSupport: backendLimits.node_support,
           });
         }
       }
