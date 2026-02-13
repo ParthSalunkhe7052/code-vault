@@ -176,8 +176,8 @@ async def check_rate_limit(
 
     except Exception as e:
         logger.error(f"[RateLimiter] Redis error: {e}")
-        # On error, allow the request (fail open)
-        return (True, max_requests, 0)
+        # On error, deny the request (fail closed) for security
+        return (False, 0, 60)
 
 
 def rate_limit(

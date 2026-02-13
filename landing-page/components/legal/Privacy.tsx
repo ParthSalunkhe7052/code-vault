@@ -58,7 +58,7 @@ const Privacy: React.FC = () => {
 
           <h2 className="text-2xl font-semibold text-white mt-8 mb-4">5. Your Rights</h2>
           <p className="text-slate-300">
-            You have the right to access, correct, or delete your personal data. Contact us at parth.ajit7052@gmail.com 
+            You have the right to access, correct, or delete your personal data. Contact us at contact@codevault.com 
             for data-related requests.
           </p>
 

@@ -18,7 +18,7 @@ export const EnterpriseContactForm: React.FC = () => {
     // For now, just open email client - can be upgraded to API call later
     const subject = `Enterprise Inquiry from ${formData.company}`;
     const body = `Name: ${formData.name}\nEmail: ${formData.email}\nCompany: ${formData.company}\n\nMessage:\n${formData.message}`;
-    window.location.href = `mailto:parth.ajit7052@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = `mailto:contact@codevault.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     
     setSubmitted(true);
     setLoading(false);

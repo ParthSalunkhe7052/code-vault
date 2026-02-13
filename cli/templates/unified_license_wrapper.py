@@ -12,7 +12,7 @@ This template combines the best features from CLI, Server, and Cloud Build versi
 
 Usage:
     from unified_license_wrapper import get_license_wrapper
-    
+
     wrapper = get_license_wrapper(
         license_key="LIC-XXXX-XXXX",
         server_url="https://api.codevault.app",
@@ -22,7 +22,6 @@ Usage:
         app_name="My App"
     )
 """
-
 
 UNIFIED_LICENSE_WRAPPER_TEMPLATE = r'''# ============ CODEVAULT LICENSE PROTECTION ============
 # This code protects your application with license validation
@@ -55,6 +54,12 @@ _CV_CLOCK_DRIFT_MAX = 60 * 60  # 1 hour max drift
 
 # Floating license session tracking
 _CV_SESSION_TOKEN = None
+
+# DEPRECATION WARNING for HMAC projects
+if not _CV_PUBLIC_KEY:
+    print("[CodeVault] WARNING: Legacy HMAC project detected. This project uses deprecated security.")
+    print("[CodeVault] Please migrate to Ed25519 for enhanced security.")
+    print("[CodeVault] Contact support for migration assistance.")
 
 # =============================================================================
 # STARTUP POP-UP - Shows protection status on launch
@@ -593,7 +598,7 @@ def _cv_validate_lease(license_key):
 # HEARTBEAT - Background license check
 # =============================================================================
 
-def _cv_start_heartbeat(license_key, hwid, interval):
+def _cv_start_heartbeat(license_key, hwid, interval, session_token=None):
     """Start background heartbeat thread for floating licenses."""
     try:
         import threading as _threading
@@ -604,11 +609,16 @@ def _cv_start_heartbeat(license_key, hwid, interval):
                 try:
                     import urllib.request
                     
-                    payload = _cv_json.dumps({
+                    payload_data = {
                         "license_key": license_key,
                         "hwid": hwid,
                         "timestamp": int(_cv_time.time())
-                    }).encode('utf-8')
+                    }
+                    # Phase 3: Include session_token for floating license heartbeat
+                    if session_token:
+                        payload_data["session_token"] = session_token
+                    
+                    payload = _cv_json.dumps(payload_data).encode('utf-8')
                     
                     req = urllib.request.Request(
                         _CV_SERVER_URL + "/api/v1/license/heartbeat",
@@ -694,6 +704,12 @@ def _cv_validate_signature(result):
                       "Response missing digital signature.")
         return False
     
+    if not _CV_PUBLIC_KEY or not _CV_PUBLIC_KEY.strip():
+        _cv_show_error("SECURITY ERROR",
+                      "No public key configured.",
+                      "Cannot verify server response without a public key.")
+        return False
+    
     # Reconstruct canonical message
     features_json = _cv_json.dumps(sorted(result.get("features", [])), sort_keys=True)
     variables_json = _cv_json.dumps(result.get("variables", {}), sort_keys=True)
@@ -727,9 +743,10 @@ def _cv_validate_license():
     """Main license validation function."""
     global _CV_SESSION_TOKEN
     
-    # Handle DEMO mode
+    # Handle DEMO mode - NOT allowed in production builds
     if _CV_LICENSE_KEY == "DEMO":
-        return True
+        print("[CodeVault] DEMO mode not allowed in production builds")
+        _cv_sys.exit(1)
     
     # Handle GENERIC_BUILD mode (runtime prompt)
     license_key = _CV_LICENSE_KEY
@@ -768,9 +785,33 @@ def _cv_validate_license():
             if not _cv_validate_signature(result):
                 return False
             
+            # Protocol v2: Verify response freshness
+            issued_at = result.get("issued_at")
+            if issued_at:
+                import time as _cv_time_pkg
+                current_time = int(_cv_time_pkg.time())
+                response_age = current_time - issued_at
+                if response_age > 300:
+                    _cv_show_error("SECURITY ERROR",
+                                  "Response expired.",
+                                  f"Server response is too old ({response_age}s). Possible replay attack.")
+                    return False
+                if response_age < -60:
+                    _cv_show_error("SECURITY ERROR",
+                                  "Response from future.",
+                                  "Clock skew detected. Please correct your system time.")
+                    return False
+            
+            # Protocol v2: Require jti for replay protection
+            if not result.get("jti"):
+                _cv_show_error("SECURITY ERROR",
+                              "Missing replay protection.",
+                              "Server response missing jti (replay protection ID).")
+                return False
+            
             if result.get("status") == "valid":
                 # Start heartbeat
-                _cv_start_heartbeat(license_key, hwid, _CV_HEARTBEAT_INTERVAL)
+                _cv_start_heartbeat(license_key, hwid, _CV_HEARTBEAT_INTERVAL, _CV_SESSION_TOKEN)
                 
                 # Register session release
                 _atexit.register(_cv_release_session)
@@ -863,11 +904,11 @@ def get_license_wrapper(
     public_key: str = "",
     heartbeat_interval: int = 300,
     app_name: str = "Protected Application",
-    show_branding: bool = True
+    show_branding: bool = True,
 ) -> str:
     """
     Get the unified license wrapper code.
-    
+
     Args:
         license_key: License key to embed (or "DEMO" or "GENERIC_BUILD")
         server_url: Server URL for license validation
@@ -876,7 +917,7 @@ def get_license_wrapper(
         heartbeat_interval: Heartbeat interval in seconds (default: 300)
         app_name: Application name for UI (default: "Protected Application")
         show_branding: Show CodeVault branding (default: True for free tier)
-    
+
     Returns:
         Complete wrapper code ready to be prepended to user code
     """
@@ -887,7 +928,7 @@ def get_license_wrapper(
     code = code.replace("{heartbeat_interval}", str(heartbeat_interval))
     code = code.replace("{app_name}", app_name)
     code = code.replace("{show_branding}", "True" if show_branding else "False")
-    
+
     return code
 
 

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, memo } from 'react';
-import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap, Box, Layers, Code, Cpu } from 'lucide-react';
+import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap, Box, Layers, Code, Cpu, Shield, Sparkles } from 'lucide-react';
+import { usePricing } from '../../../contexts/PricingContext';
 
 // Check if we're in Tauri
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -241,6 +242,12 @@ const Step3Configure = memo(({
 
             <div className="border-t border-white/10 my-6" />
 
+            {/* PROMINENT: Advanced Obfuscation Toggle */}
+            <ObfuscationToggleCard 
+                enableObfuscation={enableObfuscation}
+                setEnableObfuscation={setEnableObfuscation}
+            />
+
             {/* Bottom Section: Bento Grid for Advanced Options */}
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Advanced Configuration</h3>
             
@@ -453,6 +460,125 @@ const Step3Configure = memo(({
         </div>
     );
 });
+
+// =============================================================================
+// OBFUSCATION TOGGLE CARD - Prominent Pro Feature
+// =============================================================================
+
+const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation }) => {
+    const { tier } = usePricing();
+    const isPro = tier !== 'free';
+    
+    const handleToggle = useCallback(() => {
+        if (isPro) {
+            setEnableObfuscation(!enableObfuscation);
+        }
+    }, [isPro, enableObfuscation, setEnableObfuscation]);
+
+    const handleUpgrade = useCallback(() => {
+        // Navigate to pricing page
+        window.open('/pricing', '_blank');
+    }, []);
+
+    return (
+        <div className={`relative overflow-hidden rounded-2xl border-2 mb-8 transition-all duration-300 ${
+            enableObfuscation && isPro 
+                ? 'bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border-purple-500/50 shadow-lg shadow-purple-500/20' 
+                : 'bg-white/5 border-white/10 hover:border-white/20'
+        }`}>
+            {/* Background decoration for Pro users */}
+            {isPro && enableObfuscation && (
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 to-indigo-500/10 animate-pulse" />
+            )}
+            
+            <div className="relative z-10 p-6">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${
+                            enableObfuscation && isPro
+                                ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-500/30'
+                                : 'bg-white/10 text-slate-400'
+                        }`}>
+                            <Shield size={28} />
+                        </div>
+                        
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-white text-lg">Advanced Obfuscation</h3>
+                                {!isPro && (
+                                    <span className="px-2 py-0.5 bg-gradient-to-r from-purple-500 to-indigo-500 text-white text-xs font-bold rounded-full flex items-center gap-1">
+                                        <Sparkles size={10} />
+                                        PRO
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-sm text-slate-400 max-w-lg">
+                                {isPro 
+                                    ? 'Protect your source code with advanced obfuscation. Makes reverse engineering significantly harder.'
+                                    : 'Upgrade to Pro to enable advanced code obfuscation and protect against reverse engineering.'
+                                }
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        {!isPro ? (
+                            <button
+                                onClick={handleUpgrade}
+                                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-sm font-semibold rounded-xl transition-all hover:scale-105 flex items-center gap-2"
+                            >
+                                <Sparkles size={16} />
+                                Upgrade to Pro
+                            </button>
+                        ) : (
+                            <label className="flex items-center gap-3 cursor-pointer select-none">
+                                <span className={`text-sm font-medium ${enableObfuscation ? 'text-purple-400' : 'text-slate-500'}`}>
+                                    {enableObfuscation ? 'Enabled' : 'Disabled'}
+                                </span>
+                                <div 
+                                    onClick={handleToggle}
+                                    className={`w-16 h-9 rounded-full p-1 transition-colors duration-300 cursor-pointer ${
+                                        enableObfuscation ? 'bg-purple-600' : 'bg-slate-700'
+                                    }`}
+                                >
+                                    <div className={`w-7 h-7 rounded-full bg-white shadow-sm transition-transform duration-300 ${
+                                        enableObfuscation ? 'translate-x-7' : 'translate-x-0'
+                                    }`} />
+                                </div>
+                            </label>
+                        )}
+                    </div>
+                </div>
+
+                {/* Feature highlights */}
+                {isPro && (
+                    <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4">
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableObfuscation ? 'Hard' : 'Easy'}
+                            </div>
+                            <div className="text-xs text-slate-500">Reversal Difficulty</div>
+                        </div>
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableObfuscation ? '5+' : '0'}
+                            </div>
+                            <div className="text-xs text-slate-500">Protection Layers</div>
+                        </div>
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableObfuscation ? 'High' : 'None'}
+                            </div>
+                            <div className="text-xs text-slate-500">Security Level</div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+ObfuscationToggleCard.displayName = 'ObfuscationToggleCard';
 
 Step3Configure.displayName = 'Step3Configure';
 

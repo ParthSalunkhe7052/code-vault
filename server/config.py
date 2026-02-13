@@ -129,7 +129,7 @@ if ENVIRONMENT == "production":
             "Set JWT_SECRET environment variable to a secure random value. "
             "Generate one with: openssl rand -hex 32"
         )
-    
+
     # Validate minimum length
     if len(SECRET_KEY) < 32:
         raise ValueError("SECRET_KEY must be at least 32 characters long")
@@ -156,12 +156,16 @@ if ENVIRONMENT == "production":
         config_issues.append("SECRET_KEY must be changed from default in production!")
     if JWT_SECRET == "jwt-secret-change-in-production":
         config_issues.append("JWT_SECRET must be changed from default in production!")
-    
+
     if not BUILD_CALLBACK_SECRET:
-        config_issues.append("BUILD_CALLBACK_SECRET must be set in production for Cloud Build security!")
-    
+        config_issues.append(
+            "BUILD_CALLBACK_SECRET must be set in production for Cloud Build security!"
+        )
+
     if not PUBLIC_API_URL or "localhost" in PUBLIC_API_URL:
-        config_issues.append("PUBLIC_API_URL must be set to your production domain (e.g., https://api.codevault.parth7.me)")
+        config_issues.append(
+            "PUBLIC_API_URL must be set to your production domain (e.g., https://api.codevault.parth7.me)"
+        )
 
     if not POLAR_WEBHOOK_SECRET:
         # Warn but don't block startup — webhook endpoint will reject unsigned payloads
@@ -203,6 +207,35 @@ if config_issues:
 
 # Log current environment for visibility
 print(f"[Config] Environment: {ENVIRONMENT}")
+
+# Production environment guard
+if ENVIRONMENT != "production":
+    import logging
+
+    # Check if we're running on a production host
+    import socket
+
+    hostname = socket.gethostname().lower()
+    production_hosts = ["heroku", "aws", "prod", "production", "codevault"]
+
+    is_production_host = any(host in hostname for host in production_hosts)
+
+    if is_production_host:
+        logging.critical(
+            "[Config] CRITICAL WARNING: Running with ENVIRONMENT='{}' on what appears to be "
+            "a production host ('{}'). Set ENVIRONMENT=production for production deployments!".format(
+                ENVIRONMENT, hostname
+            )
+        )
+
+    # Additional check: Heroku-specific
+    import os
+
+    if os.getenv("DYNO") and ENVIRONMENT != "production":
+        logging.critical(
+            "[Config] CRITICAL: Running on Heroku (DYNO environment variable detected) "
+            "but ENVIRONMENT is not set to 'production'. This is a security risk!"
+        )
 
 # Build Credit Costs
 BUILD_COST_STANDARD = 1

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 import httpx
 
-from utils import get_current_user, utc_now, sanitize_log_message
+from utils import get_current_user, utc_now, sanitize_log_message, get_user_tier_limits
 from database import get_db, release_db
 from models import WebhookCreateRequest
 from middleware.tier_enforcement import requires_feature
@@ -38,6 +38,7 @@ WEBHOOK_EVENTS = [
     "compilation.started",
     "compilation.completed",
     "compilation.failed",
+    "tamper.alert",  # Fired when license validation fails due to tampering
 ]
 
 # Blocked hostnames and IP ranges for SSRF protection
@@ -392,11 +393,23 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
         await release_db(conn)
 
 
-@router.post("", dependencies=[Depends(requires_feature("webhooks"))])
+@router.post("")
 async def create_webhook(
     data: WebhookCreateRequest, user: dict = Depends(get_current_user)
 ):
-    """Create a new webhook."""
+    """Create a new webhook. Requires 'webhooks' feature on tier."""
+    # Check tier feature for webhook creation
+    conn = await get_db()
+    try:
+        limits = await get_user_tier_limits(user["id"], conn)
+        if not limits.get("webhooks", False):
+            raise HTTPException(
+                status_code=403,
+                detail="Webhooks are not available on your current plan. Please upgrade."
+            )
+    finally:
+        await release_db(conn)
+
     invalid_events = [e for e in data.events if e not in WEBHOOK_EVENTS]
     if invalid_events:
         raise HTTPException(status_code=400, detail=f"Invalid events: {invalid_events}")

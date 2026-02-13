@@ -99,6 +99,202 @@ from routes.build_routes import cleanup_compile_cache
 
 
 # =============================================================================
+# Subscription Expiry Background Job
+# =============================================================================
+
+
+async def check_expired_subscriptions():
+    """Background task that runs every hour to check and expire subscriptions.
+
+    Queries subscriptions WHERE status='canceled' AND current_period_end < NOW(),
+    then for each: UPDATE users SET plan='free', UPDATE subscriptions SET status='expired'
+    """
+    from database import get_db, release_db
+    import asyncio
+
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Run every hour
+
+            conn = await get_db()
+            try:
+                # Find expired subscriptions
+                expired_subs = await conn.fetch(
+                    """
+                    SELECT id, user_id 
+                    FROM subscriptions 
+                    WHERE status = 'canceled' 
+                    AND current_period_end < NOW()
+                    """
+                )
+
+                if expired_subs:
+                    logging.getLogger(__name__).info(
+                        f"[Subscription Expiry] Found {len(expired_subs)} expired subscription(s)"
+                    )
+
+                    for sub in expired_subs:
+                        user_id = sub["user_id"]
+                        sub_id = sub["id"]
+
+                        # Downgrade user to free
+                        await conn.execute(
+                            "UPDATE users SET plan = 'free' WHERE id = $1", user_id
+                        )
+
+                        # Mark subscription as expired
+                        await conn.execute(
+                            """
+                            UPDATE subscriptions 
+                            SET status = 'expired', updated_at = NOW() 
+                            WHERE id = $1
+                            """,
+                            sub_id,
+                        )
+
+                        logging.getLogger(__name__).info(
+                            f"[Subscription Expiry] User {user_id} downgraded to free, subscription {sub_id} marked as expired"
+                        )
+            except Exception as e:
+                logging.getLogger(__name__).error(
+                    f"[Subscription Expiry] Error checking expired subscriptions: {e}"
+                )
+            finally:
+                await release_db(conn)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"[Subscription Expiry] Outer loop error: {e}"
+            )
+
+
+async def check_expiring_licenses():
+    """Background task that runs daily to check and notify about expiring licenses.
+
+    Notifies license holders when their licenses are expiring in 7, 3, and 1 days.
+    """
+    from database import get_db, release_db
+    from email_service import notify_license_expiring
+    import asyncio
+    from datetime import timedelta
+
+    while True:
+        try:
+            await asyncio.sleep(86400)  # Run once per day
+
+            conn = await get_db()
+            try:
+                # Check for licenses expiring in 7 days
+                expiring_7_days = await conn.fetch(
+                    """
+                    SELECT l.id, l.license_key, l.client_name, l.client_email, l.expires_at, p.name as project_name, p.user_id
+                    FROM licenses l
+                    JOIN projects p ON l.project_id = p.id
+                    WHERE l.status = 'active'
+                      AND l.expires_at IS NOT NULL
+                      AND l.expires_at BETWEEN NOW() AND NOW() + INTERVAL '7 days'
+                      AND l.client_email IS NOT NULL
+                    """
+                )
+
+                # Check for licenses expiring in 3 days
+                expiring_3_days = await conn.fetch(
+                    """
+                    SELECT l.id, l.license_key, l.client_name, l.client_email, l.expires_at, p.name as project_name, p.user_id
+                    FROM licenses l
+                    JOIN projects p ON l.project_id = p.id
+                    WHERE l.status = 'active'
+                      AND l.expires_at IS NOT NULL
+                      AND l.expires_at BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+                      AND l.client_email IS NOT NULL
+                    """
+                )
+
+                # Check for licenses expiring in 1 day
+                expiring_1_day = await conn.fetch(
+                    """
+                    SELECT l.id, l.license_key, l.client_name, l.client_email, l.expires_at, p.name as project_name, p.user_id
+                    FROM licenses l
+                    JOIN projects p ON l.project_id = p.id
+                    WHERE l.status = 'active'
+                      AND l.expires_at IS NOT NULL
+                      AND l.expires_at BETWEEN NOW() AND NOW() + INTERVAL '1 day'
+                      AND l.client_email IS NOT NULL
+                    """
+                )
+
+                # Send notifications (7 days)
+                for lic in expiring_7_days:
+                    try:
+                        await notify_license_expiring(
+                            lic["client_name"] or "Customer",
+                            lic["client_email"],
+                            lic["license_key"],
+                            lic["project_name"],
+                            lic["expires_at"],
+                            7,
+                        )
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            f"[License Expiry] Failed to send 7-day notice for {lic['license_key']}: {e}"
+                        )
+
+                # Send notifications (3 days)
+                for lic in expiring_3_days:
+                    try:
+                        await notify_license_expiring(
+                            lic["client_name"] or "Customer",
+                            lic["client_email"],
+                            lic["license_key"],
+                            lic["project_name"],
+                            lic["expires_at"],
+                            3,
+                        )
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            f"[License Expiry] Failed to send 3-day notice for {lic['license_key']}: {e}"
+                        )
+
+                # Send notifications (1 day)
+                for lic in expiring_1_day:
+                    try:
+                        await notify_license_expiring(
+                            lic["client_name"] or "Customer",
+                            lic["client_email"],
+                            lic["license_key"],
+                            lic["project_name"],
+                            lic["expires_at"],
+                            1,
+                        )
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            f"[License Expiry] Failed to send 1-day notice for {lic['license_key']}: {e}"
+                        )
+
+                total_notifications = (
+                    len(expiring_7_days) + len(expiring_3_days) + len(expiring_1_day)
+                )
+                if total_notifications > 0:
+                    logging.getLogger(__name__).info(
+                        f"[License Expiry] Sent notifications for {total_notifications} expiring license(s)"
+                    )
+
+            except Exception as e:
+                logging.getLogger(__name__).error(
+                    f"[License Expiry] Error checking expiring licenses: {e}"
+                )
+            finally:
+                await release_db(conn)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.getLogger(__name__).error(f"[License Expiry] Outer loop error: {e}")
+
+
+# =============================================================================
 # FastAPI App Initialization
 # =============================================================================
 
@@ -137,9 +333,17 @@ async def app_lifespan(app: FastAPI):
         _background_tasks.append(
             asyncio.create_task(start_health_monitoring(interval_seconds=60))
         )
+        _background_tasks.append(asyncio.create_task(check_expired_subscriptions()))
+        _background_tasks.append(asyncio.create_task(check_expiring_licenses()))
         logging.getLogger(__name__).info("[Startup] Background cleanup tasks started")
         logging.getLogger(__name__).info("[Startup] Webhook retry processor started")
         logging.getLogger(__name__).info("[Startup] Health monitoring started")
+        logging.getLogger(__name__).info(
+            "[Startup] Subscription expiry checker started"
+        )
+        logging.getLogger(__name__).info(
+            "[Startup] License expiry notification checker started"
+        )
         yield
 
         # Cancel background tasks on shutdown

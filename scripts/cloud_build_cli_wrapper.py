@@ -74,6 +74,20 @@ class CloudBuildClient:
         _compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
         _fast_build = str(build_config.get("fast_build", False)).lower()
 
+        # SECURITY SYNC: Add Ed25519, binary hash, and heartbeat config (synced with CLI wrapper)
+        # These features ensure cloud builds have the same security as local CLI builds
+        signing_public_key = build_config.get("signing_public_key", "")
+        signing_private_key = build_config.get("signing_private_key", "")
+        heartbeat_interval = build_config.get("heartbeat_interval", 300)
+        binary_hash = build_config.get("binary_hash", "")
+
+        config["signing_public_key"] = signing_public_key
+        config["signing_private_key"] = signing_private_key
+        config["heartbeat_interval"] = heartbeat_interval
+        config["binary_hash_tracking"] = True
+        config["binary_hash"] = binary_hash
+        config["enable_ed25519_signatures"] = bool(signing_public_key)
+
         # Upload config to GCS to avoid 8KB substitution limit
         # Cloud Build has an 8KB limit on substitution variable values
         from google.cloud import storage as gcs_storage

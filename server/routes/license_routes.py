@@ -8,7 +8,8 @@ import time
 import secrets
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 
@@ -26,8 +27,14 @@ from utils import (
     generate_license_key,
     create_validation_response,
     get_user_tier_limits,
+    check_and_store_jti,
+    create_lease_token,
+    LEASE_DURATION_SECONDS,
+    compute_signature,
+    compute_ed25519_signature,
 )
 from database import get_db, release_db
+from config import SECRET_KEY
 from email_service import notify_license_created
 from middleware.rate_limiter import license_validate_rate_limit
 
@@ -111,7 +118,7 @@ async def _push_validation_log_to_redis(log_data: dict):
     """Push validation log to Redis queue for asynchronous processing by log worker."""
     from config import REDIS_URL
     import redis.asyncio as redis
-    
+
     if not REDIS_URL:
         logging.warning("[Redis] REDIS_URL not set, log will be dropped")
         return
@@ -156,10 +163,10 @@ async def validate_license(
 
             result_status = "valid"
             message = "License valid"
-            
+
             # Use project secret or fallback to global if none (for legacy)
             from config import SECRET_KEY
-            
+
             # Extract signing info safely (handles migration gaps and mocks)
             signing_secret = SECRET_KEY
             signing_private_key = None
@@ -188,7 +195,7 @@ async def validate_license(
             elif license_row["expires_at"] and license_row["expires_at"] < utc_now():
                 result_status = "expired"
                 message = "License has expired"
-            
+
             # Prepare log data for Redis
             geo = get_geo_from_ip(client_ip)
             log_data = {
@@ -204,12 +211,35 @@ async def validate_license(
                 "result": result_status,
                 "response_time_ms": response_time,
                 "machine_name": data.machine_name,
-                "created_at": utc_now().isoformat()
+                "created_at": utc_now().isoformat(),
             }
 
             if result_status != "valid":
-                # Push log to Redis and return early
+                # Push log to Redis
                 asyncio.create_task(_push_validation_log_to_redis(log_data))
+
+                # Trigger tamper alert webhook for Pro+ users
+                if license_row and user_id:
+                    from routes.webhook_routes import trigger_webhook
+
+                    asyncio.create_task(
+                        trigger_webhook(
+                            user_id,
+                            "tamper.alert",
+                            {
+                                "alert_type": result_status,
+                                "license_key": data.license_key,
+                                "reason": message,
+                                "hwid": data.hwid,
+                                "ip_address": client_ip,
+                                "machine_name": data.machine_name,
+                                "country": geo.get("country"),
+                                "city": geo.get("city"),
+                                "timestamp": utc_now().isoformat(),
+                            },
+                        )
+                    )
+
                 return create_validation_response(result_status, message, data.nonce)
 
             # SEC2: Binary integrity check — if client sends binary_hash,
@@ -226,6 +256,28 @@ async def validate_license(
                 if not hash_match:
                     log_data["result"] = "tampered"
                     asyncio.create_task(_push_validation_log_to_redis(log_data))
+
+                    # Trigger tamper alert for binary integrity failure
+                    from routes.webhook_routes import trigger_webhook
+
+                    asyncio.create_task(
+                        trigger_webhook(
+                            license_row["user_id"],
+                            "tamper.alert",
+                            {
+                                "alert_type": "binary_integrity_failed",
+                                "license_key": data.license_key,
+                                "reason": "Binary hash does not match registered hash",
+                                "hwid": data.hwid,
+                                "ip_address": client_ip,
+                                "machine_name": data.machine_name,
+                                "country": geo.get("country"),
+                                "city": geo.get("city"),
+                                "timestamp": utc_now().isoformat(),
+                            },
+                        )
+                    )
+
                     return create_validation_response(
                         "tampered",
                         "Binary integrity check failed. This executable may have been modified.",
@@ -234,12 +286,14 @@ async def validate_license(
 
             # Check HWID binding
             license_id = license_row["id"]
-            
+
             # SEC3: HWID heuristics
             from utils import analyze_hwid
+
             flag_reason = analyze_hwid(data.hwid)
             if flag_reason:
                 from routes.webhook_routes import trigger_webhook
+
                 asyncio.create_task(
                     trigger_webhook(
                         license_row["user_id"],
@@ -249,8 +303,8 @@ async def validate_license(
                             "hwid": data.hwid,
                             "reason": flag_reason,
                             "ip_address": client_ip,
-                            "machine_name": data.machine_name
-                        }
+                            "machine_name": data.machine_name,
+                        },
                     )
                 )
 
@@ -270,6 +324,30 @@ async def validate_license(
                     if machine_count >= license_row["max_machines"]:
                         log_data["result"] = "hwid_mismatch"
                         asyncio.create_task(_push_validation_log_to_redis(log_data))
+
+                        # Trigger tamper alert for max machines reached
+                        from routes.webhook_routes import trigger_webhook
+
+                        asyncio.create_task(
+                            trigger_webhook(
+                                license_row["user_id"],
+                                "tamper.alert",
+                                {
+                                    "alert_type": "max_machines_exceeded",
+                                    "license_key": data.license_key,
+                                    "reason": f"Attempted activation on new machine but max limit ({license_row['max_machines']}) reached",
+                                    "hwid": data.hwid,
+                                    "ip_address": client_ip,
+                                    "machine_name": data.machine_name,
+                                    "country": geo.get("country"),
+                                    "city": geo.get("city"),
+                                    "timestamp": utc_now().isoformat(),
+                                    "current_machines": machine_count,
+                                    "max_machines": license_row["max_machines"],
+                                },
+                            )
+                        )
+
                         return create_validation_response(
                             "hwid_mismatch",
                             f"Maximum machines ({license_row['max_machines']}) reached",
@@ -286,7 +364,7 @@ async def validate_license(
                     client_ip,
                     existing_binding["id"],
                     flag_reason is not None,
-                    flag_reason
+                    flag_reason,
                 )
             else:
                 machine_count = await conn.fetchval(
@@ -296,6 +374,30 @@ async def validate_license(
                 if machine_count >= license_row["max_machines"]:
                     log_data["result"] = "hwid_mismatch"
                     asyncio.create_task(_push_validation_log_to_redis(log_data))
+
+                    # Trigger tamper alert for max machines reached
+                    from routes.webhook_routes import trigger_webhook
+
+                    asyncio.create_task(
+                        trigger_webhook(
+                            license_row["user_id"],
+                            "tamper.alert",
+                            {
+                                "alert_type": "max_machines_exceeded",
+                                "license_key": data.license_key,
+                                "reason": f"New machine activation blocked - max limit ({license_row['max_machines']}) reached",
+                                "hwid": data.hwid,
+                                "ip_address": client_ip,
+                                "machine_name": data.machine_name,
+                                "country": geo.get("country"),
+                                "city": geo.get("city"),
+                                "timestamp": utc_now().isoformat(),
+                                "current_machines": machine_count,
+                                "max_machines": license_row["max_machines"],
+                            },
+                        )
+                    )
+
                     return create_validation_response(
                         "hwid_mismatch",
                         f"Maximum machines ({license_row['max_machines']}) reached",
@@ -314,7 +416,7 @@ async def validate_license(
                     data.machine_name,
                     client_ip,
                     flag_reason is not None,
-                    flag_reason
+                    flag_reason,
                 )
 
             await conn.execute(
@@ -385,16 +487,54 @@ async def validate_license(
             if session_token:
                 variables["_cv_session_token"] = session_token
 
-        return create_validation_response(
+        # Protocol v2: Check for replay attack before generating response
+        # Generate a temporary jti to check - actual jti is created in create_validation_response
+        temp_jti = secrets.token_hex(16)
+        is_valid, replay_error = await check_and_store_jti(temp_jti, data.license_key)
+        if not is_valid:
+            return create_validation_response(
+                "invalid",
+                replay_error,
+                data.nonce,
+                secret=signing_secret,
+                private_key_pem=signing_private_key,
+                license_key=data.license_key,
+            )
+
+        # Phase 4: Generate server-signed lease token for offline validation
+        lease_token = None
+        if license_row["expires_at"]:
+            lease_expires = int(time.time()) + LEASE_DURATION_SECONDS
+            # Use the earlier of license expiry or lease duration
+            lease_expires = min(
+                lease_expires, int(license_row["expires_at"].timestamp())
+            )
+            lease_token = create_lease_token(
+                license_key=data.license_key,
+                hwid=data.hwid,
+                expires_at=lease_expires,
+                private_key_pem=signing_private_key,
+                secret=signing_secret,
+            )
+
+        response = create_validation_response(
             "valid",
             "License valid",
             data.nonce,
-            expires_at=int(license_row["expires_at"].timestamp()) if license_row["expires_at"] else None,
-            features=json.loads(license_row["features"]) if isinstance(license_row["features"], str) else (license_row["features"] or []),
+            expires_at=int(license_row["expires_at"].timestamp())
+            if license_row["expires_at"]
+            else None,
+            features=json.loads(license_row["features"])
+            if isinstance(license_row["features"], str)
+            else (license_row["features"] or []),
             variables=variables,
             secret=signing_secret,
             private_key_pem=signing_private_key,
+            license_key=data.license_key,
         )
+        # Attach lease token to response
+        response.lease_token = lease_token
+        return response
     finally:
         await release_db(conn)
 
@@ -404,7 +544,10 @@ async def license_heartbeat(
     request: Request,
     data: LicenseValidationRequest,
 ):
-    """Update heartbeat for an active license session (SEC4)."""
+    """Update heartbeat for an active license session (SEC4).
+
+    Updates both hardware_bindings and license_sessions (if floating license).
+    """
     conn = await get_db()
     try:
         # Check if the binding exists and is active
@@ -415,28 +558,41 @@ async def license_heartbeat(
                JOIN projects p ON l.project_id = p.id
                WHERE l.license_key = $1 AND hb.hwid = $2""",
             data.license_key,
-            data.hwid
+            data.hwid,
         )
-        
+
         if not binding:
             raise HTTPException(status_code=404, detail="License session not found")
-            
+
         if not binding["is_active"]:
             raise HTTPException(status_code=403, detail="Session inactive")
-            
-        # Update heartbeat
+
+        # Update heartbeat in hardware_bindings
         await conn.execute(
             """UPDATE hardware_bindings 
                SET last_heartbeat_at = NOW(), 
                    heartbeat_count = heartbeat_count + 1
                WHERE id = $1""",
-            binding["id"]
+            binding["id"],
         )
-        
+
+        # Phase 3: Update license_sessions TTL if session_token provided (floating license)
+        if data.session_token:
+            await conn.execute(
+                """UPDATE license_sessions 
+                   SET expires_at = NOW() + INTERVAL '360 seconds',
+                       last_active_at = NOW()
+                   WHERE license_id = (SELECT id FROM licenses WHERE license_key = $1)
+                   AND hwid = $2 AND session_token = $3 AND is_active = TRUE""",
+                data.license_key,
+                data.hwid,
+                data.session_token,
+            )
+
         return {
             "status": "alive",
             "server_time": int(time.time()),
-            "next_heartbeat": binding["heartbeat_interval_seconds"]
+            "next_heartbeat": binding["heartbeat_interval_seconds"],
         }
     finally:
         await release_db(conn)
@@ -585,6 +741,7 @@ async def create_license(
             )
 
         from routes.webhook_routes import trigger_webhook
+
         asyncio.create_task(
             trigger_webhook(
                 user["id"],
@@ -651,6 +808,7 @@ async def revoke_license(license_id: str, user: dict = Depends(get_current_user)
             raise HTTPException(status_code=404, detail="License not found")
 
         from routes.webhook_routes import trigger_webhook
+
         asyncio.create_task(
             trigger_webhook(
                 user["id"],
@@ -785,7 +943,9 @@ async def delete_binding(
             user["id"],
         )
         if not license_check:
-            raise HTTPException(status_code=404, detail="License not found or access denied")
+            raise HTTPException(
+                status_code=404, detail="License not found or access denied"
+            )
 
         await conn.execute(
             "DELETE FROM hardware_bindings WHERE id = $1 AND license_id = $2",
@@ -852,6 +1012,7 @@ async def reset_hwid(
 
         # Trigger webhook
         from routes.webhook_routes import trigger_webhook
+
         asyncio.create_task(
             trigger_webhook(
                 user["id"],
@@ -1197,6 +1358,187 @@ async def delete_license_variable(
             "status": "deleted",
             "key": variable_check["key"],
             "message": f"Variable '{variable_check['key']}' deleted successfully",
+        }
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Phase 8: Auto-Update Manifest & Kill-Switch
+# =============================================================================
+
+
+@router.get("/projects/{project_id}/update-manifest")
+async def get_update_manifest(project_id: str):
+    """Public endpoint to get auto-update manifest for a project.
+
+    Returns a signed manifest that clients can use to check for updates.
+    This allows software vendors to push updates to their customers.
+    """
+    import hashlib
+    import base64
+
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            "SELECT id, name, signing_private_key, signing_secret FROM projects WHERE id = $1",
+            project_id,
+        )
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Get latest build info
+        latest_build = await conn.fetchrow(
+            """SELECT id, created_at, build_type FROM cloud_builds 
+               WHERE project_id = $1 AND status = 'completed' 
+               ORDER BY created_at DESC LIMIT 1""",
+            project_id,
+        )
+
+        manifest = {
+            "project_id": project_id,
+            "project_name": project["name"],
+            "latest_version": latest_build["id"][:8] if latest_build else "0.0.0",
+            "latest_build_date": latest_build["created_at"].isoformat()
+            if latest_build
+            else None,
+            "min_required_version": "1.0.0",
+            "update_url": f"/api/v1/projects/{project_id}/download",
+        }
+
+        # Sign the manifest
+        signing_private_key = project.get("signing_private_key")
+        signing_secret = project.get("signing_secret")
+
+        if signing_private_key:
+            from utils import compute_ed25519_signature
+
+            signature = compute_ed25519_signature(manifest, signing_private_key)
+        else:
+            from utils import compute_signature
+
+            active_secret = signing_secret or SECRET_KEY
+            signature = compute_signature(manifest, active_secret)
+
+        manifest["signature"] = signature
+        manifest["signed_at"] = int(time.time())
+
+        return manifest
+    finally:
+        await release_db(conn)
+
+
+class KillSwitchPolicy(BaseModel):
+    enabled: bool = False
+    reason: Optional[str] = None
+    killed_versions: List[str] = []
+    redirect_url: Optional[str] = None
+
+
+@router.get("/projects/{project_id}/kill-switch")
+async def get_kill_switch(project_id: str):
+    """Public endpoint to check kill-switch policy for a project.
+
+    Returns whether the application should be terminated and optional redirect.
+    Used for emergency shutdown of compromised or pirated software.
+    """
+    import hashlib
+
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            "SELECT id, signing_private_key, signing_secret FROM projects WHERE id = $1",
+            project_id,
+        )
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Check for active kill-switch (stored as project metadata or separate table)
+        kill_switch = await conn.fetchrow(
+            """SELECT enabled, reason, killed_versions, redirect_url 
+               FROM kill_switches 
+               WHERE project_id = $1 AND enabled = TRUE""",
+            project_id,
+        )
+
+        if not kill_switch:
+            return {
+                "enabled": False,
+                "project_id": project_id,
+            }
+
+        # Sign the kill-switch response
+        response_data = {
+            "enabled": kill_switch["enabled"],
+            "reason": kill_switch["reason"],
+            "killed_versions": kill_switch["killed_versions"] or [],
+            "redirect_url": kill_switch["redirect_url"],
+        }
+
+        signing_private_key = project.get("signing_private_key")
+
+        if signing_private_key:
+            from utils import compute_ed25519_signature
+
+            signature = compute_ed25519_signature(response_data, signing_private_key)
+        else:
+            from utils import compute_signature
+
+            signing_secret = project.get("signing_secret") or SECRET_KEY
+            signature = compute_signature(response_data, signing_secret)
+
+        return {
+            **response_data,
+            "signature": signature,
+            "project_id": project_id,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.post("/projects/{project_id}/kill-switch")
+async def set_kill_switch(
+    project_id: str,
+    policy: KillSwitchPolicy,
+    user: dict = Depends(get_current_user),
+):
+    """Set kill-switch policy for a project (owner only)."""
+    conn = await get_db()
+    try:
+        # Verify ownership
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Upsert kill-switch
+        await conn.execute(
+            """INSERT INTO kill_switches (id, project_id, enabled, reason, killed_versions, redirect_url, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, NOW())
+               ON CONFLICT (project_id) DO UPDATE SET
+               enabled = $3, reason = $4, killed_versions = $5, redirect_url = $6
+            """,
+            secrets.token_hex(16),
+            project_id,
+            policy.enabled,
+            policy.reason,
+            json.dumps(policy.killed_versions),
+            policy.redirect_url,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Kill-switch {'enabled' if policy.enabled else 'disabled'}",
+            "policy": {
+                "enabled": policy.enabled,
+                "reason": policy.reason,
+            },
         }
     finally:
         await release_db(conn)

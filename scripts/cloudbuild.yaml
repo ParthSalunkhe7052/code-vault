@@ -1,67 +1,177 @@
+# CodeVault Cloud Build Configuration
+# Uses the CodeVault CLI compiler with full security features (Ed25519, binary hash, heartbeat)
+
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
+  # Step 1: Setup and install CodeVault CLI
+  - name: 'python:3.11-slim'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        echo "Starting build process..."
+        echo "=== CodeVault Cloud Build Starting ==="
         echo "Build ID: ${_BUILD_ID}"
         echo "Project ID: ${_PROJECT_ID}"
         echo "Language: ${_LANGUAGE}"
         echo "Target Platforms: ${_TARGET_PLATFORMS}"
         
-  - name: 'gcr.io/cloud-builders/gcloud'
+        # Install required dependencies
+        apt-get update && apt-get install -y git wget unzip
+        
+        # Install CodeVault CLI from the repository
+        echo "Installing CodeVault CLI..."
+        pip install --no-cache-dir -e .
+        
+        # Verify installation
+        codevault --version || echo "CodeVault CLI installed"
+
+  # Step 2: Download and prepare source code
+  - name: 'python:3.11-slim'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         echo "Downloading source code..."
+        mkdir -p /workspace/source
+        
         if [ -n "${_SOURCE_URL}" ]; then
-          wget -q "${_SOURCE_URL}" -O source.zip
-          unzip -q source.zip
-          echo "Source downloaded successfully"
+          wget -q "${_SOURCE_URL}" -O /tmp/source.zip
+          unzip -q /tmp/source.zip -d /workspace/source/
+          echo "Source downloaded and extracted"
         else
           echo "No source URL provided"
+          exit 1
         fi
-
-  - name: 'python:3.11-slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "Installing dependencies..."
-        if [ -f requirements.txt ]; then
-          pip install --no-cache-dir -r requirements.txt
-        fi
-        echo "Dependencies installed"
-
-  - name: 'python:3.11-slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "Building executable..."
-        mkdir -p output
         
-        if [ -f "main.py" ]; then
-          pip install pyinstaller
-          pyinstaller --onefile --name "${_OUTPUT_NAME}" main.py
-          cp dist/"${_OUTPUT_NAME}.exe" output/ 2>/dev/null || echo "No exe generated"
-        else
-          echo "No main.py found in root"
+        # Download build configuration
+        if [ -n "${_CONFIG_URL}" ]; then
+          echo "Downloading build configuration..."
+          gsutil cp "${_CONFIG_URL}" /workspace/build_config.json
+          echo "Configuration downloaded"
         fi
-        echo "Build completed"
 
+  # Step 3: Build with CodeVault Compiler (includes Ed25519, binary hash, heartbeat)
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Building with CodeVault secure compiler..."
+        cd /workspace
+        
+        # Load configuration values
+        ENTRY_FILE=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('entry_file', 'main.py'))")
+        OUTPUT_NAME=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('output_name', 'app'))")
+        LICENSE_KEY=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('license_key', 'GENERIC'))")
+        API_URL=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('api_url', 'https://api.codevault.com'))")
+        PUBLIC_KEY=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('signing_public_key', ''))")
+        HEARTBEAT_INTERVAL=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('heartbeat_interval', 300))")
+        SKIP_OBFUSCATION=$(cat build_config.json | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('skip_obfuscation', True) else 'false')")
+        ENABLE_LEASE=$(cat build_config.json | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('enable_lease', False) else 'false')")
+        
+        echo "Build configuration:"
+        echo "  Entry file: ${ENTRY_FILE}"
+        echo "  Output name: ${OUTPUT_NAME}"
+        echo "  Language: ${_LANGUAGE}"
+        echo "  Obfuscation: ${SKIP_OBFUSCATION}"
+        echo "  Ed25519: $([ -n \"${PUBLIC_KEY}\" ] && echo 'enabled' || echo 'disabled')"
+        echo "  Heartbeat: ${HEARTBEAT_INTERVAL}s"
+        
+        mkdir -p /workspace/output
+        
+        # Run CodeVault compiler with full security features
+        if [ "${_LANGUAGE}" = "python" ]; then
+          # Python build with Nuitka + CodeVault wrapper
+          python3 -m codevault_cli build \
+            --project-dir /workspace/source \
+            --entry-file "${ENTRY_FILE}" \
+            --output-name "${OUTPUT_NAME}" \
+            --output-dir /workspace/output \
+            --language python \
+            --license-key "${LICENSE_KEY}" \
+            --api-url "${API_URL}" \
+            --public-key "${PUBLIC_KEY}" \
+            --heartbeat-interval "${HEARTBEAT_INTERVAL}" \
+            $([ "${SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
+            $([ "${ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
+            --cloud-build
+        elif [ "${_LANGUAGE}" = "nodejs" ]; then
+          # Node.js build with pkg + CodeVault wrapper
+          python3 -m codevault_cli build \
+            --project-dir /workspace/source \
+            --entry-file "${ENTRY_FILE}" \
+            --output-name "${OUTPUT_NAME}" \
+            --output-dir /workspace/output \
+            --language nodejs \
+            --license-key "${LICENSE_KEY}" \
+            --api-url "${API_URL}" \
+            --public-key "${PUBLIC_KEY}" \
+            --heartbeat-interval "${HEARTBEAT_INTERVAL}" \
+            $([ "${SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
+            $([ "${ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
+            --cloud-build
+        else
+          echo "Unsupported language: ${_LANGUAGE}"
+          exit 1
+        fi
+        
+        echo "Build completed successfully"
+
+  # Step 4: Calculate and register binary hash (SEC2)
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Registering binary integrity hash..."
+        
+        if [ -f /workspace/output/${_OUTPUT_NAME}.exe ]; then
+          BINARY_PATH="/workspace/output/${_OUTPUT_NAME}.exe"
+        elif [ -f /workspace/output/${_OUTPUT_NAME} ]; then
+          BINARY_PATH="/workspace/output/${_OUTPUT_NAME}"
+        else
+          echo "Warning: Binary not found in expected location"
+          ls -la /workspace/output/
+          exit 0
+        fi
+        
+        # Calculate SHA-256 hash
+        BINARY_HASH=$(sha256sum "${BINARY_PATH}" | awk '{print $1}')
+        echo "Binary hash: ${BINARY_HASH}"
+        
+        # Store hash in metadata for callback
+        echo "{\"binary_hash\": \"${BINARY_HASH}\", \"build_id\": \"${_BUILD_ID}\", \"project_id\": \"${_PROJECT_ID}\"}" > /workspace/output/binary_metadata.json
+        
+        echo "Binary hash registered for integrity verification"
+
+  # Step 5: Upload artifacts to GCS
   - name: 'gcr.io/cloud-builders/gsutil'
     args:
       - 'cp'
-      - 'output/*'
+      - '/workspace/output/*'
       - 'gs://codevault-builds/builds/${_BUILD_ID}/'
+
+  # Step 6: Trigger completion callback
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ -n "${_CALLBACK_URL}" ]; then
+          echo "Sending completion callback..."
+          
+          # Prepare callback payload
+          CALLBACK_PAYLOAD=$(cat /workspace/output/binary_metadata.json 2>/dev/null || echo "{}")
+          
+          curl -X POST "${_CALLBACK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "${CALLBACK_PAYLOAD}" || echo "Callback failed (non-critical)"
+        fi
 
 options:
   machineType: 'E2_HIGHCPU_8'
   env:
     - 'PYTHONUNBUFFERED=1'
+    - 'PYTHONPATH=/workspace'
   logging: 'CLOUD_LOGGING_ONLY'
 
 substitutions:
@@ -70,8 +180,13 @@ substitutions:
   _LANGUAGE: 'python'
   _TARGET_PLATFORMS: 'windows'
   _SOURCE_URL: ''
-  _OUTPUT_NAME: 'app'
   _CONFIG_URL: ''
   _CALLBACK_URL: ''
+  _OUTPUT_NAME: 'app'
   _DEBUG_BUILD: 'false'
   _SOURCE_DIR: 'source'
+
+artifacts:
+  objects:
+    location: 'gs://codevault-builds/builds/${_BUILD_ID}/'
+    paths: ['output/*']

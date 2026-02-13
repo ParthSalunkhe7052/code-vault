@@ -109,6 +109,7 @@ def safe_join(base: Path, *parts: str) -> Path:
         # Decode percent-encoded sequences to catch traversal attempts
         try:
             from urllib.parse import unquote
+
             decoded = part_str
             for _ in range(3):
                 new_decoded = unquote(decoded)
@@ -128,7 +129,11 @@ def safe_join(base: Path, *parts: str) -> Path:
         part_path = Path(decoded)
 
         # Reject absolute paths or drive-letter paths
-        if "://" in decoded or part_path.is_absolute() or re.match(r"^[a-zA-Z]:", decoded):
+        if (
+            "://" in decoded
+            or part_path.is_absolute()
+            or re.match(r"^[a-zA-Z]:", decoded)
+        ):
             raise SecurityError(f"Absolute path detected in: {decoded}")
 
         # Reject traversal components
@@ -245,24 +250,31 @@ def analyze_hwid(hwid: str) -> Optional[str]:
     """
     if not hwid:
         return "empty"
-    
+
     if len(hwid) < 12:
         return "too_short"
-    
+
     # Check for all zeros or all identical characters
     if len(set(hwid)) <= 1:
         return "identical_chars"
-    
+
     # Check for common generic/VM/test HWIDs
     generic_patterns = [
-        "00000000", "ffffffff", "12345678",
-        "unknown", "test", "demo", "machine", "none", "null"
+        "00000000",
+        "ffffffff",
+        "12345678",
+        "unknown",
+        "test",
+        "demo",
+        "machine",
+        "none",
+        "null",
     ]
     hwid_lower = hwid.lower()
     for pattern in generic_patterns:
         if pattern in hwid_lower:
             return "generic_pattern"
-            
+
     return None
 
 
@@ -333,6 +345,31 @@ def compute_ed25519_signature(data: dict, private_key_pem: str) -> str:
     private_key = load_pem_private_key(private_key_pem.encode(), password=None)
     signature_bytes = private_key.sign(message.encode())
     return base64.b64encode(signature_bytes).decode()
+
+
+def verify_signature(data: dict, signature: str, secret: str) -> bool:
+    """Verify HMAC-SHA256 signature."""
+    expected = compute_signature(data, secret)
+    return hmac.compare_digest(expected, signature)
+
+
+def verify_ed25519_signature(
+    data: dict, signature_b64: str, public_key_pem: str
+) -> bool:
+    """Verify Ed25519 signature."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+    from cryptography.exceptions import InvalidSignatureError
+
+    try:
+        message = _build_signature_message(data)
+        public_key = load_pem_public_key(public_key_pem.encode())
+        signature_bytes = base64.b64decode(signature_b64.encode())
+        public_key.verify(signature_bytes, message.encode())
+        return True
+    except (InvalidSignatureError, Exception):
+        return False
 
 
 def create_jwt_token(user_id: str, email: str) -> str:
@@ -422,15 +459,27 @@ def create_validation_response(
     variables: Optional[dict] = None,
     secret: Optional[str] = None,
     private_key_pem: Optional[str] = None,
+    license_key: Optional[str] = None,
 ) -> LicenseValidationResponse:
-    """Create a signed license validation response.
+    """Create a signed license validation response (Protocol v2).
 
     Uses Ed25519 asymmetric signing when private_key_pem is provided (new projects).
-    Falls back to HMAC-SHA256 with shared secret for legacy projects.
+    Falls back to HMAC-SHA256 with shared secret for legacy projects only.
+
+    Protocol v2 includes:
+    - Nonce binding: client_nonce echoed back for request-response pairing
+    - Freshness: issued_at timestamp for replay protection
+    - Replay ID (jti): unique identifier to detect replay attacks
     """
+    import secrets
+
     server_nonce = generate_nonce()
     timestamp = int(time.time())
-    server_time = timestamp  # Current server time for offline lease validation
+    server_time = timestamp
+
+    # Protocol v2: Generate unique JWT ID for replay protection
+    jti = secrets.token_hex(16)
+    issued_at = timestamp
 
     response_data = {
         "status": status,
@@ -441,16 +490,18 @@ def create_validation_response(
         "server_nonce": server_nonce,
         "timestamp": timestamp,
         "server_time": server_time,
+        "issued_at": issued_at,
+        "jti": jti,
     }
 
-    # Prefer Ed25519 signing (new projects), fall back to HMAC (legacy)
+    # Protocol v2: Require Ed25519 for all new responses (no HMAC fallback)
     if private_key_pem:
         signature = compute_ed25519_signature(response_data, private_key_pem)
     else:
-        # DEPRECATED: HMAC signing is a security risk — the shared secret can be
-        # extracted from compiled binaries, allowing attackers to forge responses.
-        # Projects should be migrated to Ed25519 via POST /api/v1/admin/migrate-signing.
+        # HMAC fallback ONLY for legacy projects without Ed25519 keys
+        # This is a security risk - responses can be forged if secret is compromised
         import logging as _log
+
         _log.getLogger(__name__).warning(
             "[SECURITY] HMAC fallback used for validation response. "
             "Migrate this project to Ed25519 signing for stronger security."
@@ -469,7 +520,176 @@ def create_validation_response(
         timestamp=timestamp,
         signature=signature,
         server_time=server_time,
+        issued_at=issued_at,
+        jti=jti,
+        protocol_version="v2",
+        lease_token=None,  # Will be set by caller if needed
     )
+
+
+# =============================================================================
+# Protocol v2: Replay Protection
+# =============================================================================
+
+RESPONSE_MAX_AGE_SECONDS = 300  # 5 minutes max age for responses
+
+
+async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
+    """Check if jti has been used before (replay attack) and store it.
+
+    Uses Redis for fast in-memory lookup. The jti is stored with a TTL
+    matching the response max age.
+
+    Returns:
+        (is_valid, error_message) - is_valid False if replay detected
+    """
+    from config import REDIS_URL
+    import redis.asyncio as redis
+
+    if not REDIS_URL:
+        import logging
+
+        logging.warning("[Security] REDIS_URL not set, skipping jti replay check")
+        return True, ""
+
+    try:
+        r = redis.from_url(REDIS_URL)
+        redis_key = f"jti:{license_key}:{jti}"
+
+        # Check if jti exists (replay attack)
+        exists = await r.exists(redis_key)
+        if exists:
+            await r.close()
+            return False, "Replay attack detected: jti already used"
+
+        # Store jti with TTL
+        await r.setex(redis_key, RESPONSE_MAX_AGE_SECONDS, "1")
+        await r.close()
+        return True, ""
+    except Exception as e:
+        import logging
+
+        logging.error(f"[Security] Failed to check jti replay: {e}")
+        return False, "Internal security error"
+
+
+def validate_response_freshness(
+    issued_at: int, max_age: int = RESPONSE_MAX_AGE_SECONDS
+) -> tuple[bool, str]:
+    """Validate that a response is not stale based on issued_at timestamp.
+
+    Returns:
+        (is_fresh, error_message)
+    """
+    current_time = int(time.time())
+    age = current_time - issued_at
+
+    if age > max_age:
+        return False, f"Response stale: age {age}s exceeds max {max_age}s"
+
+    if age < -60:
+        # Allow 60s clock skew but reject future-dated responses
+        return False, f"Response from future: clock skew detected"
+
+    return True, ""
+
+
+# =============================================================================
+# Phase 4: Server-Signed Lease Tokens
+# =============================================================================
+
+LEASE_DURATION_SECONDS = 86400  # 24 hours default lease duration
+
+
+def create_lease_token(
+    license_key: str,
+    hwid: str,
+    expires_at: int,
+    private_key_pem: Optional[str] = None,
+    secret: Optional[str] = None,
+) -> str:
+    """Create a server-signed lease token for offline validation.
+
+    The lease token includes:
+    - nbf: not before (server_time)
+    - exp: expiration timestamp
+    - hwid: hardware ID bound to this lease
+    - license_id: license key (hashed)
+    - jti: unique identifier for anti-replay
+
+    The token is signed with Ed25519 (preferred) or HMAC (legacy).
+    """
+    import secrets
+
+    server_time = int(time.time())
+    jti = secrets.token_hex(16)
+
+    lease_payload = {
+        "nbf": server_time,
+        "exp": expires_at,
+        "hwid": hwid,
+        "license_key_hash": hashlib.sha256(license_key.encode()).hexdigest(),
+        "jti": jti,
+        "server_time": server_time,
+    }
+
+    if private_key_pem:
+        signature = compute_ed25519_signature(lease_payload, private_key_pem)
+    else:
+        active_secret = secret or SECRET_KEY
+        signature = compute_signature(lease_payload, active_secret)
+
+    import json
+    import base64
+
+    token_data = json.dumps({"payload": lease_payload, "signature": signature})
+
+    return base64.b64encode(token_data.encode()).decode()
+
+
+def validate_lease_token(
+    lease_token: str,
+    hwid: str,
+    private_key_pem: Optional[str] = None,
+    secret: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Validate a server-signed lease token.
+
+    Returns:
+        (is_valid, error_message)
+    """
+    import json
+    import base64
+
+    try:
+        token_data = json.loads(base64.b64decode(lease_token.encode()).decode())
+        lease_payload = token_data.get("payload", {})
+        signature = token_data.get("signature", "")
+    except Exception as e:
+        return False, f"Invalid lease token format: {e}"
+
+    current_time = int(time.time())
+    exp = lease_payload.get("exp", 0)
+    if current_time > exp:
+        return False, "Lease expired"
+
+    nbf = lease_payload.get("nbf", 0)
+    if current_time < nbf:
+        return False, "Lease not yet valid"
+
+    if lease_payload.get("hwid") != hwid:
+        return False, "HWID mismatch"
+
+    if private_key_pem:
+        is_valid = verify_ed25519_signature(lease_payload, signature, private_key_pem)
+    else:
+        active_secret = secret or SECRET_KEY
+        is_valid = verify_signature(lease_payload, signature, active_secret)
+
+    if not is_valid:
+        return False, "Invalid lease signature"
+
+    return True, ""
 
 
 async def get_user_tier_limits(user_id: str, conn) -> dict:

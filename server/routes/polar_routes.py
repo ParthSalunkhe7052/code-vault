@@ -19,6 +19,7 @@ from fastapi import Header
 from pydantic import BaseModel
 import jwt
 import httpx
+import asyncpg
 
 from config import (
     POLAR_ACCESS_TOKEN,
@@ -32,6 +33,7 @@ from config import (
     ENVIRONMENT,
 )
 from database import get_db, release_db
+from utils import hash_api_key
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -96,11 +98,12 @@ async def get_current_user_for_polar(
                 if user:
                     return dict(user)
 
-        # Try API key
+        # Try API key (hash before comparison)
         if x_api_key:
+            hashed_key = hash_api_key(x_api_key)
             user = await conn.fetchrow(
                 "SELECT id, email, name, plan, role, api_key FROM users WHERE api_key = $1",
-                x_api_key,
+                hashed_key,
             )
             if user:
                 return dict(user)
@@ -166,12 +169,13 @@ async def get_user_subscription(user_id: str, conn) -> dict:
 
 
 async def sync_user_tier(user_id: str, tier: str, conn):
-    """Sync tier from subscriptions to users table."""
-    try:
-        await conn.execute("UPDATE users SET plan = $1 WHERE id = $2", tier, user_id)
-        logger.info(f"[Tier Sync] Updated user {user_id} plan to {tier}")
-    except Exception as e:
-        logger.error(f"[Tier Sync] Failed to sync user {user_id} to {tier}: {e}")
+    """Sync tier from subscriptions to users table.
+
+    Raises:
+        Exception: If the database update fails, allowing the transaction to roll back.
+    """
+    await conn.execute("UPDATE users SET plan = $1 WHERE id = $2", tier, user_id)
+    logger.info(f"[Tier Sync] Updated user {user_id} plan to {tier}")
 
 
 # =============================================================================
@@ -417,11 +421,19 @@ async def polar_webhook(request: Request):
                     logger.info(f"[Polar Webhook] Unhandled event type: {event_type}")
 
                 # Store event ID for idempotency
-                await conn.execute(
-                    "INSERT INTO processed_webhook_events (event_id, event_type) VALUES ($1, $2)",
-                    event_id,
-                    event_type,
-                )
+                try:
+                    await conn.execute(
+                        "INSERT INTO processed_webhook_events (event_id, event_type) VALUES ($1, $2)",
+                        event_id,
+                        event_type,
+                    )
+                except asyncpg.UniqueViolationError:
+                    # Race condition: another request processed this event simultaneously
+                    logger.info(
+                        f"[Polar Webhook] Idempotency race: Event {event_id} was already "
+                        "processed by another request"
+                    )
+                    return {"status": "success", "message": "Event already processed"}
 
                 return {"status": "success"}
 
@@ -452,12 +464,31 @@ def _verify_webhook_signature(
     The secret from Polar is expected to be base64-encoded (with or without
     the 'whsec_' prefix). The signature is computed as:
     base64(HMAC-SHA256(secret, "{webhook_id}.{webhook_timestamp}.{body}"))
+
+    Also checks timestamp staleness (rejects webhooks older than 5 minutes).
     """
     import base64
     import hashlib
     import hmac
+    import time
 
     try:
+        # Check timestamp staleness (5 minute tolerance)
+        try:
+            webhook_ts = int(webhook_timestamp)
+            current_ts = int(time.time())
+            if abs(current_ts - webhook_ts) > 300:  # 300 seconds = 5 minutes
+                logger.error(
+                    f"[Polar Webhook] Timestamp stale: {webhook_ts} vs current {current_ts} "
+                    f"(diff: {abs(current_ts - webhook_ts)}s)"
+                )
+                return False
+        except (ValueError, TypeError) as e:
+            logger.error(
+                f"[Polar Webhook] Invalid timestamp format: {webhook_timestamp}"
+            )
+            return False
+
         # Strip 'whsec_' prefix if present, then base64-decode the secret
         secret_str = secret
         if secret_str.startswith("whsec_"):
@@ -653,10 +684,10 @@ async def handle_subscription_created(event_data: dict, conn):
     """Handle new subscription creation from Polar."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning(
-            "[Polar Webhook] subscription.created: Could not resolve user_id"
+        logger.error("[Polar Webhook] subscription.created: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
         )
-        return
 
     product_id = _extract_product_id(event_data)
     tier = get_tier_from_product_id(product_id) if product_id else "free"
@@ -708,10 +739,10 @@ async def handle_subscription_updated(event_data: dict, conn):
     """Handle subscription updates (plan changes, etc.)."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning(
-            "[Polar Webhook] subscription.updated: Could not resolve user_id"
+        logger.error("[Polar Webhook] subscription.updated: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
         )
-        return
 
     product_id = _extract_product_id(event_data)
     tier = get_tier_from_product_id(product_id) if product_id else "free"
@@ -748,10 +779,10 @@ async def handle_subscription_canceled(event_data: dict, conn):
     """Handle subscription cancellation (access continues until period end)."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning(
-            "[Polar Webhook] subscription.canceled: Could not resolve user_id"
+        logger.error("[Polar Webhook] subscription.canceled: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
         )
-        return
 
     # Mark as canceled but keep the current tier until period ends
     await conn.execute(
@@ -774,10 +805,10 @@ async def handle_subscription_revoked(event_data: dict, conn):
     """Handle subscription revocation (immediate access removal)."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning(
-            "[Polar Webhook] subscription.revoked: Could not resolve user_id"
+        logger.error("[Polar Webhook] subscription.revoked: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
         )
-        return
 
     # Immediately downgrade to free
     await conn.execute(
@@ -803,8 +834,10 @@ async def handle_order_paid(event_data: dict, conn):
     """Handle successful order payment (monthly renewal credit refill)."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning("[Polar Webhook] order.paid: Could not resolve user_id")
-        return
+        logger.error("[Polar Webhook] order.paid: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
+        )
 
     # Get the user's current tier to refill credits
     sub = await conn.fetchrow(
@@ -831,8 +864,10 @@ async def handle_order_refunded(event_data: dict, conn):
     """Handle order refund - downgrade to free tier."""
     user_id = await _resolve_user_id(event_data, conn)
     if not user_id:
-        logger.warning("[Polar Webhook] order.refunded: Could not resolve user_id")
-        return
+        logger.error("[Polar Webhook] order.refunded: Could not resolve user_id")
+        raise HTTPException(
+            status_code=422, detail="Could not resolve user_id from webhook data"
+        )
 
     # Downgrade subscription to free
     await conn.execute(
@@ -887,6 +922,231 @@ async def force_sync_subscription_tiers(
             "status": "success",
             "message": f"Synced tiers for {count} users",
             "updated_count": int(count) if count.isdigit() else 0,
+        }
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Phase 6: User-Facing Reconcile & Idempotent Processing
+# =============================================================================
+
+
+@router.get("/subscription/reconcile")
+async def reconcile_subscription(
+    user: dict = Depends(get_current_user_for_polar),
+):
+    """User-facing endpoint to reconcile subscription status with Polar API.
+
+    This endpoint fetches the current subscription state from Polar and compares
+    it with our local state. Returns any discrepancies found.
+    """
+    from config import POLAR_API_KEY
+
+    if not POLAR_API_KEY:
+        raise HTTPException(
+            status_code=503, detail="Reconciliation service unavailable"
+        )
+
+    conn = await get_db()
+    try:
+        # Get user's Polar customer ID
+        user_record = await conn.fetchrow(
+            "SELECT polar_customer_id, polar_subscription_id, plan FROM users WHERE id = $1",
+            user["id"],
+        )
+
+        if not user_record or not user_record.get("polar_subscription_id"):
+            return {
+                "status": "ok",
+                "local_state": {
+                    "has_subscription": False,
+                    "current_plan": user_record.get("plan", "free")
+                    if user_record
+                    else "free",
+                },
+                "polar_state": None,
+                "discrepancies": [],
+            }
+
+        # Fetch subscription from Polar API
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{POLAR_API_BASE}/subscriptions/{user_record['polar_subscription_id']}",
+                headers={"Authorization": f"Bearer {POLAR_API_KEY}"},
+            )
+
+            if response.status_code == 404:
+                return {
+                    "status": "ok",
+                    "local_state": {
+                        "has_subscription": True,
+                        "subscription_id": user_record["polar_subscription_id"],
+                        "current_plan": user_record.get("plan", "free"),
+                    },
+                    "polar_state": "not_found",
+                    "discrepancies": [
+                        "Subscription exists locally but not found in Polar - may be canceled"
+                    ],
+                }
+
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch from Polar: {response.status_code}",
+                )
+
+            polar_data = response.json()
+
+        # Compare states
+        polar_status = polar_data.get("status")
+        polar_tier = _map_product_id_to_tier(polar_data.get("product_id"))
+
+        discrepancies = []
+
+        # Check if local plan matches Polar tier
+        if user_record.get("plan") != polar_tier:
+            discrepancies.append(
+                {
+                    "field": "plan",
+                    "local_value": user_record.get("plan"),
+                    "polar_value": polar_tier,
+                    "fix": f"Update local plan to '{polar_tier}'",
+                }
+            )
+
+        # Check if subscription is canceled/active
+        if (
+            polar_status in ("canceled", "past_due", "unpaid")
+            and user_record.get("plan") != "free"
+        ):
+            discrepancies.append(
+                {
+                    "field": "status",
+                    "local_value": "active",
+                    "polar_value": polar_status,
+                    "fix": "Downgrade to free tier",
+                }
+            )
+
+        return {
+            "status": "ok",
+            "local_state": {
+                "has_subscription": True,
+                "subscription_id": user_record["polar_subscription_id"],
+                "current_plan": user_record.get("plan", "free"),
+            },
+            "polar_state": {
+                "status": polar_status,
+                "tier": polar_tier,
+                "current_period_end": polar_data.get("current_period_end"),
+            },
+            "discrepancies": discrepancies,
+            "action_required": len(discrepancies) > 0,
+        }
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to connect to Polar: {str(e)}"
+        )
+    finally:
+        await release_db(conn)
+
+
+@router.post("/subscription/reconcile/fix")
+async def reconcile_fix(
+    user: dict = Depends(get_current_user_for_polar),
+):
+    """Apply reconciliation fixes to align local state with Polar.
+
+    This is the deterministic idempotent processing path for billing issues.
+    """
+    conn = await get_db()
+    try:
+        # Get user's current subscription info
+        user_record = await conn.fetchrow(
+            "SELECT polar_customer_id, polar_subscription_id, plan FROM users WHERE id = $1",
+            user["id"],
+        )
+
+        if not user_record or not user_record.get("polar_subscription_id"):
+            # No subscription - ensure user is on free tier
+            await conn.execute(
+                "UPDATE users SET plan = 'free' WHERE id = $1",
+                user["id"],
+            )
+            return {
+                "status": "fixed",
+                "message": "No subscription found - reset to free tier",
+            }
+
+        # Fetch latest from Polar
+        from config import POLAR_API_KEY
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{POLAR_API_BASE}/subscriptions/{user_record['polar_subscription_id']}",
+                headers={"Authorization": f"Bearer {POLAR_API_KEY}"},
+            )
+
+            if response.status_code == 404:
+                # Subscription not found in Polar - cancel locally
+                await conn.execute(
+                    """UPDATE users SET plan = 'free', polar_subscription_id = NULL 
+                       WHERE id = $1""",
+                    user["id"],
+                )
+                await conn.execute(
+                    """INSERT INTO webhook_deliveries 
+                       (id, event_type, payload, success, created_at)
+                       VALUES ($1, 'reconciliation.fix', $2, TRUE, NOW())""",
+                    f"rec_{secrets.token_hex(8)}",
+                    json.dumps(
+                        {"action": "subscription_not_found", "user_id": user["id"]}
+                    ),
+                )
+                return {
+                    "status": "fixed",
+                    "message": "Subscription not found in Polar - reset to free tier",
+                }
+
+            polar_data = response.json()
+
+        # Apply fix based on Polar state
+        new_plan = _map_product_id_to_tier(polar_data.get("product_id"))
+        polar_status = polar_data.get("status")
+
+        if polar_status in ("canceled", "past_due", "unpaid"):
+            new_plan = "free"
+
+        await conn.execute(
+            "UPDATE users SET plan = $1 WHERE id = $2",
+            new_plan,
+            user["id"],
+        )
+
+        # Log the fix for audit
+        await conn.execute(
+            """INSERT INTO webhook_deliveries 
+               (id, event_type, payload, success, created_at)
+               VALUES ($1, 'reconciliation.fix', $2, TRUE, NOW())""",
+            secrets.token_hex(16),
+            json.dumps(
+                {
+                    "action": "subscription_synced",
+                    "user_id": user["id"],
+                    "new_plan": new_plan,
+                    "polar_status": polar_status,
+                }
+            ),
+        )
+
+        return {
+            "status": "fixed",
+            "message": f"Subscription reconciled - plan updated to {new_plan}",
+            "new_plan": new_plan,
         }
     finally:
         await release_db(conn)

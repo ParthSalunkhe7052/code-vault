@@ -140,7 +140,7 @@ const BuildSettings = () => {
                 </Section>
 
                 <Section title="Server Settings" icon={Server}>
-                    <Input label="License Server URL" description="URL for license validation" value={settings.defaultServerUrl} onChange={(v) => updateSetting('defaultServerUrl', v)} placeholder="http://localhost:8000" />
+                    <Input label="License Server URL" description="URL for license validation" value={settings.defaultServerUrl} onChange={(v) => updateSetting('defaultServerUrl', v)} placeholder={import.meta.env.VITE_API_URL || 'https://api.codevault.com'} />
                 </Section>
 
                 <Section title="UI Preferences" icon={Eye}>

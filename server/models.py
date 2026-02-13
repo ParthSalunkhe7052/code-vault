@@ -46,7 +46,12 @@ class LicenseValidationRequest(BaseModel):
     nonce: str = Field(..., min_length=16, max_length=64)
     timestamp: int
     client_version: Optional[str] = None
-    binary_hash: Optional[str] = Field(None, max_length=128)  # SHA-256 self-hash for integrity check
+    binary_hash: Optional[str] = Field(
+        None, max_length=128
+    )  # SHA-256 self-hash for integrity check
+    session_token: Optional[str] = Field(
+        None, max_length=64
+    )  # For floating license heartbeat
 
 
 class LicenseValidationResponse(BaseModel):
@@ -60,6 +65,12 @@ class LicenseValidationResponse(BaseModel):
     timestamp: int
     signature: str
     server_time: int = 0  # Server's current UTC timestamp for offline lease
+    # Protocol v2 fields
+    issued_at: int = 0  # Timestamp when response was issued
+    jti: str = ""  # JWT ID - unique identifier for replay protection
+    protocol_version: str = "v2"  # Protocol version for client compatibility
+    # Phase 4: Server-signed lease token
+    lease_token: Optional[str] = None  # Server-signed lease for offline use
 
 
 class LicenseReleaseRequest(BaseModel):
@@ -76,7 +87,9 @@ class LicenseCreateRequest(BaseModel):
     max_machines: int = Field(default=1, ge=1, le=100)
     features: List[str] = []
     notes: Optional[str] = None
-    license_type: str = Field(default="perpetual", pattern="^(perpetual|subscription|trial)$")
+    license_type: str = Field(
+        default="perpetual", pattern="^(perpetual|subscription|trial)$"
+    )
     license_mode: str = Field(default="static", pattern="^(static|floating)$")
     max_concurrent: int = Field(default=1, ge=1, le=100)
 

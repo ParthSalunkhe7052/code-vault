@@ -136,7 +136,7 @@ const Pricing: React.FC = () => {
               { text: "Unlimited Projects", included: true },
               { text: "5,000 Licenses", included: true },
               { text: "100 Cloud Builds/mo", included: true },
-              { text: "10 Team Seats", included: true },
+              { text: "Priority Queue Access", included: true },
               { text: "Advanced Nuitka Config", included: true },
               { text: "White Label Branding", included: true },
               { text: "Priority Support", included: true },
@@ -156,12 +156,12 @@ const Pricing: React.FC = () => {
               </div>
             </div>
             
-            <ul className="space-y-4 mb-8 flex-1">
+             <ul className="space-y-4 mb-8 flex-1">
               {[
                 { text: "Unlimited Licenses", included: true },
                 { text: "Unlimited Cloud Builds", included: true },
                 { text: "Unlimited Team Seats", included: true },
-                { text: "Dedicated Runners", included: true },
+                { text: "Priority Queue Access", included: true },
                 { text: "Custom SLAs", included: true },
                 { text: "Security Audits", included: true },
                 { text: "24/7 Phone Support", included: true },
@@ -213,13 +213,17 @@ const Pricing: React.FC = () => {
         <div className="mt-32 max-w-3xl mx-auto">
           <h3 className="text-2xl font-bold text-center mb-12">Common Questions</h3>
           <div className="space-y-1">
-             <div className="p-6 rounded-2xl bg-[#0f1219] border border-white/5 hover:border-white/10 transition-colors">
-                <h4 className="font-semibold text-white mb-2">What is a "Cloud Build"?</h4>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                   A Cloud Build is a remote compilation job. We spin up a fresh VM, install your dependencies, run Nuitka, and return a signed binary. 
-                   You get 25/mo on Pro. Local builds (on your own machine) are always unlimited and free.
-                </p>
-             </div>
+              <div className="p-6 rounded-2xl bg-[#0f1219] border border-white/5 hover:border-white/10 transition-colors">
+                 <h4 className="font-semibold text-white mb-2">What is a "Cloud Build"?</h4>
+                 <p className="text-sm text-slate-400 leading-relaxed">
+                    A Cloud Build is a remote compilation job. We spin up a fresh VM, install your dependencies, run Nuitka, and return a signed binary. 
+                    You get 25/mo on Pro. Local builds (on your own machine) are always unlimited and free.
+                 </p>
+                 <p className="text-sm text-slate-500 leading-relaxed mt-2">
+                    <span className="text-amber-400">Note:</span> Cloud Builds currently support Windows and Linux. macOS builds are not available in the cloud - 
+                    use local builds on your macOS machine for macOS executables.
+                 </p>
+              </div>
              <div className="p-6 rounded-2xl bg-[#0f1219] border border-white/5 hover:border-white/10 transition-colors">
                 <h4 className="font-semibold text-white mb-2">Can I sell my software?</h4>
                 <p className="text-sm text-slate-400 leading-relaxed">

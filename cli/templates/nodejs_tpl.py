@@ -291,7 +291,12 @@ async function _lw_validate() {
                         try {
                             const result = JSON.parse(body);
                             // Verify Ed25519 signature if public key is available
-                            if (result.signature && _LW_PUBLIC_KEY_PEM && _LW_PUBLIC_KEY_PEM.trim() !== '') {
+                            if (result.signature) {
+                                if (!_LW_PUBLIC_KEY_PEM || _LW_PUBLIC_KEY_PEM.trim() === '') {
+                                    console.error('[SECURITY ERROR] No public key configured, cannot verify server response');
+                                    _lw_pauseAndExit(1);
+                                    return;
+                                }
                                 try {
                                     const msg = _lw_buildSignatureMessage(result);
                                     const sigBuf = Buffer.from(result.signature, 'base64');
@@ -303,22 +308,52 @@ async function _lw_validate() {
                                         return;
                                     }
                                 } catch (sigErr) {
-                                    console.error('[WARN] Signature check failed:', sigErr.message);
+                                    console.error('[SECURITY ERROR] Signature verification failed:', sigErr.message);
+                                    _lw_pauseAndExit(1);
+                                    return;
+                                }
+                            } else {
+                                console.error('[SECURITY ERROR] Server response missing signature');
+                                _lw_pauseAndExit(1);
+                                return;
+                            }
+                            
+                            // Protocol v2: Verify response freshness
+                            if (result.issued_at) {
+                                const currentTime = Math.floor(Date.now() / 1000);
+                                const responseAge = currentTime - result.issued_at;
+                                if (responseAge > 300) {
+                                    console.error('[SECURITY ERROR] Response expired. Server response is too old (' + responseAge + 's). Possible replay attack.');
+                                    _lw_pauseAndExit(1);
+                                    return;
+                                }
+                                if (responseAge < -60) {
+                                    console.error('[SECURITY ERROR] Response from future. Clock skew detected. Please correct your system time.');
+                                    _lw_pauseAndExit(1);
+                                    return;
                                 }
                             }
+                            
+                            // Protocol v2: Require jti for replay protection
+                            if (!result.jti) {
+                                console.error('[SECURITY ERROR] Missing replay protection. Server response missing jti.');
+                                _lw_pauseAndExit(1);
+                                return;
+                            }
+                            
                             if (result.status === 'valid') {
                                 console.log("[OK] License validated online");
                                 
-                                // SEC4: Start heartbeat
-                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval});
-
-                                // MON2: Capture floating session token
+                                // MON2: Capture floating session token first
                                 _LW_SESSION_TOKEN = (result.variables || {})["_cv_session_token"];
                                 if (_LW_SESSION_TOKEN) {
                                     process.on('exit', () => {
                                         _lw_releaseSession(LICENSE_KEY, SERVER_URL, hwid, _LW_SESSION_TOKEN);
                                     });
                                 }
+
+                                // SEC4: Start heartbeat (with session_token for floating licenses)
+                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval}, _LW_SESSION_TOKEN);
 
                                 // Check clock drift and create lease
                                 const serverTime = result.server_time || result.timestamp || Math.floor(Date.now() / 1000);
@@ -429,7 +464,7 @@ _lw_validate().then(() => {
 });
 """
 
-NODEJS_WRAPPER_PREFIX = r'''// ============ LICENSE WRAPPER - DO NOT REMOVE ============
+NODEJS_WRAPPER_PREFIX = r"""// ============ LICENSE WRAPPER - DO NOT REMOVE ============
 // CRITICAL: Wrap everything in try-catch to catch module load errors
 try {
 // Use stderr for immediate output (stdout might buffer in pkg)
@@ -543,8 +578,9 @@ function _lw_buildSignatureMessage(data) {
 
 function _lw_verifyEd25519Signature(responseData, signatureB64) {
     if (!_LW_PUBLIC_KEY_PEM || _LW_PUBLIC_KEY_PEM.trim() === '') {
-        // No public key embedded — fall back to trusting server response (legacy HMAC mode)
-        return true;
+        // No public key embedded — fail closed for security
+        process.stderr.write("[License Wrapper] SECURITY ERROR: No public key configured, cannot verify server response\n");
+        return false;
     }
     try {
         const message = _lw_buildSignatureMessage(responseData);
@@ -705,16 +741,21 @@ function _lw_validateLease(licenseKey, hwid) {
     return { valid: true, message: 'Valid' };
 }
 
-function _lw_startHeartbeat(licenseKey, hwid, serverUrl, intervalMs) {
+function _lw_startHeartbeat(licenseKey, hwid, serverUrl, intervalMs, sessionToken = null) {
     setInterval(async () => {
         try {
             const urlObj = new URL(serverUrl + "/api/v1/license/heartbeat");
-            const postData = JSON.stringify({
+            const payload = {
                 license_key: licenseKey,
                 hwid: hwid,
                 timestamp: Math.floor(Date.now() / 1000),
                 nonce: _lw_crypto.randomBytes(16).toString('hex')
-            });
+            };
+            // Phase 3: Include session_token for floating license heartbeat
+            if (sessionToken) {
+                payload.session_token = sessionToken;
+            }
+            const postData = JSON.stringify(payload);
             
             const options = {
                 hostname: urlObj.hostname,
@@ -1026,19 +1067,37 @@ async function _lw_validate() {
                                 _lw_showErrorAndWait('SIGNATURE INVALID', new Error('Server response signature verification failed.\n\nThis may indicate a tampered response or misconfigured server.\nPlease contact the application developer.'));
                                 return;
                             }
+                            // Protocol v2: Verify response freshness
+                            if (result.issued_at) {
+                                const currentTime = Math.floor(Date.now() / 1000);
+                                const responseAge = currentTime - result.issued_at;
+                                if (responseAge > 300) {
+                                    _lw_showErrorAndWait('RESPONSE EXPIRED', new Error('Server response is too old (' + responseAge + 's). Possible replay attack.'));
+                                    return;
+                                }
+                                if (responseAge < -60) {
+                                    _lw_showErrorAndWait('CLOCK SKEW', new Error('Clock skew detected. Please correct your system time.'));
+                                    return;
+                                }
+                            }
+                            // Protocol v2: Require jti for replay protection
+                            if (!result.jti) {
+                                _lw_showErrorAndWait('MISSING JTI', new Error('Server response missing jti (replay protection ID).'));
+                                return;
+                            }
                             if (result.status === 'valid') {
                                 console.log("[OK] License validated online");
                                 
-                                // SEC4: Start heartbeat
-                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval});
-
-                                // MON2: Capture floating session token
+                                // MON2: Capture floating session token first
                                 _LW_SESSION_TOKEN = (result.variables || {})["_cv_session_token"];
                                 if (_LW_SESSION_TOKEN) {
                                     process.on('exit', () => {
                                         _lw_releaseSession(LICENSE_KEY, SERVER_URL, hwid, _LW_SESSION_TOKEN);
                                     });
                                 }
+
+                                // SEC4: Start heartbeat (with session_token for floating licenses)
+                                _lw_startHeartbeat(LICENSE_KEY, hwid, SERVER_URL, {heartbeat_interval}, _LW_SESSION_TOKEN);
 
                                 // Check clock drift and create lease
                                 const serverTime = result.server_time || result.timestamp || Math.floor(Date.now() / 1000);
@@ -1106,7 +1165,7 @@ async function _lw_validate() {
         process.stderr.write('[DEBUG] Validation complete, starting application...\n');
         // ============ END LICENSE WRAPPER - APP CODE BELOW ============
 
-'''
+"""
 
 NODEJS_WRAPPER_SUFFIX = r"""
 // ============ LICENSE WRAPPER CLEANUP ============

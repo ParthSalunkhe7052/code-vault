@@ -154,6 +154,12 @@ function App() {
                                             } />
                                         </Route>
 
+                                        {/* Legal pages - redirect to landing page */}
+                                        <Route path="/privacy" element={<Navigate to="https://codevault.com/privacy" replace />} />
+                                        <Route path="/terms" element={<Navigate to="https://codevault.com/terms" replace />} />
+                                        <Route path="/gdpr" element={<Navigate to="https://codevault.com/gdpr" replace />} />
+                                        <Route path="/sla" element={<Navigate to="https://codevault.com/sla" replace />} />
+
                                         {/* Catch all - redirect to home */}
                                         <Route path="*" element={<Navigate to="/" replace />} />
                                     </Routes>

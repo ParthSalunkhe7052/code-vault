@@ -10,7 +10,7 @@ import hashlib
 import hmac
 import asyncio
 from datetime import timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 
 import httpx
@@ -364,6 +364,147 @@ async def _log_delivery_failure(
             await WebhookRetryQueue._disable_webhook(
                 webhook_id, f"Too many consecutive failures ({MAX_FAILURE_COUNT})"
             )
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Phase 6: Dead Letter Queue (DLQ) for Failed Webhooks
+# =============================================================================
+
+
+async def add_to_dead_letter_queue(
+    webhook_id: str,
+    event: str,
+    payload: Dict[str, Any],
+    error: str,
+    attempt: int,
+) -> str:
+    """Add a permanently failed webhook to the dead letter queue.
+
+    The DLQ stores failed webhook events for manual review or reprocessing.
+    Returns the DLQ entry ID.
+    """
+    dlq_id = f"dlq_{secrets.token_hex(12)}"
+
+    conn = await get_db()
+    try:
+        await conn.execute(
+            """
+            INSERT INTO webhook_dead_letter_queue (
+                id, webhook_id, event, payload, error_message, 
+                attempt_count, created_at, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'pending')
+            """,
+            dlq_id,
+            webhook_id,
+            event,
+            json.dumps(payload),
+            error[:2000],  # Truncate long errors
+            attempt,
+        )
+
+        logger.warning(
+            f"[WebhookDLQ] Added failed webhook {webhook_id} event '{event}' to dead letter queue (ID: {dlq_id})"
+        )
+
+        return dlq_id
+    finally:
+        await release_db(conn)
+
+
+async def get_dead_letter_queue(
+    limit: int = 50,
+    status: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Get entries from the dead letter queue."""
+    conn = await get_db()
+    try:
+        query = "SELECT * FROM webhook_dead_letter_queue"
+        params = []
+
+        if status:
+            query += " WHERE status = $1"
+            params.append(status)
+
+        query += " ORDER BY created_at DESC LIMIT $1"
+        params.append(limit)
+
+        rows = await conn.fetch(query, *params)
+
+        return [
+            {
+                "id": row["id"],
+                "webhook_id": row["webhook_id"],
+                "event": row["event"],
+                "payload": json.loads(row["payload"]) if row["payload"] else None,
+                "error_message": row["error_message"],
+                "attempt_count": row["attempt_count"],
+                "status": row["status"],
+                "created_at": row["created_at"].isoformat()
+                if row["created_at"]
+                else None,
+                "processed_at": row["processed_at"].isoformat()
+                if row.get("processed_at")
+                else None,
+            }
+            for row in rows
+        ]
+    finally:
+        await release_db(conn)
+
+
+async def reprocess_dead_letter_entry(dlq_id: str) -> tuple[bool, str]:
+    """Attempt to reprocess a dead letter queue entry.
+
+    This creates a new webhook delivery attempt from the DLQ entry.
+    """
+    conn = await get_db()
+    try:
+        # Get the DLQ entry
+        row = await conn.fetchrow(
+            "SELECT * FROM webhook_dead_letter_queue WHERE id = $1 AND status = 'pending'",
+            dlq_id,
+        )
+
+        if not row:
+            return False, "DLQ entry not found or already processed"
+
+        # Get the webhook
+        webhook = await conn.fetchrow(
+            "SELECT * FROM webhooks WHERE id = $1 AND is_active = TRUE",
+            row["webhook_id"],
+        )
+
+        if not webhook:
+            return False, "Webhook no longer exists or is inactive"
+
+        # Attempt delivery
+        payload = json.loads(row["payload"]) if row["payload"] else {}
+        success, error = await deliver_webhook_with_retry(
+            webhook_id=webhook["id"],
+            url=webhook["url"],
+            secret=webhook["secret"],
+            event=row["event"],
+            payload=payload,
+            attempt=row["attempt_count"],
+        )
+
+        # Update DLQ status
+        if success:
+            await conn.execute(
+                "UPDATE webhook_dead_letter_queue SET status = 'processed', processed_at = NOW() WHERE id = $1",
+                dlq_id,
+            )
+            return True, "Successfully reprocessed"
+        else:
+            await conn.execute(
+                "UPDATE webhook_dead_letter_queue SET status = 'failed', error_message = $1 WHERE id = $2",
+                error[:2000],
+                dlq_id,
+            )
+            return False, error
+
     finally:
         await release_db(conn)
 
