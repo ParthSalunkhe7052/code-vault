@@ -104,10 +104,8 @@ class CloudBuildClient:
         # Create build object
         build = cloudbuild_v1.Build()
 
-        # Load cloudbuild.yaml from project root
-        cloudbuild_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "cloudbuild.yaml"
-        )
+        # Load cloudbuild.yaml from local file (not from GitHub repo)
+        cloudbuild_path = os.path.join(os.path.dirname(__file__), "cloudbuild.yaml")
 
         if not os.path.exists(cloudbuild_path):
             raise FileNotFoundError(f"cloudbuild.yaml not found at {cloudbuild_path}")
