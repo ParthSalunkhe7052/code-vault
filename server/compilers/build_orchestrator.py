@@ -255,12 +255,12 @@ class BuildConfig:
 
     # Project info
     project_id: str = ""  # Database project ID for hash registration
-    project_name: str
+    project_name: str = "App"
     project_version: str = "1.0.0"
     publisher: str = "Unknown Publisher"
 
     # Source
-    source_dir: Path = None
+    source_dir: Optional[Path] = None
     entry_file: str = ""
     language: Literal["python", "nodejs"] = "python"
 
@@ -270,7 +270,7 @@ class BuildConfig:
     license_mode: Literal["fixed", "generic", "demo"] = "generic"
 
     # Output
-    output_dir: Path = None
+    output_dir: Optional[Path] = None
 
     # Build options
     skip_obfuscation: bool = True
@@ -355,6 +355,14 @@ class BuildOrchestrator:
 
             # Save to cache for future builds
             save_to_cache(cache_dir, cache_key, final_path)
+            
+            # Register binary hash for integrity checking (SEC2)
+            if config.project_id:
+                await register_binary_hash(
+                    project_id=config.project_id,
+                    exe_path=final_path,
+                    db_pool=config.db_pool
+                )
 
             return final_path
 
@@ -476,6 +484,14 @@ class BuildOrchestrator:
 
             # Save to cache for future builds
             save_to_cache(cache_dir, cache_key, final_path)
+            
+            # Register binary hash for integrity checking (SEC2)
+            if config.project_id:
+                await register_binary_hash(
+                    project_id=config.project_id,
+                    exe_path=final_path,
+                    db_pool=config.db_pool
+                )
 
             return final_path
 
