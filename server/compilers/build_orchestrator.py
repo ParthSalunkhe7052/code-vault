@@ -148,6 +148,65 @@ def save_to_cache(cache_dir: Path, cache_key: str, exe_path: Path) -> None:
         logger.warning(f"[Cache] Failed to save cache: {e}")
 
 
+def calculate_file_hash(file_path: Path) -> str:
+    """Calculate SHA-256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+
+async def register_binary_hash(
+    project_id: str,
+    exe_path: Path,
+    db_pool = None
+) -> bool:
+    """
+    Register binary hash in the database for integrity checking.
+
+    Args:
+        project_id: Project ID
+        exe_path: Path to compiled executable
+        db_pool: Database connection pool
+
+    Returns:
+        True if registration successful
+    """
+    try:
+        if not exe_path.exists():
+            logger.warning(f"[BinaryHash] Executable not found: {exe_path}")
+            return False
+
+        binary_hash = calculate_file_hash(exe_path)
+        binary_size = exe_path.stat().st_size
+
+        # If no database pool provided, log only
+        if db_pool is None:
+            logger.info(f"[BinaryHash] Hash: {binary_hash[:16]}... Size: {binary_size} bytes")
+            return True
+
+        # Register with database
+        import asyncpg
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO binary_hashes (project_id, binary_hash, binary_size, created_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (project_id, binary_hash) DO NOTHING
+                """,
+                project_id,
+                binary_hash,
+                binary_size
+            )
+            logger.info(f"[BinaryHash] Registered hash for project {project_id}: {binary_hash[:16]}...")
+            return True
+
+    except Exception as e:
+        logger.warning(f"[BinaryHash] Failed to register hash: {e}")
+        return False
+
+
 class BuildError(Exception):
     """
     Build-specific error with type and retry information.
@@ -195,6 +254,7 @@ class BuildConfig:
     """Configuration for a build job"""
 
     # Project info
+    project_id: str = ""  # Database project ID for hash registration
     project_name: str
     project_version: str = "1.0.0"
     publisher: str = "Unknown Publisher"
@@ -218,6 +278,9 @@ class BuildConfig:
 
     # Additional files to include
     include_files: list = field(default_factory=list)
+    
+    # Database
+    db_pool = None  # Database connection pool for hash registration
 
 
 class BuildOrchestrator:

@@ -1,0 +1,77 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Starting build process..."
+        echo "Build ID: ${_BUILD_ID}"
+        echo "Project ID: ${_PROJECT_ID}"
+        echo "Language: ${_LANGUAGE}"
+        echo "Target Platforms: ${_TARGET_PLATFORMS}"
+        
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Downloading source code..."
+        if [ -n "${_SOURCE_URL}" ]; then
+          wget -q "${_SOURCE_URL}" -O source.zip
+          unzip -q source.zip
+          echo "Source downloaded successfully"
+        else
+          echo "No source URL provided"
+        fi
+
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Installing dependencies..."
+        if [ -f requirements.txt ]; then
+          pip install --no-cache-dir -r requirements.txt
+        fi
+        echo "Dependencies installed"
+
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Building executable..."
+        mkdir -p output
+        
+        if [ -f "main.py" ]; then
+          pip install pyinstaller
+          pyinstaller --onefile --name "${_OUTPUT_NAME}" main.py
+          cp dist/"${_OUTPUT_NAME}.exe" output/ 2>/dev/null || echo "No exe generated"
+        else
+          echo "No main.py found in root"
+        fi
+        echo "Build completed"
+
+  - name: 'gcr.io/cloud-builders/gsutil'
+    args:
+      - 'cp'
+      - 'output/*'
+      - 'gs://codevault-builds/builds/${_BUILD_ID}/'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  env:
+    - 'PYTHONUNBUFFERED=1'
+  logging: 'CLOUD_LOGGING_ONLY'
+
+substitutions:
+  _BUILD_ID: ''
+  _PROJECT_ID: ''
+  _LANGUAGE: 'python'
+  _TARGET_PLATFORMS: 'windows'
+  _SOURCE_URL: ''
+  _OUTPUT_NAME: 'app'
+  _CONFIG_URL: ''
+  _CALLBACK_URL: ''
+  _DEBUG_BUILD: 'false'
+  _SOURCE_DIR: 'source'

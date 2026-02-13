@@ -156,6 +156,13 @@ if ENVIRONMENT == "production":
         config_issues.append("SECRET_KEY must be changed from default in production!")
     if JWT_SECRET == "jwt-secret-change-in-production":
         config_issues.append("JWT_SECRET must be changed from default in production!")
+    
+    if not BUILD_CALLBACK_SECRET:
+        config_issues.append("BUILD_CALLBACK_SECRET must be set in production for Cloud Build security!")
+    
+    if not PUBLIC_API_URL or "localhost" in PUBLIC_API_URL:
+        config_issues.append("PUBLIC_API_URL must be set to your production domain (e.g., https://api.codevault.parth7.me)")
+
     if not POLAR_WEBHOOK_SECRET:
         # Warn but don't block startup — webhook endpoint will reject unsigned payloads
         print(

@@ -102,8 +102,8 @@ class CloudBuildClient:
 
         substitutions_str = ",".join(substitutions)
 
-        # Find cloudbuild.yaml
-        cloudbuild_path = os.path.join(os.path.dirname(__file__), "cloudbuild.yaml")
+        # Find cloudbuild.yaml in project root
+        cloudbuild_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cloudbuild.yaml")
 
         if not os.path.exists(cloudbuild_path):
             raise FileNotFoundError(f"cloudbuild.yaml not found at {cloudbuild_path}")
