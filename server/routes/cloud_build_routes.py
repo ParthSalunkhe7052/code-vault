@@ -398,8 +398,17 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                 logger.error(
                     f"[Upload] Files in .github/scripts: {list((project_root / '.github' / 'scripts').glob('*')) if (project_root / '.github' / 'scripts').exists() else 'directory does not exist'}"
                 )
+
+            # Also copy nuitka_patch.py for Wine builds
+            patch_source = project_root / ".github" / "scripts" / "nuitka_patch.py"
+            if patch_source.exists():
+                patch_dest = source_dir / ".github" / "scripts" / "nuitka_patch.py"
+                shutil.copy2(patch_source, patch_dest)
+                logger.info(f"[Upload] Successfully copied nuitka_patch.py to source")
+            else:
+                logger.warning(f"[Upload] nuitka_patch.py not found at {patch_source}")
         except Exception as e:
-            logger.error(f"[Upload] Failed to copy cloud_runner.py: {e}")
+            logger.error(f"[Upload] Failed to copy build scripts: {e}")
             import traceback
 
             logger.error(f"[Upload] Traceback: {traceback.format_exc()}")

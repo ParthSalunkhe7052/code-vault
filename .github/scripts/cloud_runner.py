@@ -938,16 +938,12 @@ class CloudRunner:
         available_cpus = multiprocessing.cpu_count()
 
         if sys.platform == "win32":
-            # Windows/Wine is unstable with multiple jobs AND needs pefile instead of depends.exe
+            # Windows/Wine is unstable with multiple jobs
             job_count = 1
             logger.warning(
                 "Windows detected: Forcing job count to 1 for stability in Wine"
             )
-            # CRITICAL: Use pefile dependency tool to avoid depends.exe (requires MFC42.dll)
-            # This is the proper fix for Wine builds where depends.exe crashes
-            cmd.append("--dependency-tool=pefile")
-            # Also keep the experimental flag for older Nuitka versions
-            cmd.append("--experimental=use_pefile_recursion")
+            # Note: --experimental=use_pefile_recursion is already added above in fast_build logic
         else:
             # Linux: Use 2 jobs on 2+ CPU machines for faster builds
             # Scons race condition was fixed in newer Nuitka versions
