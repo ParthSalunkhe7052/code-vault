@@ -13,8 +13,6 @@ substitutions:
   _SOURCE_URL: ''
   _CONFIG_URL: ''
   _OUTPUT_NAME: 'app'
-  _DEBUG_BUILD: 'false'
-  _NUITKA_CACHE_DIR: '/workspace/.nuitka-cache'
   _BUILD_ID: 'unknown'
   _PROJECT_ID: 'unknown'
 
@@ -208,7 +206,7 @@ steps:
 
         echo "[Cloud Build] ===== Building for Windows ====="
 
-        export NUITKA_CACHE_DIR=${_NUITKA_CACHE_DIR}
+        export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
         mkdir -p $$NUITKA_CACHE_DIR
 
         wine python -m pip install --upgrade --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography pefile

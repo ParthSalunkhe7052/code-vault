@@ -213,8 +213,6 @@ class CloudBuildClient:
             "_CALLBACK_SECRET": callback_secret,
             "_OUTPUT_NAME": config.get("output_name", "app"),
             "_GCS_BUCKET": "codevault-builds",
-            "_DEBUG_BUILD": "false",
-            "_NUITKA_CACHE_DIR": "/workspace/.nuitka-cache",
         }
 
         try:
