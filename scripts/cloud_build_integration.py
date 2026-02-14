@@ -30,25 +30,48 @@ def get_gcp_credentials() -> Optional[Any]:
 
     if workload_pool and service_account_email:
         try:
-            from google.auth import identity_pool
-
-            # Get Heroku metadata token
+            # Get Heroku OIDC token from metadata endpoint
+            heroku_app_id = None
             try:
                 with httpx.Client(timeout=10.0) as client:
                     response = client.get("https://heroku.com/dyno/metadata")
                     if response.status_code == 200:
                         heroku_app_id = response.json().get("app_id", "")
-                        print(
-                            f"[CloudBuild] Using Workload Identity for Heroku app: {heroku_app_id}"
-                        )
+                        print(f"[CloudBuild] Heroku app ID: {heroku_app_id}")
             except Exception as e:
                 print(f"[CloudBuild] Could not get Heroku metadata: {e}")
 
-            # Create external account credentials for Workload Identity
+            # Get the OAuth token from Heroku
+            # Heroku provides an OAuth token via HEROKU_OAUTH_TOKEN environment variable
+            heroku_oauth_token = os.getenv("HEROKU_OAUTH_TOKEN")
+
+            if not heroku_oauth_token:
+                # Try to get it from the metadata endpoint
+                try:
+                    with httpx.Client(timeout=10.0) as client:
+                        response = client.get(
+                            "https://heroku.com/dyno.metadata",
+                            headers={"Authorization": f"Bearer {os.getenv('DYNO')}"},
+                        )
+                except:
+                    pass
+
+            # For now, let's try using the audience from the workload pool
+            # and create credentials that will handle token exchange automatically
+            from google.auth import identity_pool
+
+            # Build the correct audience string
+            audience = f"//iam.googleapis.com/projects/464861363870/locations/global/workloadIdentityPools/codevault-pool/providers/codevault-provider"
+
+            print(
+                f"[CloudBuild] Creating Workload Identity credentials with audience: {audience}"
+            )
+
+            # Try with explicit credential source
             credentials = identity_pool.Credentials.from_info(
                 {
                     "type": "external_account",
-                    "audience": f"//iam.googleapis.com/{workload_pool}",
+                    "audience": audience,
                     "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
                     "token_url": "https://sts.googleapis.com/v1/token",
                     "credential_source": {
@@ -57,6 +80,9 @@ def get_gcp_credentials() -> Optional[Any]:
                             "type": "json",
                             "subject_token_field_name": "id_token",
                         },
+                        "headers": {
+                            "Authorization": f"Bearer {os.getenv('HEROKU_OAUTH_TOKEN', '')}"
+                        },
                     },
                 }
             ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
@@ -64,9 +90,10 @@ def get_gcp_credentials() -> Optional[Any]:
             print("[CloudBuild] Using Workload Identity credentials")
             return credentials
         except Exception as e:
-            print(
-                f"[CloudBuild] Workload Identity failed: {e}, falling back to other methods"
-            )
+            print(f"[CloudBuild] Workload Identity failed: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     # Check for service account file
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
