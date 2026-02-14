@@ -22,6 +22,8 @@ def get_gcp_credentials() -> Optional[Any]:
     2. Service account file
     3. Application Default Credentials
     """
+    import httpx
+
     # Check for Workload Identity configuration (Heroku)
     workload_pool = os.getenv("GCP_WORKLOAD_IDENTITY_POOL")
     service_account_email = os.getenv("GCP_SERVICE_ACCOUNT")
@@ -29,16 +31,16 @@ def get_gcp_credentials() -> Optional[Any]:
     if workload_pool and service_account_email:
         try:
             from google.auth import identity_pool
-            import requests
 
             # Get Heroku metadata token
             try:
-                response = requests.get("https://heroku.com/dyno/metadata", timeout=10)
-                if response.status_code == 200:
-                    heroku_app_id = response.json().get("app_id", "")
-                    print(
-                        f"[CloudBuild] Using Workload Identity for Heroku app: {heroku_app_id}"
-                    )
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get("https://heroku.com/dyno/metadata")
+                    if response.status_code == 200:
+                        heroku_app_id = response.json().get("app_id", "")
+                        print(
+                            f"[CloudBuild] Using Workload Identity for Heroku app: {heroku_app_id}"
+                        )
             except Exception as e:
                 print(f"[CloudBuild] Could not get Heroku metadata: {e}")
 
