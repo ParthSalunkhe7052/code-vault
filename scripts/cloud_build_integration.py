@@ -176,13 +176,33 @@ class CloudBuildClient:
         tier = build_config.get("plan_tier", "free")
         build.timeout = duration_pb2.Duration(seconds=TIER_TIMEOUTS.get(tier, 3600))
 
+        # OPTIMIZED: Choose machine type based on platform + tier
+        # Windows/Wine can't use parallel jobs effectively, so use smaller machines
+        # Linux builds benefit from 8 cores with 6 parallel Nuitka jobs
         MachineType = cloudbuild_v1.BuildOptions.MachineType
-        machine_types = {
-            "business": MachineType.N1_HIGHCPU_8,
-            "pro": MachineType.E2_HIGHCPU_8,
-            "free": MachineType.E2_MEDIUM,
-        }
-        build.options.machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
+
+        is_windows_only = platforms == "windows" or (
+            isinstance(platforms, str)
+            and "windows" in platforms
+            and "linux" not in platforms
+        )
+
+        if is_windows_only:
+            # Windows/Wine: Single-threaded Nuitka, no need for 8 cores
+            # E2_MEDIUM (1 vCPU, 4GB) is sufficient for single-threaded builds
+            # Cost savings: $0.003/min vs $0.0156/min (5x cheaper!)
+            build.options.machine_type = MachineType.E2_MEDIUM
+            logger.info(
+                f"[CloudBuild] Windows-only build: using E2_MEDIUM (single-threaded Nuitka)"
+            )
+        else:
+            # Linux builds: Benefit from 8 cores with 6 parallel jobs
+            machine_types = {
+                "business": MachineType.N1_HIGHCPU_8,
+                "pro": MachineType.E2_HIGHCPU_8,
+                "free": MachineType.E2_MEDIUM,
+            }
+            build.options.machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
 
         # Upload config to GCS
         from google.cloud import storage as gcs_storage
