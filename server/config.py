@@ -64,9 +64,10 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 # If REDIS_URL is not set but UPSTASH credentials are available, construct the URL
 if not REDIS_URL and UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
     # Upstash REST API URL format: https://unique-name.upstash.io
-    # Convert to standard Redis URL format: rediss://default:{token}@{endpoint}:6379
+    # Convert to standard Redis URL format
+    # Using redis:// instead of rediss:// to avoid SSL handshake issues in some environments
     endpoint = UPSTASH_REDIS_REST_URL.replace("https://", "").replace("http://", "")
-    REDIS_URL = f"rediss://default:{UPSTASH_REDIS_REST_TOKEN}@{endpoint}:6379"
+    REDIS_URL = f"redis://default:{UPSTASH_REDIS_REST_TOKEN}@{endpoint}:6379"
     print(f"[Config] Using Upstash Redis: {endpoint}")
 elif not REDIS_URL:
     # For local development, suggest localhost Redis
