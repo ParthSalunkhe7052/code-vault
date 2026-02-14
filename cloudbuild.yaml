@@ -17,7 +17,6 @@ substitutions:
   _NUITKA_CACHE_DIR: '/workspace/.nuitka-cache'
   _BUILD_ID: 'unknown'
   _PROJECT_ID: 'unknown'
-  _CACHE_KEY: 'default'
 
 options:
   machineType: 'E2_HIGHCPU_8'
@@ -36,15 +35,15 @@ steps:
       - |
         set +e
         echo "[Cloud Build] Attempting to restore cache..."
-        if gsutil -q stat "gs://${_GCS_BUCKET}/cache/pip-cache-${_CACHE_KEY}.tar.gz" 2>/dev/null; then
+        if gsutil -q stat "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz" 2>/dev/null; then
           echo "[Cloud Build] Restoring pip cache..."
-          gsutil cp "gs://${_GCS_BUCKET}/cache/pip-cache-${_CACHE_KEY}.tar.gz" /tmp/pip-cache.tar.gz
+          gsutil cp "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz" /tmp/pip-cache.tar.gz
           mkdir -p /root/.cache/pip
           tar -xzf /tmp/pip-cache.tar.gz -C /root/.cache/pip 2>/dev/null || true
         fi
-        if gsutil -q stat "gs://${_GCS_BUCKET}/cache/ccache-${_CACHE_KEY}.tar.gz" 2>/dev/null; then
+        if gsutil -q stat "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz" 2>/dev/null; then
           echo "[Cloud Build] Restoring ccache..."
-          gsutil cp "gs://${_GCS_BUCKET}/cache/ccache-${_CACHE_KEY}.tar.gz" /tmp/ccache.tar.gz
+          gsutil cp "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz" /tmp/ccache.tar.gz
           mkdir -p /workspace/.ccache
           tar -xzf /tmp/ccache.tar.gz -C /workspace/.ccache 2>/dev/null || true
         fi
@@ -330,14 +329,14 @@ steps:
           pip_cache_size=$$(du -s /root/.cache/pip 2>/dev/null | cut -f1)
           if [ "$$pip_cache_size" -gt 1000 ]; then
             tar -czf /tmp/pip-cache.tar.gz -C /root/.cache/pip . 2>/dev/null
-            gsutil cp /tmp/pip-cache.tar.gz "gs://${_GCS_BUCKET}/cache/pip-cache-${_CACHE_KEY}.tar.gz"
+            gsutil cp /tmp/pip-cache.tar.gz "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz"
           fi
         fi
         if [ -d /workspace/.ccache ]; then
           ccache_size=$$(du -s /workspace/.ccache 2>/dev/null | cut -f1)
           if [ "$$ccache_size" -gt 1000 ]; then
             tar -czf /tmp/ccache.tar.gz -C /workspace/.ccache . 2>/dev/null
-            gsutil cp /tmp/ccache.tar.gz "gs://${_GCS_BUCKET}/cache/ccache-${_CACHE_KEY}.tar.gz"
+            gsutil cp /tmp/ccache.tar.gz "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz"
           fi
         fi
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
