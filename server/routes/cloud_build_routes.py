@@ -457,23 +457,13 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
 
     conn = None
     try:
-        # Import Cloud Build client
-        import sys
-        from pathlib import Path as PathLib
-
-        # Add parent directory to path to import modules from CodeVault root
-        wrapper_path = PathLib(__file__).parent.parent.parent
-        if str(wrapper_path) not in sys.path:
-            sys.path.insert(0, str(wrapper_path))
-
         # Use Cloud Build API on Windows to avoid cmd.exe interpreting & characters in URLs
+        import sys
         if sys.platform == "win32":
             from cloud_build_integration import CloudBuildClient
-
             logger.info("[CloudBuild] Using Cloud Build API client (Windows detected)")
         else:
             from cloud_build_cli_wrapper import CloudBuildClient
-
             logger.info("[CloudBuild] Using gcloud CLI wrapper")
 
         # Upload source to R2 (still needed for Cloud Build to download)
@@ -1274,12 +1264,6 @@ async def get_build_status(
         ):
             try:
                 import sys
-                from pathlib import Path as PathLib
-
-                wrapper_path = PathLib(__file__).parent.parent.parent
-                if str(wrapper_path) not in sys.path:
-                    sys.path.insert(0, str(wrapper_path))
-
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
@@ -1524,12 +1508,6 @@ async def sync_build_status(
 
         try:
             import sys
-            from pathlib import Path as PathLib
-
-            wrapper_path = PathLib(__file__).parent.parent.parent
-            if str(wrapper_path) not in sys.path:
-                sys.path.insert(0, str(wrapper_path))
-
             if sys.platform == "win32":
                 from cloud_build_integration import CloudBuildClient
             else:
@@ -1656,12 +1634,6 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
-                from pathlib import Path as PathLib
-
-                wrapper_path = PathLib(__file__).parent.parent.parent
-                if str(wrapper_path) not in sys.path:
-                    sys.path.insert(0, str(wrapper_path))
-
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
@@ -1728,12 +1700,6 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
-                from pathlib import Path as PathLib
-
-                wrapper_path = PathLib(__file__).parent.parent.parent
-                if str(wrapper_path) not in sys.path:
-                    sys.path.insert(0, str(wrapper_path))
-
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
