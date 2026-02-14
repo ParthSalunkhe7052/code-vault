@@ -201,6 +201,7 @@ class CloudBuildClient:
         # IMPORTANT: Only include substitutions that are USED in cloudbuild.yaml steps
         # Config data (entry_file, license_key, api_url, etc.) is passed via config.json
         # which is downloaded from _CONFIG_URL - this avoids the 8KB limit and unused var errors
+        callback_secret = build_config.get("callback_secret", "")
         build.substitutions = {
             "_BUILD_ID": build_id,
             "_PROJECT_ID": project_id,
@@ -209,6 +210,7 @@ class CloudBuildClient:
             "_SOURCE_URL": source_url,
             "_CONFIG_URL": config_url,
             "_CALLBACK_URL": callback_url,
+            "_CALLBACK_SECRET": callback_secret,
             "_OUTPUT_NAME": config.get("output_name", "app"),
             "_GCS_BUCKET": "codevault-builds",
             "_DEBUG_BUILD": "false",

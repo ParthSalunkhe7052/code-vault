@@ -6,6 +6,7 @@
 
 substitutions:
   _CALLBACK_URL: 'https://api.codevault.parth7.me/api/v1/cloud-build/webhook'
+  _CALLBACK_SECRET: ''
   _TARGET_PLATFORMS: 'linux,windows'
   _LANGUAGE: 'python'
   _GCS_BUCKET: 'codevault-builds'
@@ -350,11 +351,10 @@ steps:
       - name: 'artifacts'
         path: '/workspace/artifacts'
 
-  # ===== STEP 7: Send Webhook Callback =====
+# ===== STEP 7: Send Webhook Callback =====
   - name: 'gcr.io/cloud-builders/curl'
     id: 'webhook-callback'
     entrypoint: 'bash'
-    secretEnv: ['_CALLBACK_SECRET']
     args:
       - '-c'
       - |
@@ -412,27 +412,23 @@ steps:
 
         # Build the payload with GCS blob keys instead of URLs
         payload='{"build_id":"'"${_BUILD_ID}"'","cloud_build_id":"'"${_BUILD_ID}"'","status":"'"$$overall_status"'","linux_status":"'"$$linux_status"'","windows_status":"'"$$windows_status"'","linux_download_key":"'"$$linux_download_key"'","windows_download_key":"'"$$windows_download_key"'","filename":"'"$$filename"'","error":"'"$$error_msg"'","timestamp":'"$$(date +%s)"'}'
-        sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$_CALLBACK_SECRET" | awk '{print $$2}')
+        sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "${_CALLBACK_SECRET}" | awk '{print $$2}')
 
         echo "[Cloud Build] Sending webhook callback..."
-        echo "[Cloud Build] Payload: $$payload"
 
-        # Retry logic with exponential backoff (A7)
+        # Retry logic with exponential backoff
         max_retries=3
         retry_delay=5
-        for i in $(seq 1 $$max_retries); do
+        for i in $$(seq 1 $$max_retries); do
           echo "[Cloud Build] Webhook attempt $$i/$$max_retries..."
-          if curl -sf -X POST "${_CALLBACK_URL}" \
-            -H "Content-Type: application/json" \
-            -H "X-Signature: $$sig" \
-            -d "$$payload"; then
+          if curl -sf -X POST "${_CALLBACK_URL}" -H "Content-Type: application/json" -H "X-Signature: $$sig" -d "$$payload"; then
             echo "[Cloud Build] Webhook succeeded on attempt $$i"
             break
           else
             if [[ $$i -lt $$max_retries ]]; then
               echo "[Cloud Build] Webhook failed, retrying in $${retry_delay}s..."
               sleep $$retry_delay
-              retry_delay=$$((retry_delay * 2))  # Exponential backoff
+              retry_delay=$$((retry_delay * 2))
             else
               echo "[Cloud Build] Webhook failed after $$max_retries attempts"
             fi
@@ -441,9 +437,3 @@ steps:
 
         echo "[Cloud Build] Webhook callback completed"
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
-
-# ===== Secrets Configuration =====
-availableSecrets:
-  secretManager:
-    - versionName: projects/cloudbuild-486309/secrets/callback-webhook-secret/versions/latest
-      env: '_CALLBACK_SECRET'
