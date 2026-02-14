@@ -409,27 +409,41 @@ steps:
         fi
 
         echo "[Cloud Build] Sending webhook to: ${_CALLBACK_URL}"
+        echo "[Cloud Build] Payload: $$payload"
+
+        # Test connectivity first
+        echo "[Cloud Build] Testing connectivity..."
+        curl -v --connect-timeout 10 "${_CALLBACK_URL}" 2>&1 | head -20 || true
 
         max_retries=5
-        retry_delay=2
+        retry_delay=5
         for i in $$(seq 1 $$max_retries); do
           echo "[Cloud Build] Attempt $$i/$$max_retries..."
 
+          # Use verbose output for debugging
           if [ -n "$$sig" ]; then
-            response=$$(curl -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" -H "Content-Type: application/json" -H "X-Signature: $$sig" -d "$$payload" 2>&1)
+            response=$$(curl -v -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
+              -H "Content-Type: application/json" \
+              -H "X-Signature: $$sig" \
+              -d "$$payload" 2>&1)
           else
-            response=$$(curl -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" -H "Content-Type: application/json" -d "$$payload" 2>&1)
+            response=$$(curl -v -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
+              -H "Content-Type: application/json" \
+              -d "$$payload" 2>&1)
           fi
 
           http_code=$$(echo "$$response" | tail -1)
           body=$$(echo "$$response" | head -n -1)
 
+          echo "[Cloud Build] Response: $$response"
+
           if [[ "$$http_code" == "200" || "$$http_code" == "201" ]]; then
             echo "[Cloud Build] Success (HTTP $$http_code)"
             break
           else
-            echo "[Cloud Build] Failed (HTTP $$http_code): $$body"
+            echo "[Cloud Build] Failed (HTTP $$http_code)"
             if [[ $$i -lt $$max_retries ]]; then
+              echo "[Cloud Build] Retrying in $${retry_delay}s..."
               sleep $$retry_delay
               retry_delay=$$((retry_delay * 2))
             fi
