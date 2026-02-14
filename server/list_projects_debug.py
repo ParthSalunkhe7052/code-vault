@@ -1,11 +1,11 @@
 import asyncio
 import os
-from database import get_db, release_db, init_db
+from database import get_db, release_db, init_database
 
 async def list_projects():
     # Load env vars if needed or ensure they are present
     from config import DATABASE_URL
-    await init_db(DATABASE_URL)
+    await init_database()
     
     conn = await get_db()
     try:
