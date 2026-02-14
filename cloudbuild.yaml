@@ -17,7 +17,6 @@ substitutions:
   _PROJECT_ID: 'unknown'
 
 options:
-  machineType: 'E2_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
   dynamicSubstitutions: true
   pool: {}
@@ -243,7 +242,9 @@ steps:
         windows_error=""
 
         if [ -f "./project/source/$$output_name.exe" ]; then
-          zip -q "$$output_name-windows.zip" "./project/source/$$output_name.exe"
+          echo "[Cloud Build] Packaging $$output_name.exe"
+          # Wine image doesn't have zip, use Python instead
+          python -c "import zipfile; zipfile.ZipFile('$$output_name-windows.zip', 'w', zipfile.ZIP_DEFLATED).write('./project/source/$$output_name.exe', '$$output_name.exe')"
           mkdir -p /workspace/artifacts
           mv "$$output_name-windows.zip" /workspace/artifacts/
           windows_artifacts="$$output_name-windows.zip"
