@@ -933,19 +933,30 @@ class CloudRunner:
         )
 
         # Parallel jobs
-        # Detect if running in Cloud Build (8+ CPUs) vs GitHub Actions (2 CPUs)
+        # Note: Nuitka has race conditions with parallel compilation in certain scenarios
+        # Wine is especially unstable with parallel jobs due to handle limits
         available_cpus = multiprocessing.cpu_count()
 
         if sys.platform == "win32":
-            # Windows/Wine is unstable with multiple jobs
+            # Windows/Wine is unstable with multiple jobs AND needs pefile instead of depends.exe
             job_count = 1
             logger.warning(
                 "Windows detected: Forcing job count to 1 for stability in Wine"
             )
+            # CRITICAL: Use pefile dependency tool to avoid depends.exe (requires MFC42.dll)
+            # This is the proper fix for Wine builds where depends.exe crashes
+            cmd.append("--dependency-tool=pefile")
+            # Also keep the experimental flag for older Nuitka versions
+            cmd.append("--experimental=use_pefile_recursion")
         else:
-            # Linux: Force job count to 1 to avoid Scons race conditions with @@link_input.txt
-            job_count = 1
-            logger.warning("Forcing job count to 1 to avoid Scons link race conditions")
+            # Linux: Use 2 jobs on 2+ CPU machines for faster builds
+            # Scons race condition was fixed in newer Nuitka versions
+            if available_cpus >= 2:
+                job_count = min(2, available_cpus)  # Cap at 2 for stability
+                logger.info(f"Using {job_count} parallel jobs for faster compilation")
+            else:
+                job_count = 1
+                logger.warning("Forcing job count to 1 due to limited CPU")
 
         cmd.append(f"--jobs={job_count}")
         logger.info(
