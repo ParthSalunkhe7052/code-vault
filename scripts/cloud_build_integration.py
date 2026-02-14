@@ -4,6 +4,7 @@ This module replaces GitHub Actions API calls with Google Cloud Build API calls
 """
 
 import json
+import logging
 import os
 import re
 import yaml
@@ -12,6 +13,8 @@ from google.cloud.devtools import cloudbuild_v1
 from google.oauth2 import service_account
 from google.api_core import exceptions
 from google.protobuf import duration_pb2
+
+logger = logging.getLogger(__name__)
 
 
 def get_gcp_credentials() -> Optional[Any]:
@@ -28,6 +31,10 @@ def get_gcp_credentials() -> Optional[Any]:
     workload_pool = os.getenv("GCP_WORKLOAD_IDENTITY_POOL")
     service_account_email = os.getenv("GCP_SERVICE_ACCOUNT")
 
+    logger.info(
+        f"[CloudBuild] Checking GCP credentials - workload_pool: {workload_pool}, service_account: {service_account_email}"
+    )
+
     if workload_pool and service_account_email:
         try:
             # Get Heroku OIDC token from metadata endpoint
@@ -35,39 +42,24 @@ def get_gcp_credentials() -> Optional[Any]:
             try:
                 with httpx.Client(timeout=10.0) as client:
                     response = client.get("https://heroku.com/dyno/metadata")
+                    logger.info(
+                        f"[CloudBuild] Heroku metadata response status: {response.status_code}"
+                    )
                     if response.status_code == 200:
                         heroku_app_id = response.json().get("app_id", "")
-                        print(f"[CloudBuild] Heroku app ID: {heroku_app_id}")
+                        logger.info(f"[CloudBuild] Heroku app ID: {heroku_app_id}")
             except Exception as e:
-                print(f"[CloudBuild] Could not get Heroku metadata: {e}")
+                logger.warning(f"[CloudBuild] Could not get Heroku metadata: {e}")
 
-            # Get the OAuth token from Heroku
-            # Heroku provides an OAuth token via HEROKU_OAUTH_TOKEN environment variable
-            heroku_oauth_token = os.getenv("HEROKU_OAUTH_TOKEN")
-
-            if not heroku_oauth_token:
-                # Try to get it from the metadata endpoint
-                try:
-                    with httpx.Client(timeout=10.0) as client:
-                        response = client.get(
-                            "https://heroku.com/dyno.metadata",
-                            headers={"Authorization": f"Bearer {os.getenv('DYNO')}"},
-                        )
-                except:
-                    pass
-
-            # For now, let's try using the audience from the workload pool
-            # and create credentials that will handle token exchange automatically
-            from google.auth import identity_pool
-
-            # Build the correct audience string
-            audience = f"//iam.googleapis.com/projects/464861363870/locations/global/workloadIdentityPools/codevault-pool/providers/codevault-provider"
-
-            print(
+            # Build the correct audience string using the full pool path
+            audience = f"//iam.googleapis.com/{workload_pool}"
+            logger.info(
                 f"[CloudBuild] Creating Workload Identity credentials with audience: {audience}"
             )
 
-            # Try with explicit credential source
+            # Try with explicit credential source - let google-auth handle the token exchange
+            from google.auth import identity_pool
+
             credentials = identity_pool.Credentials.from_info(
                 {
                     "type": "external_account",
@@ -80,20 +72,19 @@ def get_gcp_credentials() -> Optional[Any]:
                             "type": "json",
                             "subject_token_field_name": "id_token",
                         },
-                        "headers": {
-                            "Authorization": f"Bearer {os.getenv('HEROKU_OAUTH_TOKEN', '')}"
-                        },
                     },
                 }
             ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
 
-            print("[CloudBuild] Using Workload Identity credentials")
+            logger.info(
+                "[CloudBuild] Created Workload Identity credentials successfully"
+            )
             return credentials
         except Exception as e:
-            print(f"[CloudBuild] Workload Identity failed: {e}")
+            logger.error(f"[CloudBuild] Workload Identity failed: {e}")
             import traceback
 
-            traceback.print_exc()
+            logger.error(f"[CloudBuild] Traceback: {traceback.format_exc()}")
 
     # Check for service account file
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -102,11 +93,13 @@ def get_gcp_credentials() -> Optional[Any]:
             credentials_path,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
-        print("[CloudBuild] Using service account file credentials")
+        logger.info("[CloudBuild] Using service account file credentials")
         return credentials
 
     # Fall back to Application Default Credentials
-    print("[CloudBuild] Using Application Default Credentials")
+    logger.warning(
+        "[CloudBuild] No credentials found, using Application Default Credentials"
+    )
     return None
 
 
