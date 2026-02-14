@@ -243,8 +243,8 @@ steps:
 
         if [ -f "./project/source/$$output_name.exe" ]; then
           echo "[Cloud Build] Packaging $$output_name.exe"
-          # Wine image doesn't have zip, use Python instead
-          python -c "import zipfile; zipfile.ZipFile('$$output_name-windows.zip', 'w', zipfile.ZIP_DEFLATED).write('./project/source/$$output_name.exe', '$$output_name.exe')"
+          # Wine image: use wine python for zipping
+          wine python -c "import zipfile; zipfile.ZipFile('$$output_name-windows.zip', 'w', zipfile.ZIP_DEFLATED).write('./project/source/$$output_name.exe', '$$output_name.exe')"
           mkdir -p /workspace/artifacts
           mv "$$output_name-windows.zip" /workspace/artifacts/
           windows_artifacts="$$output_name-windows.zip"
