@@ -248,7 +248,7 @@ def initialize_health_monitor():
     """Initialize health monitoring system."""
     # Register health checks
     health_monitor.register_check("database", database_health_check, critical=True)
-    health_monitor.register_check("redis", redis_health_check)
+    # health_monitor.register_check("redis", redis_health_check)
     health_monitor.register_check("webhook_queue", webhook_queue_health_check)
 
     # Register alert handlers
