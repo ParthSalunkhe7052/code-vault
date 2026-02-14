@@ -932,27 +932,33 @@ class CloudRunner:
             [f"--output-filename={output_exe}", f"--output-dir={self.output_dir}"]
         )
 
-        # Parallel jobs
-        # Note: Nuitka has race conditions with parallel compilation in certain scenarios
-        # Wine is especially unstable with parallel jobs due to handle limits
+        # Parallel jobs - OPTIMIZED for E2_HIGHCPU_8 (8 vCPUs)
         available_cpus = multiprocessing.cpu_count()
+        env_jobs = os.environ.get("NUITKA_JOBS", "")
 
         if sys.platform == "win32":
-            # Windows/Wine is unstable with multiple jobs
+            # Windows/Wine is unstable with multiple jobs - keep at 1
             job_count = 1
-            logger.warning(
-                "Windows detected: Forcing job count to 1 for stability in Wine"
-            )
-            # Note: --experimental=use_pefile_recursion is already added above in fast_build logic
+            logger.warning("Windows/Wine: Using 1 job for stability")
         else:
-            # Linux: Use 2 jobs on 2+ CPU machines for faster builds
-            # Scons race condition was fixed in newer Nuitka versions
-            if available_cpus >= 2:
-                job_count = min(2, available_cpus)  # Cap at 2 for stability
-                logger.info(f"Using {job_count} parallel jobs for faster compilation")
+            # Linux: Use environment variable or calculate optimal jobs
+            if env_jobs:
+                job_count = int(env_jobs)
+                logger.info(f"Using NUITKA_JOBS from environment: {job_count}")
+            elif available_cpus >= 8:
+                # On 8+ core machines, use 6 jobs (leave 2 for system)
+                job_count = 6
+                logger.info(f"Using {job_count} parallel jobs (8-core optimization)")
+            elif available_cpus >= 4:
+                # On 4+ core machines, use 3 jobs
+                job_count = 3
+                logger.info(f"Using {job_count} parallel jobs (4-core optimization)")
+            elif available_cpus >= 2:
+                job_count = 2
+                logger.info(f"Using {job_count} parallel jobs")
             else:
                 job_count = 1
-                logger.warning("Forcing job count to 1 due to limited CPU")
+                logger.warning("Single CPU detected, using 1 job")
 
         cmd.append(f"--jobs={job_count}")
         logger.info(

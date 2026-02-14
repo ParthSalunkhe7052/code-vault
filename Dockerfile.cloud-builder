@@ -2,56 +2,57 @@
 # CodeVault Cloud Builder - Pre-built Docker Image
 # ==============================================
 # This image contains all dependencies pre-installed for faster Cloud Build runs.
-# 
-# Build and push to GCR:
+#
+# Build and push to GCR (when Docker is running):
+#   gcloud auth configure-docker gcr.io
 #   docker build -t gcr.io/cloudbuild-486309/codevault-builder:latest -f Dockerfile.cloud-builder .
 #   docker push gcr.io/cloudbuild-486309/codevault-builder:latest
 #
 # Expected savings: 2-3 minutes per build (no apt-get/pip install)
+#
+# To use in cloudbuild.yaml, replace:
+#   name: 'python:3.11-slim'
+# with:
+#   name: 'gcr.io/cloudbuild-486309/codevault-builder:latest'
 
 FROM python:3.11-slim
 
-# Metadata
 LABEL maintainer="CodeVault Team"
 LABEL description="Pre-built image for CodeVault Cloud Build with Nuitka and dependencies"
-LABEL version="1.0"
+LABEL version="2.0"
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CCACHE_DIR=/workspace/.ccache \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 
-# Install system dependencies
-# - patchelf: Required for Nuitka Linux builds
-# - build-essential: C compiler for Nuitka
-# - ccache: Compiler cache for faster repeat builds
-# - unzip: Extract source archives
-# - curl: Download files
+# Install system dependencies in single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     patchelf \
     build-essential \
     ccache \
     unzip \
     curl \
+    zip \
+    tar \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Python build dependencies
-# These are the main packages needed for Nuitka builds
+# Pre-install Python build dependencies (major time saver)
 RUN pip install --no-cache-dir \
-    nuitka \
+    nuitka==2.4.8 \
     ordered-set \
     zstandard \
     requests \
-    cryptography
+    cryptography \
+    pefile
 
-# Create workspace directory
-RUN mkdir -p /workspace/artifacts /workspace/.ccache
+# Pre-configure ccache
+RUN mkdir -p /workspace/.ccache /workspace/.nuitka-cache /workspace/artifacts && \
+    ccache --set-config=max_size=500M
 
-# Set working directory
 WORKDIR /workspace
 
-# Default command (can be overridden in cloudbuild.yaml)
 CMD ["python3", "--version"]

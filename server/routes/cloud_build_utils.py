@@ -11,6 +11,7 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Optional
+from datetime import timedelta
 
 from fastapi import HTTPException
 from storage_service import storage_service
@@ -34,37 +35,54 @@ def validate_safe_path(base_dir: Path, user_input: str) -> Path:
     try:
         base_resolved = base_dir.resolve()
         candidate_resolved = candidate.resolve()
-        # Check if candidate is within base_dir using relative_to
         candidate_resolved.relative_to(base_resolved)
         return candidate_resolved
     except (ValueError, OSError):
         raise HTTPException(400, "Invalid path component")
 
 
-async def generate_gcs_signed_url(download_key: str) -> Optional[str]:
-    """Generate signed URL for GCS artifacts"""
+def generate_gcs_signed_url(download_key: str) -> Optional[str]:
+    """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions).
+
+    Priority:
+    1. Try GCS first (for Cloud Build artifacts)
+    2. Fallback to R2 (for GitHub Actions artifacts)
+
+    Returns signed URL valid for 1 hour, or None if generation fails.
+    """
     try:
         from google.cloud import storage as gcs_storage
-        from datetime import timedelta
+        from config import GCS_BUILDS_BUCKET
 
-        # Initialize GCS client
         gcs_client = gcs_storage.Client()
-        bucket = gcs_client.bucket("codevault-builds")
+        bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
         blob = bucket.blob(download_key)
 
-        # Check if blob exists in GCS
         if blob.exists():
-            # Generate signed URL valid for 1 hour
-            url = blob.generate_signed_url(
+            signed_url = blob.generate_signed_url(
                 version="v4",
                 expiration=timedelta(hours=1),
                 method="GET",
             )
-            return url
-        return None
-    except Exception as e:
-        logger.error(f"[CloudBuild] Failed to generate GCS signed URL: {e}")
-        return None
+            logger.info(f"[CloudBuild] Generated GCS signed URL for {download_key}")
+            return signed_url
+    except Exception as gcs_error:
+        logger.debug(f"[CloudBuild] GCS signed URL failed: {gcs_error}")
+
+    if storage_service.is_cloud_enabled() and storage_service.client:
+        try:
+            r2_url = storage_service.client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": storage_service.bucket, "Key": download_key},
+                ExpiresIn=3600,
+            )
+            logger.info(f"[CloudBuild] Generated R2 signed URL for {download_key}")
+            return r2_url
+        except Exception as r2_error:
+            logger.debug(f"[CloudBuild] R2 signed URL failed: {r2_error}")
+
+    logger.warning(f"[CloudBuild] Could not generate signed URL for {download_key}")
+    return None
 
 
 def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -93,13 +111,11 @@ async def invalidate_cached_source(project_id: str) -> None:
         s3 = storage_service.client
         bucket = storage_service.bucket
 
-        # Check if cached source exists and delete it
         try:
             s3.head_object(Bucket=bucket, Key=project_source_key)
             s3.delete_object(Bucket=bucket, Key=project_source_key)
             logger.info(f"[Cache] Invalidated cached source: {project_source_key}")
         except Exception:
-            # Cache doesn't exist, that's fine
             pass
     except Exception as e:
         logger.warning(f"[Cache] Failed to invalidate source cache: {e}")

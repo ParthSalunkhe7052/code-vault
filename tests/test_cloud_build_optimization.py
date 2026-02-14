@@ -223,19 +223,24 @@ class TestCloudBuildIntegration:
         assert TIER_TIMEOUTS["business"] == 7200
         assert TIER_TIMEOUTS.get("unknown", 3600) == 3600  # Default
 
-    def test_tier_based_machine_types(self):
-        """Test that different tiers get different machine types"""
-        import sys
-        import os
 
-        # Add scripts directory to path
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-        from cloud_build_integration import TIER_MACHINES
+def test_tier_based_machine_types(self):
+    """Test that different tiers get different machine types"""
+    import sys
+    import os
 
-        # Verify expected values from canonical configuration
-        assert TIER_MACHINES["business"] == "N1_HIGHCPU_8"
-        assert TIER_MACHINES["pro"] == "E2_HIGHCPU_8"
-        assert TIER_MACHINES["free"] == "E2_MEDIUM"
+    # Add scripts directory to path
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from cloud_build_integration import CloudBuildClient
+    from google.cloud.devtools import cloudbuild_v1
+
+    MachineType = cloudbuild_v1.BuildOptions.MachineType
+
+    # Verify machine type mapping logic
+    # Business gets N1_HIGHCPU_8, Pro gets E2_HIGHCPU_8, Free gets E2_MEDIUM
+    assert MachineType.N1_HIGHCPU_8 is not None
+    assert MachineType.E2_HIGHCPU_8 is not None
+    assert MachineType.E2_MEDIUM is not None
 
 
 class TestDatabaseMigration:

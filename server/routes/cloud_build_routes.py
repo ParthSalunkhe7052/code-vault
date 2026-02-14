@@ -45,6 +45,7 @@ from routes.cloud_build_websocket import (
 )
 from routes.cloud_build_utils import (
     validate_safe_path,
+    generate_gcs_signed_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -273,54 +274,6 @@ def get_remote_build_id(build_row) -> Optional[str]:
     return build_row.get("gcp_build_id") or build_row.get("github_run_id")
 
 
-def generate_gcs_signed_url(download_key: str) -> Optional[str]:
-    """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions)"""
-    try:
-        # Check if download_key is from GCS (Cloud Build) or R2 (GitHub Actions)
-        # GCS keys: builds/{build_id}/platform/filename
-        # Both use same format, but storage location differs
-
-        # Try GCS first (for Cloud Build artifacts)
-        try:
-            from google.cloud import storage as gcs_storage
-            from datetime import timedelta
-
-            # Initialize GCS client
-            gcs_client = gcs_storage.Client()
-            from config import GCS_BUILDS_BUCKET
-
-            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
-            blob = bucket.blob(download_key)
-
-            # Check if blob exists in GCS
-            if blob.exists():
-                # Generate signed URL (valid for 1 hour)
-                signed_url = blob.generate_signed_url(
-                    version="v4", expiration=timedelta(hours=1), method="GET"
-                )
-                logger.info(f"[CloudBuild] Generated GCS signed URL for {download_key}")
-                return signed_url
-        except Exception as gcs_error:
-            logger.debug(f"[CloudBuild] Not in GCS or error: {gcs_error}")
-
-        # Fallback to R2 (for GitHub Actions artifacts)
-        if storage_service.is_cloud_enabled() and storage_service.client:
-            r2_url = storage_service.client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": storage_service.bucket, "Key": download_key},
-                ExpiresIn=3600,
-            )
-            logger.info(f"[CloudBuild] Generated R2 signed URL for {download_key}")
-            return r2_url
-
-        logger.warning(f"[CloudBuild] Could not generate signed URL for {download_key}")
-        return None
-
-    except Exception as e:
-        logger.error(f"[CloudBuild] Error generating signed URL: {e}")
-        return None
-
-
 async def verify_webhook_signature(request: Request) -> bool:
     signature = request.headers.get("X-Signature")
     if not signature:
@@ -347,7 +300,7 @@ async def verify_webhook_signature(request: Request) -> bool:
 
 async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
     """
-    Upload source to R2. Creates fresh zip for each build.
+        Upload source to R2. Creates fresh zip for each build.
     Cache invalidation ensures new files are always used.
     """
     import shutil
@@ -467,6 +420,11 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
     conn = None
     try:
         # Always use Cloud Build API client (supports Workload Identity on Heroku)
+        import sys
+
+        scripts_path = Path(__file__).parent.parent.parent / "scripts"
+        if str(scripts_path) not in sys.path:
+            sys.path.insert(0, str(scripts_path))
         from cloud_build_integration import CloudBuildClient
 
         logger.info("[CloudBuild] Using Cloud Build API client")
