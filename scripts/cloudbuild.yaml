@@ -8,6 +8,7 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         echo "=== CodeVault Cloud Build Starting ==="
         echo "Build ID: ${_BUILD_ID}"
         echo "Project ID: ${_PROJECT_ID}"
@@ -30,6 +31,7 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         echo "Downloading source code..."
         mkdir -p /workspace/source
         
@@ -55,26 +57,16 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         echo "Building with CodeVault secure compiler..."
         cd /workspace
         
-        # Load configuration values
-        ENTRY_FILE=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('entry_file', 'main.py'))")
-        OUTPUT_NAME=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('output_name', 'app'))")
-        LICENSE_KEY=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('license_key', 'GENERIC'))")
-        API_URL=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('api_url', 'https://api.codevault.com'))")
-        PUBLIC_KEY=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('signing_public_key', ''))")
-        HEARTBEAT_INTERVAL=$(cat build_config.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('heartbeat_interval', 300))")
-        SKIP_OBFUSCATION=$(cat build_config.json | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('skip_obfuscation', True) else 'false')")
-        ENABLE_LEASE=$(cat build_config.json | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('enable_lease', False) else 'false')")
-        
         echo "Build configuration:"
-        echo "  Entry file: ${ENTRY_FILE}"
-        echo "  Output name: ${OUTPUT_NAME}"
+        echo "  Entry file: ${_ENTRY_FILE}"
+        echo "  Output name: ${_OUTPUT_NAME}"
         echo "  Language: ${_LANGUAGE}"
-        echo "  Obfuscation: ${SKIP_OBFUSCATION}"
-        echo "  Ed25519: $([ -n \"${PUBLIC_KEY}\" ] && echo 'enabled' || echo 'disabled')"
-        echo "  Heartbeat: ${HEARTBEAT_INTERVAL}s"
+        echo "  Obfuscation: ${_SKIP_OBFUSCATION}"
+        echo "  Heartbeat: ${_HEARTBEAT_INTERVAL}s"
         
         mkdir -p /workspace/output
         
@@ -83,31 +75,29 @@ steps:
           # Python build with Nuitka + CodeVault wrapper
           python3 -m codevault_cli build \
             --project-dir /workspace/source \
-            --entry-file "${ENTRY_FILE}" \
-            --output-name "${OUTPUT_NAME}" \
+            --entry-file "${_ENTRY_FILE}" \
+            --output-name "${_OUTPUT_NAME}" \
             --output-dir /workspace/output \
             --language python \
-            --license-key "${LICENSE_KEY}" \
-            --api-url "${API_URL}" \
-            --public-key "${PUBLIC_KEY}" \
-            --heartbeat-interval "${HEARTBEAT_INTERVAL}" \
-            $([ "${SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
-            $([ "${ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
+            --license-key "${_LICENSE_KEY}" \
+            --api-url "${_API_URL}" \
+            --heartbeat-interval "${_HEARTBEAT_INTERVAL}" \
+            $([ "${_SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
+            $([ "${_ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
             --cloud-build
         elif [ "${_LANGUAGE}" = "nodejs" ]; then
           # Node.js build with pkg + CodeVault wrapper
           python3 -m codevault_cli build \
             --project-dir /workspace/source \
-            --entry-file "${ENTRY_FILE}" \
-            --output-name "${OUTPUT_NAME}" \
+            --entry-file "${_ENTRY_FILE}" \
+            --output-name "${_OUTPUT_NAME}" \
             --output-dir /workspace/output \
             --language nodejs \
-            --license-key "${LICENSE_KEY}" \
-            --api-url "${API_URL}" \
-            --public-key "${PUBLIC_KEY}" \
-            --heartbeat-interval "${HEARTBEAT_INTERVAL}" \
-            $([ "${SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
-            $([ "${ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
+            --license-key "${_LICENSE_KEY}" \
+            --api-url "${_API_URL}" \
+            --heartbeat-interval "${_HEARTBEAT_INTERVAL}" \
+            $([ "${_SKIP_OBFUSCATION}" = "false" ] && echo "--obfuscate") \
+            $([ "${_ENABLE_LEASE}" = "true" ] && echo "--enable-lease") \
             --cloud-build
         else
           echo "Unsupported language: ${_LANGUAGE}"
@@ -122,6 +112,7 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         echo "Registering binary integrity hash..."
         
         if [ -f /workspace/output/${_OUTPUT_NAME}.exe ]; then
@@ -129,17 +120,17 @@ steps:
         elif [ -f /workspace/output/${_OUTPUT_NAME} ]; then
           BINARY_PATH="/workspace/output/${_OUTPUT_NAME}"
         else
-          echo "Warning: Binary not found in expected location"
+          echo "Error: Binary not found in expected location"
           ls -la /workspace/output/
-          exit 0
+          exit 1
         fi
         
-        # Calculate SHA-256 hash
-        BINARY_HASH=$(sha256sum "${BINARY_PATH}" | awk '{print $1}')
-        echo "Binary hash: ${BINARY_HASH}"
+        # Calculate SHA-256 hash (Escape internal bash variables)
+        BINARY_HASH=$(sha256sum "$${BINARY_PATH}" | awk '{print $1}')
+        echo "Binary hash: $${BINARY_HASH}"
         
         # Store hash in metadata for callback
-        echo "{\"binary_hash\": \"${BINARY_HASH}\", \"build_id\": \"${_BUILD_ID}\", \"project_id\": \"${_PROJECT_ID}\"}" > /workspace/output/binary_metadata.json
+        echo "{\"binary_hash\": \"$${BINARY_HASH}\", \"build_id\": \"${_BUILD_ID}\", \"project_id\": \"${_PROJECT_ID}\"}" > /workspace/output/binary_metadata.json
         
         echo "Binary hash registered for integrity verification"
 
@@ -156,15 +147,16 @@ steps:
     args:
       - '-c'
       - |
+        set -e
         if [ -n "${_CALLBACK_URL}" ]; then
           echo "Sending completion callback..."
           
-          # Prepare callback payload
+          # Prepare callback payload (Escape internal bash variable)
           CALLBACK_PAYLOAD=$(cat /workspace/output/binary_metadata.json 2>/dev/null || echo "{}")
           
           curl -X POST "${_CALLBACK_URL}" \
             -H "Content-Type: application/json" \
-            -d "${CALLBACK_PAYLOAD}" || echo "Callback failed (non-critical)"
+            -d "$${CALLBACK_PAYLOAD}" || echo "Callback failed (non-critical)"
         fi
 
 options:
@@ -183,8 +175,12 @@ substitutions:
   _CONFIG_URL: ''
   _CALLBACK_URL: ''
   _OUTPUT_NAME: 'app'
-  _DEBUG_BUILD: 'false'
-  _SOURCE_DIR: 'source'
+  _ENTRY_FILE: 'main.py'
+  _LICENSE_KEY: 'GENERIC'
+  _API_URL: 'https://api.codevault.com'
+  _HEARTBEAT_INTERVAL: '300'
+  _SKIP_OBFUSCATION: 'true'
+  _ENABLE_LEASE: 'false'
 
 artifacts:
   objects:

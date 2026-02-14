@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X } from 'lucide-react';
+import { Cloud, Loader2, CheckCircle, XCircle, Download, Monitor, Terminal, X, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import { useProjectBuild } from '../contexts/BuildContext';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * Platform configuration for display
@@ -28,8 +29,9 @@ export function CloudBuildButton({
   onComplete, 
   className = "" 
 }) {
-  // Global Build Context
+  // Global Build Context and Auth
   const projectBuild = useProjectBuild(projectId);
+  const { isAdmin } = useAuth();
 
   // Local state (synced with global where possible, but kept for granular UI control)
   const [status, setStatus] = useState('idle'); // idle, starting, building, completed, failed, cancelled
@@ -38,6 +40,8 @@ export function CloudBuildButton({
   const [displayProgress, setDisplayProgress] = useState(0); // Animated progress for smooth transitions
   const [error, setError] = useState(null);
   const [stage, setStage] = useState('');
+  const [adminErrorDetails, setAdminErrorDetails] = useState(null);
+  const [showAdminDetails, setShowAdminDetails] = useState(false);
   
   // For single-platform builds (legacy/simple mode)
   const [downloadUrl, setDownloadUrl] = useState(null);
@@ -76,6 +80,8 @@ export function CloudBuildButton({
   const startBuild = async () => {
     setStatus('starting');
     setError(null);
+    setAdminErrorDetails(null);
+    setShowAdminDetails(false);
     setProgress(5); // Start at 5% for immediate feedback
     setDisplayProgress(5);
     setDownloadUrl(null);
@@ -116,8 +122,22 @@ export function CloudBuildButton({
       pollStatus(newBuildId);
     } catch (err) {
       setStatus('failed');
-      setError(err.response?.data?.detail || 'Failed to start build');
-      console.error(err);
+      
+      // Handle admin error details
+      const errorDetail = err.response?.data?.detail;
+      if (isAdmin && typeof errorDetail === 'object' && errorDetail.traceback) {
+        setError(errorDetail.message || errorDetail.error || 'Failed to start build');
+        setAdminErrorDetails({
+          error: errorDetail.error,
+          traceback: errorDetail.traceback,
+          buildId: errorDetail.build_id
+        });
+      } else {
+        setError(typeof errorDetail === 'string' ? errorDetail : 'Failed to start build');
+        setAdminErrorDetails(null);
+      }
+      
+      console.error('Cloud Build Error:', err);
     }
   };
 
@@ -301,6 +321,8 @@ export function CloudBuildButton({
   const resetBuild = () => {
     setStatus('idle');
     setError(null);
+    setAdminErrorDetails(null);
+    setShowAdminDetails(false);
     setProgress(0);
     setDisplayProgress(0);
     setDownloadUrl(null);
@@ -595,6 +617,44 @@ export function CloudBuildButton({
             Build failed
           </div>
           <p className="text-sm text-red-300 bg-red-950/30 p-2 rounded">{error}</p>
+          
+          {/* Admin error details - only shown for admin users */}
+          {isAdmin && adminErrorDetails && (
+            <div className="mt-3">
+              <button
+                onClick={() => setShowAdminDetails(!showAdminDetails)}
+                className="flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 mb-2"
+              >
+                <AlertCircle className="w-3 h-3" />
+                {showAdminDetails ? 'Hide' : 'Show'} Admin Debug Info
+              </button>
+              
+              {showAdminDetails && (
+                <div className="space-y-2">
+                  {adminErrorDetails.buildId && (
+                    <p className="text-xs text-slate-400">
+                      Build ID: <span className="font-mono text-slate-300">{adminErrorDetails.buildId}</span>
+                    </p>
+                  )}
+                  <div className="bg-black/50 rounded p-2 overflow-auto max-h-48">
+                    <p className="text-xs text-slate-500 mb-1">Error:</p>
+                    <pre className="text-xs text-red-300 font-mono whitespace-pre-wrap">
+                      {adminErrorDetails.error}
+                    </pre>
+                  </div>
+                  {adminErrorDetails.traceback && (
+                    <div className="bg-black/50 rounded p-2 overflow-auto max-h-64">
+                      <p className="text-xs text-slate-500 mb-1">Traceback:</p>
+                      <pre className="text-xs text-amber-300/80 font-mono text-[10px] whitespace-pre-wrap">
+                        {adminErrorDetails.traceback}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          
           <button
             onClick={resetBuild}
             className="text-sm text-red-400 hover:text-red-300 underline underline-offset-4"

@@ -457,14 +457,10 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
 
     conn = None
     try:
-        # Use Cloud Build API on Windows to avoid cmd.exe interpreting & characters in URLs
-        import sys
-        if sys.platform == "win32":
-            from cloud_build_integration import CloudBuildClient
-            logger.info("[CloudBuild] Using Cloud Build API client (Windows detected)")
-        else:
-            from cloud_build_cli_wrapper import CloudBuildClient
-            logger.info("[CloudBuild] Using gcloud CLI wrapper")
+        # Always use Cloud Build API client (supports Workload Identity on Heroku)
+        from cloud_build_integration import CloudBuildClient
+
+        logger.info("[CloudBuild] Using Cloud Build API client")
 
         # Upload source to R2 (still needed for Cloud Build to download)
         source_url = await upload_source_to_r2(build_id, source_dir)
@@ -556,12 +552,50 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
         return True
 
     except Exception as e:
-        logger.error(f"Failed to trigger Cloud Build: {e}")
+        import traceback
+
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        # Filter out long HTML responses from error messages
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+
+        # Also clean up the traceback - remove HTML content
+        clean_traceback = error_traceback
+        if "<!doctype html>" in error_traceback or "<html" in error_traceback.lower():
+            # Extract just the relevant Python traceback
+            lines = error_traceback.split("\n")
+            clean_lines = []
+            for line in lines:
+                if "<!" in line or "<html" in line.lower() or len(line) > 200:
+                    break
+                clean_lines.append(line)
+            clean_traceback = "\n".join(clean_lines)
+            if not clean_traceback:
+                clean_traceback = clean_error
+
+        logger.error(f"Failed to trigger Cloud Build: {clean_error}")
         if conn is None:
             conn = await get_db()
+        # Store both error message and traceback for admin debugging
         await conn.execute(
-            "UPDATE cloud_builds SET status = 'failed', error_message = $1 WHERE id = $2",
-            str(e),
+            """UPDATE cloud_builds 
+               SET status = 'failed', 
+                   error_message = $1,
+                   admin_error_details = $2
+               WHERE id = $3""",
+            clean_error,
+            clean_traceback,
             build_id,
         )
         return False
@@ -792,9 +826,34 @@ async def start_cloud_build(
         )
         queue_status = queue_result.get("status")
         if queue_status not in {"queued", "running"}:
-            raise HTTPException(
-                500, queue_result.get("message", "Failed to enqueue cloud build")
-            )
+            error_message = queue_result.get("message", "Failed to enqueue cloud build")
+            # Get detailed error from database if available
+            try:
+                conn = await get_db()
+                build_error = await conn.fetchrow(
+                    "SELECT error_message, admin_error_details FROM cloud_builds WHERE id = $1",
+                    build_id,
+                )
+                if build_error and build_error.get("admin_error_details"):
+                    # Re-raise with detailed error for admin users
+                    if user.get("role") == "admin":
+                        raise HTTPException(
+                            status_code=500,
+                            detail={
+                                "message": "Cloud build failed",
+                                "error": build_error.get(
+                                    "error_message", error_message
+                                ),
+                                "traceback": build_error.get("admin_error_details"),
+                                "build_id": build_id,
+                            },
+                        )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[CloudBuild] Error fetching build details: {e}")
+
+            raise HTTPException(500, error_message)
         queue_accepted = True
 
         return CloudBuildResponse(
@@ -803,7 +862,39 @@ async def start_cloud_build(
             message=queue_result.get("message", "Cloud build queued."),
         )
 
-    except Exception:
+    except Exception as e:
+        import traceback
+
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        # Filter out long HTML responses from error messages
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+        elif len(error_msg) > 500:
+            # Extract just the key error message
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                # Just take first 200 chars
+                clean_error = error_msg[:200] + "..."
+
+        # Log detailed error for debugging
+        logger.error(
+            f"[CloudBuild] Build start failed for user {user['id']}: {clean_error}"
+        )
+
         if deducted_credits > 0 and not queue_accepted:
             try:
                 await conn.execute(
@@ -816,16 +907,31 @@ async def start_cloud_build(
                         """
                         UPDATE cloud_builds
                         SET status = 'failed',
-                            error_message = COALESCE(error_message, 'Build failed before enqueue/trigger. Credit refunded.')
+                            error_message = COALESCE(error_message, $2),
+                            admin_error_details = $3
                         WHERE id = $1
                         """,
                         build_id,
+                        f"Build failed before enqueue/trigger. Credit refunded. Error: {error_msg}",
+                        error_traceback if user.get("role") == "admin" else None,
                     )
                 logger.info(
                     f"[CloudBuild] Refunded {deducted_credits} credit(s) for user {user['id']} after enqueue failure"
                 )
             except Exception as refund_error:
                 logger.error(f"[CloudBuild] Failed to refund credits: {refund_error}")
+
+        # Re-raise with admin details if user is admin
+        if user.get("role") == "admin":
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "Cloud build failed",
+                    "error": error_msg,
+                    "traceback": error_traceback,
+                    "build_id": build_id,
+                },
+            )
         raise
     finally:
         await release_db(conn)
@@ -1264,10 +1370,11 @@ async def get_build_status(
         ):
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
@@ -1507,11 +1614,7 @@ async def sync_build_status(
             }
 
         try:
-            import sys
-            if sys.platform == "win32":
-                from cloud_build_integration import CloudBuildClient
-            else:
-                from cloud_build_cli_wrapper import CloudBuildClient
+            from cloud_build_integration import CloudBuildClient
 
             cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
             gcp_status = cloud_build.get_build_status(remote_build_id)
@@ -1634,10 +1737,11 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
@@ -1700,10 +1804,11 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 cloud_build.cancel_build(remote_build_id)
@@ -2168,6 +2273,9 @@ async def get_queue_position(build_id: str) -> Optional[int]:
 
 async def trigger_build_directly(build_id: str, config: dict, project_id: str):
     """Fallback: trigger build directly without queue."""
+    import traceback
+
+    conn = None
     try:
         # Security: Validate project_id and construct safe source directory path
         safe_project_dir = validate_safe_path(UPLOAD_DIR, project_id)
@@ -2190,10 +2298,62 @@ async def trigger_build_directly(build_id: str, config: dict, project_id: str):
 
         started = await trigger_cloud_build(build_id, config, source_dir)
         if not started:
-            return {"status": "error", "message": "Failed to start cloud build"}
+            return {
+                "status": "error",
+                "message": "Failed to start cloud build - check logs",
+            }
         return {"status": "running", "message": "Build started immediately"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+
+        # Clean traceback
+        clean_traceback = error_traceback
+        if "<!doctype html>" in error_traceback or "<html" in error_traceback.lower():
+            lines = error_traceback.split("\n")
+            clean_lines = []
+            for line in lines:
+                if "<!" in line or "<html" in line.lower() or len(line) > 200:
+                    break
+                clean_lines.append(line)
+            clean_traceback = "\n".join(clean_lines)
+            if not clean_traceback:
+                clean_traceback = clean_error
+
+        logger.error(f"[CloudBuild] trigger_build_directly failed: {clean_error}")
+
+        # Store detailed error in database
+        try:
+            conn = await get_db()
+            await conn.execute(
+                """UPDATE cloud_builds 
+                   SET status = 'failed', 
+                       error_message = $1,
+                       admin_error_details = $2
+                   WHERE id = $3""",
+                clean_error,
+                clean_traceback,
+                build_id,
+            )
+        except Exception as db_err:
+            logger.error(f"[CloudBuild] Failed to store error in DB: {db_err}")
+
+        return {
+            "status": "error",
+            "message": f"Failed to start cloud build: {error_msg}",
+        }
 
 
 @router.get("/{build_id}/queue-position")
