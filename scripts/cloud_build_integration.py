@@ -198,7 +198,9 @@ class CloudBuildClient:
         config_url = f"gs://codevault-builds/builds/{build_id}/config.json"
 
         # Set Substitutions (GCB expects these to start with _)
-        # IMPORTANT: Must match ALL substitutions defined in cloudbuild.yaml
+        # IMPORTANT: Only include substitutions that are USED in cloudbuild.yaml steps
+        # Config data (entry_file, license_key, api_url, etc.) is passed via config.json
+        # which is downloaded from _CONFIG_URL - this avoids the 8KB limit and unused var errors
         build.substitutions = {
             "_BUILD_ID": build_id,
             "_PROJECT_ID": project_id,
@@ -208,14 +210,6 @@ class CloudBuildClient:
             "_CONFIG_URL": config_url,
             "_CALLBACK_URL": callback_url,
             "_OUTPUT_NAME": config.get("output_name", "app"),
-            "_ENTRY_FILE": config.get("entry_file", "main.py"),
-            "_LICENSE_KEY": config.get("license_key", "GENERIC_BUILD"),
-            "_API_URL": config.get(
-                "api_url", "https://api.codevault.parth7.me/api/v1/license/validate"
-            ),
-            "_HEARTBEAT_INTERVAL": str(config.get("heartbeat_interval", 300)),
-            "_SKIP_OBFUSCATION": str(config.get("skip_obfuscation", True)).lower(),
-            "_ENABLE_LEASE": str(config.get("enable_lease", False)).lower(),
             "_GCS_BUCKET": "codevault-builds",
             "_DEBUG_BUILD": "false",
             "_NUITKA_CACHE_DIR": "/workspace/.nuitka-cache",
