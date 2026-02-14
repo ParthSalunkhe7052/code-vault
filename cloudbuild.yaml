@@ -104,7 +104,7 @@ steps:
     args:
       - '-c'
       - |
-        # set -e removed to allow partial success
+        set -e
 
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"linux"* || "${_LANGUAGE}" != "python" ]]; then
@@ -120,6 +120,13 @@ steps:
 
         # Install Python build tools
         pip install --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography
+
+        # Validate cloud_runner.py exists
+        if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
+          echo "[Cloud Build] ERROR: cloud_runner.py not found in source package"
+          echo "cloud_runner.py not found in source package" > /workspace/project/source/error_message.txt
+          exit 1
+        fi
 
         # Load config
         decoded_config=$$(cat /workspace/config.json)
@@ -202,7 +209,7 @@ steps:
     args:
       - '-c'
       - |
-        # set -e removed to allow partial success
+        set -e
 
         # Check platform and language
         if [[ "${_TARGET_PLATFORMS}" != *"windows"* || "${_LANGUAGE}" != "python" ]]; then
@@ -221,13 +228,26 @@ steps:
         wine python -m pip install --upgrade --quiet --disable-pip-version-check \
           nuitka ordered-set zstandard requests cryptography pefile
 
+        # Validate cloud_runner.py exists
+        if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
+          echo "[Cloud Build] ERROR: cloud_runner.py not found in source package"
+          echo "cloud_runner.py not found in source package" > ./project/source/error_message.txt
+          exit 1
+        fi
+
         # Rick Hack: Monkey-patch Nuitka using versioned script
         nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
 
         if [ -n "$$nuitka_depends_py" ]; then
           echo "[Cloud Build] Patching Nuitka at: $$nuitka_depends_py"
-          wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
-          echo "[Cloud Build] Patch applied successfully"
+          if [ -f "./project/source/.github/scripts/nuitka_patch.py" ]; then
+            wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
+            echo "[Cloud Build] Patch applied successfully"
+          else
+            echo "[Cloud Build] WARNING: nuitka_patch.py not found, skipping patch"
+          fi
+        else
+          echo "[Cloud Build] WARNING: DependsExe.py not found, skipping patch"
         fi
 
         # Run runner
@@ -300,7 +320,7 @@ steps:
       - name: 'artifacts'
         path: '/workspace/artifacts'
 
-  # ===== STEP 4c: Build for Node.js =====
+  # ===== STEP 5: Build for Node.js =====
   - name: 'node:20-slim'
     id: 'build-nodejs'
     entrypoint: 'bash'
@@ -328,7 +348,7 @@ steps:
       - name: 'artifacts'
         path: '/workspace/artifacts'
 
-  # ===== STEP 6: Send Webhook Callback =====
+  # ===== STEP 7: Send Webhook Callback =====
   - name: 'gcr.io/cloud-builders/curl'
     id: 'webhook-callback'
     entrypoint: 'bash'

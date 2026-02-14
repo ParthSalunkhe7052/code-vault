@@ -57,8 +57,9 @@ def get_gcp_credentials() -> Optional[Any]:
     if workload_pool and service_account_email:
         try:
             from google.auth import identity_pool
+
             audience = f"//iam.googleapis.com/{workload_pool}"
-            
+
             external_credentials = identity_pool.Credentials.from_info(
                 {
                     "type": "external_account",
@@ -82,6 +83,7 @@ def get_gcp_credentials() -> Optional[Any]:
     # Try Application Default Credentials (ADC)
     try:
         import google.auth
+
         credentials, project = google.auth.default(
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
@@ -109,7 +111,7 @@ class CloudBuildClient:
         credentials_path: Optional[str] = None,
     ):
         self.project_id = project_id
-        
+
         credentials = None
         if credentials_path:
             credentials = service_account.Credentials.from_service_account_file(
@@ -140,8 +142,9 @@ class CloudBuildClient:
         # Create build object
         build = cloudbuild_v1.Build()
 
-        # Load cloudbuild.yaml
-        cloudbuild_path = os.path.join(os.path.dirname(__file__), "cloudbuild.yaml")
+        # Load cloudbuild.yaml from project root (not scripts/ directory)
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        cloudbuild_path = os.path.join(project_root, "cloudbuild.yaml")
         if not os.path.exists(cloudbuild_path):
             raise FileNotFoundError(f"cloudbuild.yaml not found at {cloudbuild_path}")
 
@@ -172,7 +175,7 @@ class CloudBuildClient:
         # Set timeout and machine type based on tier
         tier = build_config.get("plan_tier", "free")
         build.timeout = duration_pb2.Duration(seconds=TIER_TIMEOUTS.get(tier, 3600))
-        
+
         MachineType = cloudbuild_v1.BuildOptions.MachineType
         machine_types = {
             "business": MachineType.N1_HIGHCPU_8,
@@ -183,10 +186,15 @@ class CloudBuildClient:
 
         # Upload config to GCS
         from google.cloud import storage as gcs_storage
-        gcs_client = gcs_storage.Client(credentials=self.credentials, project=self.project_id)
+
+        gcs_client = gcs_storage.Client(
+            credentials=self.credentials, project=self.project_id
+        )
         config_bucket = gcs_client.bucket("codevault-builds")
         config_blob = config_bucket.blob(f"builds/{build_id}/config.json")
-        config_blob.upload_from_string(json.dumps(config), content_type="application/json")
+        config_blob.upload_from_string(
+            json.dumps(config), content_type="application/json"
+        )
         config_url = f"gs://codevault-builds/builds/{build_id}/config.json"
 
         # Set Substitutions (GCB expects these to start with _)
@@ -208,11 +216,17 @@ class CloudBuildClient:
         }
 
         try:
-            operation = self.client.create_build(project_id=self.project_id, build=build)
+            operation = self.client.create_build(
+                project_id=self.project_id, build=build
+            )
             build_result = operation.metadata.build if operation.metadata else None
-            
+
             created_at = None
-            if build_result and hasattr(build_result, "create_time") and build_result.create_time:
+            if (
+                build_result
+                and hasattr(build_result, "create_time")
+                and build_result.create_time
+            ):
                 created_at = build_result.create_time.isoformat()
 
             return {
@@ -229,8 +243,10 @@ class CloudBuildClient:
         """Get the status of a Cloud Build job"""
         try:
             build = self.client.get_build(project_id=self.project_id, id=build_id)
+
             def format_time(ts):
-                if not ts: return None
+                if not ts:
+                    return None
                 return ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
             return {
