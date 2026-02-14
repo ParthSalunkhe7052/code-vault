@@ -16,7 +16,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import re
+import sys
+from pathlib import Path
 
+# Add project root and scripts directory to sys.path
+project_root = Path(__file__).parent.parent
+scripts_dir = project_root / "scripts"
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+if str(scripts_dir) not in sys.path:
+    sys.path.insert(0, str(scripts_dir))
 
 # =============================================================================
 # Logging Filter to reduce /status endpoint spam
