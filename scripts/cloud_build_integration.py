@@ -14,6 +14,73 @@ from google.api_core import exceptions
 from google.protobuf import duration_pb2
 
 
+def get_gcp_credentials() -> Optional[Any]:
+    """
+    Get GCP credentials using Workload Identity (for Heroku) or service account.
+    Priority:
+    1. Workload Identity (Heroku)
+    2. Service account file
+    3. Application Default Credentials
+    """
+    # Check for Workload Identity configuration (Heroku)
+    workload_pool = os.getenv("GCP_WORKLOAD_IDENTITY_POOL")
+    service_account_email = os.getenv("GCP_SERVICE_ACCOUNT")
+
+    if workload_pool and service_account_email:
+        try:
+            from google.auth import identity_pool
+            import requests
+
+            # Get Heroku metadata token
+            try:
+                response = requests.get("https://heroku.com/dyno/metadata", timeout=10)
+                if response.status_code == 200:
+                    heroku_app_id = response.json().get("app_id", "")
+                    print(
+                        f"[CloudBuild] Using Workload Identity for Heroku app: {heroku_app_id}"
+                    )
+            except Exception as e:
+                print(f"[CloudBuild] Could not get Heroku metadata: {e}")
+
+            # Create external account credentials for Workload Identity
+            credentials = identity_pool.Credentials.from_info(
+                {
+                    "type": "external_account",
+                    "audience": f"//iam.googleapis.com/{workload_pool}",
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+                    "token_url": "https://sts.googleapis.com/v1/token",
+                    "credential_source": {
+                        "url": "https://heroku.com/dyno/metadata",
+                        "format": {
+                            "type": "json",
+                            "subject_token_field_name": "id_token",
+                        },
+                    },
+                }
+            ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
+
+            print("[CloudBuild] Using Workload Identity credentials")
+            return credentials
+        except Exception as e:
+            print(
+                f"[CloudBuild] Workload Identity failed: {e}, falling back to other methods"
+            )
+
+    # Check for service account file
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if credentials_path and os.path.exists(credentials_path):
+        credentials = service_account.Credentials.from_service_account_file(
+            credentials_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        print("[CloudBuild] Using service account file credentials")
+        return credentials
+
+    # Fall back to Application Default Credentials
+    print("[CloudBuild] Using Application Default Credentials")
+    return None
+
+
 # Tier-based timeout configuration (in seconds)
 TIER_TIMEOUTS = {
     "free": 1800,  # 30 minutes
@@ -45,20 +112,24 @@ class CloudBuildClient:
         Args:
             project_id: Google Cloud project ID
             credentials_path: Path to service account JSON key file
-                            If None, will use gcloud auth credentials
+                            If None, will use Workload Identity (Heroku) or ADC
         """
         self.project_id = project_id
 
-        # Load credentials - use gcloud auth by default
+        # Try to get credentials using Workload Identity or service account
+        credentials = None
         if credentials_path:
             credentials = service_account.Credentials.from_service_account_file(
                 credentials_path,
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
+        else:
+            credentials = get_gcp_credentials()
+
+        if credentials:
             self.client = cloudbuild_v1.CloudBuildClient(credentials=credentials)
         else:
-            # Use gcloud auth credentials (automatically discovered)
-            # This works with: gcloud auth login
+            # Fall back to default credentials
             self.client = cloudbuild_v1.CloudBuildClient()
 
     def trigger_build(self, build_config: Dict[str, Any]) -> Dict[str, Any]:

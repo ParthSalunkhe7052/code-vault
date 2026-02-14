@@ -242,11 +242,29 @@ const Step3Configure = memo(({
 
             <div className="border-t border-white/10 my-6" />
 
-            {/* PROMINENT: Advanced Obfuscation Toggle */}
-            <ObfuscationToggleCard 
-                enableObfuscation={enableObfuscation}
-                setEnableObfuscation={setEnableObfuscation}
-            />
+            {/* PROMINENT: Advanced Obfuscation Toggle - Only for Node.js */}
+            {isNodeJS ? (
+                <ObfuscationToggleCard 
+                    enableObfuscation={enableObfuscation}
+                    setEnableObfuscation={setEnableObfuscation}
+                />
+            ) : (
+                <div className="bg-gradient-to-br from-amber-500/10 to-orange-600/10 rounded-2xl border border-amber-500/20 p-6">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
+                            <Shield size={24} />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-white text-lg">Advanced Obfuscation</h3>
+                            </div>
+                            <p className="text-sm text-slate-400">
+                                Obfuscation is not available for Python projects. Python compilation with Nuitka produces native executables which are already protected at the binary level.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Bottom Section: Bento Grid for Advanced Options */}
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Advanced Configuration</h3>
