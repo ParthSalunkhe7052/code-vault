@@ -138,6 +138,22 @@ class CloudBuildClient:
         """
         self.project_id = project_id
 
+        # DEBUG: Print environment variables
+        import sys
+
+        print(
+            f"[CloudBuild DEBUG] GCP_WORKLOAD_IDENTITY_POOL={os.getenv('GCP_WORKLOAD_IDENTITY_POOL')}",
+            file=sys.stderr,
+        )
+        print(
+            f"[CloudBuild DEBUG] GCP_SERVICE_ACCOUNT={os.getenv('GCP_SERVICE_ACCOUNT')}",
+            file=sys.stderr,
+        )
+        print(
+            f"[CloudBuild DEBUG] GOOGLE_APPLICATION_CREDENTIALS={os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}",
+            file=sys.stderr,
+        )
+
         # Try to get credentials using Workload Identity or service account
         credentials = None
         if credentials_path:
@@ -149,8 +165,16 @@ class CloudBuildClient:
             credentials = get_gcp_credentials()
 
         if credentials:
+            print(
+                f"[CloudBuild DEBUG] Using provided credentials, type: {type(credentials)}",
+                file=sys.stderr,
+            )
             self.client = cloudbuild_v1.CloudBuildClient(credentials=credentials)
         else:
+            print(
+                f"[CloudBuild DEBUG] No credentials provided, using default",
+                file=sys.stderr,
+            )
             # Fall back to default credentials
             self.client = cloudbuild_v1.CloudBuildClient()
 
