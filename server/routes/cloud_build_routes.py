@@ -1687,148 +1687,142 @@ async def sync_build_status(
                 "synced": False,
             }
 
-        try:
-            from cloud_build_integration import CloudBuildClient
+        from cloud_build_integration import CloudBuildClient
 
-            cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-            gcp_status = cloud_build.get_build_status(remote_build_id)
+        cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
+        gcp_status = cloud_build.get_build_status(remote_build_id)
 
-            real_gcp_status = gcp_status.get("status", "")
+        real_gcp_status = gcp_status.get("status", "")
 
-            # Map GCP status
-            status_map = {
-                "QUEUED": "queued",
-                "WORKING": "running",
-                "SUCCESS": "completed",
-                "FAILURE": "failed",
-                "CANCELLED": "cancelled",
-                "EXPIRED": "failed",
-            }
+        status_map = {
+            "QUEUED": "queued",
+            "WORKING": "running",
+            "SUCCESS": "completed",
+            "FAILURE": "failed",
+            "CANCELLED": "cancelled",
+            "EXPIRED": "failed",
+        }
 
-            db_status = status_map.get(real_gcp_status, build["status"])
+        db_status = status_map.get(real_gcp_status, build["status"])
 
-            # Only update if status changed
-            if db_status != build["status"]:
-                await conn.execute(
-                    """UPDATE cloud_builds 
-                       SET status = $1, 
-                           completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
-                           error_message = COALESCE(error_message, $2)
-                       WHERE id = $3""",
-                    db_status,
-                    gcp_status.get(
-                        "status_details", f"Build {db_status} in Cloud Build"
-                    ),
+        if db_status != build["status"]:
+            await conn.execute(
+                """UPDATE cloud_builds 
+                   SET status = $1, 
+                       completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
+                       error_message = COALESCE(error_message, $2)
+                   WHERE id = $3""",
+                db_status,
+                gcp_status.get("status_details", f"Build {db_status} in Cloud Build"),
+                build_id,
+            )
+
+            if db_status == "completed":
+                artifacts = await conn.fetch(
+                    "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
                     build_id,
                 )
 
-                # A6: Recover artifact download keys for completed builds
-                if db_status == "completed":
-                    artifacts = await conn.fetch(
-                        "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
-                        build_id,
-                    )
+                output_name = build.get("output_name") or "app"
 
-                    output_name = build.get("output_name") or "app"
+                for art in artifacts:
+                    if art["status"] in ["pending", "running"]:
+                        await conn.execute(
+                            """UPDATE cloud_build_artifacts 
+                               SET status = 'completed', completed_at = NOW() 
+                               WHERE id = $1""",
+                            art["id"],
+                        )
+                        logger.info(
+                            f"[CloudBuild] Sync marked artifact {art['platform']} as completed"
+                        )
 
-                    for art in artifacts:
-                        if art["status"] in ["pending", "running"]:
-                            await conn.execute(
-                                """UPDATE cloud_build_artifacts 
-                                   SET status = 'completed', completed_at = NOW() 
-                                   WHERE id = $1""",
-                                art["id"],
+                    if not art["download_key"]:
+                        possible_filenames = [
+                            f"{output_name}-{art['platform']}.zip",
+                            f"{output_name}-{art['platform']}.tar.gz"
+                            if art["platform"] == "linux"
+                            else None,
+                            f"{art['platform']}_build.zip",
+                            f"{build_id}_{art['platform']}.zip",
+                            f"source.{art['platform']}.zip",
+                        ]
+                        possible_filenames = [f for f in possible_filenames if f]
+
+                        for filename_guess in possible_filenames:
+                            guessed_key = (
+                                f"builds/{build_id}/{art['platform']}/{filename_guess}"
                             )
-                            logger.info(
-                                f"[CloudBuild] Sync marked artifact {art['platform']} as completed"
-                            )
+                            try:
+                                test_url = generate_gcs_signed_url(guessed_key)
+                                if test_url:
+                                    await conn.execute(
+                                        "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                        guessed_key,
+                                        filename_guess,
+                                        art["id"],
+                                    )
+                                    logger.info(
+                                        f"[CloudBuild] Sync recovered download key for {art['platform']}: {guessed_key}"
+                                    )
+                                    break
+                            except Exception:
+                                continue
 
-                        if not art["download_key"]:
-                            possible_filenames = [
-                                f"{output_name}-{art['platform']}.zip",
-                                f"{output_name}-{art['platform']}.tar.gz"
-                                if art["platform"] == "linux"
-                                else None,
-                                f"{art['platform']}_build.zip",
-                                f"{build_id}_{art['platform']}.zip",
-                                f"source.{art['platform']}.zip",
-                            ]
-                            possible_filenames = [f for f in possible_filenames if f]
+                        if not art.get("download_key"):
+                            try:
+                                from google.cloud import storage as gcs_storage
+                                from config import GCS_BUILDS_BUCKET
 
-                            for filename_guess in possible_filenames:
-                                guessed_key = f"builds/{build_id}/{art['platform']}/{filename_guess}"
-                                try:
-                                    test_url = generate_gcs_signed_url(guessed_key)
-                                    if test_url:
+                                gcs_client = gcs_storage.Client()
+                                bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+                                prefix = f"builds/{build_id}/{art['platform']}/"
+
+                                blobs = list(
+                                    bucket.list_blobs(prefix=prefix, max_results=10)
+                                )
+                                for blob in blobs:
+                                    if blob.name.endswith((".zip", ".exe", ".tar.gz")):
                                         await conn.execute(
                                             "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
-                                            guessed_key,
-                                            filename_guess,
+                                            blob.name,
+                                            blob.name.split("/")[-1],
                                             art["id"],
                                         )
                                         logger.info(
-                                            f"[CloudBuild] Sync recovered download key for {art['platform']}: {guessed_key}"
+                                            f"[CloudBuild] Sync found artifact via GCS listing: {blob.name}"
                                         )
                                         break
-                                except Exception:
-                                    continue
+                            except Exception as list_err:
+                                logger.warning(
+                                    f"[CloudBuild] GCS listing failed: {list_err}"
+                                )
 
-                            if not art.get("download_key"):
-                                try:
-                                    from google.cloud import storage as gcs_storage
-                                    from config import GCS_BUILDS_BUCKET
+            logger.info(
+                f"[CloudBuild] Manual sync: Build {build_id} status changed from {build['status']} to {db_status}"
+            )
 
-                                    gcs_client = gcs_storage.Client()
-                                    bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
-                                    prefix = f"builds/{build_id}/{art['platform']}/"
+            return {
+                "message": "Status synced from Cloud Build",
+                "previous_status": build["status"],
+                "current_status": db_status,
+                "cloud_status": real_gcp_status,
+                "synced": True,
+            }
+        else:
+            return {
+                "message": "Status is already up to date",
+                "status": db_status,
+                "cloud_status": real_gcp_status,
+                "synced": True,
+            }
 
-                                    blobs = list(
-                                        bucket.list_blobs(prefix=prefix, max_results=10)
-                                    )
-                                    for blob in blobs:
-                                        if blob.name.endswith(
-                                            (".zip", ".exe", ".tar.gz")
-                                        ):
-                                            await conn.execute(
-                                                "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
-                                                blob.name,
-                                                blob.name.split("/")[-1],
-                                                art["id"],
-                                            )
-                                            logger.info(
-                                                f"[CloudBuild] Sync found artifact via GCS listing: {blob.name}"
-                                            )
-                                            break
-                                except Exception as list_err:
-                                    logger.warning(
-                                        f"[CloudBuild] GCS listing failed: {list_err}"
-                                    )
+    except Exception as e:
+        logger.error(f"[CloudBuild] Manual sync failed: {e}")
+        raise HTTPException(500, f"Failed to sync with Cloud Build: {str(e)}")
 
-                logger.info(
-                    f"[CloudBuild] Manual sync: Build {build_id} status changed from {build['status']} to {db_status}"
-                )
-
-                return {
-                    "message": "Status synced from Cloud Build",
-                    "previous_status": build["status"],
-                    "current_status": db_status,
-                    "cloud_status": real_gcp_status,
-"synced": True,
-                }
-            else:
-                return {
-                    "message": "Status is already up to date",
-                    "status": db_status,
-                    "cloud_status": real_gcp_status,
-                    "synced": True,
-                }
-
-        except Exception as e:
-            logger.error(f"[CloudBuild] Manual sync failed: {e}")
-            raise HTTPException(500, f"Failed to sync with Cloud Build: {str(e)}")
-
-        finally:
-            await release_db(conn)
+    finally:
+        await release_db(conn)
 
 
 @router.get("/{build_id}/gcp-sync")
@@ -1911,7 +1905,9 @@ async def gcp_direct_sync(
                     ]
 
                     for filename_guess in possible_filenames:
-                        guessed_key = f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                        guessed_key = (
+                            f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                        )
                         try:
                             test_url = generate_gcs_signed_url(guessed_key)
                             if test_url:
@@ -1921,7 +1917,9 @@ async def gcp_direct_sync(
                                     filename_guess,
                                     art["id"],
                                 )
-                                logger.info(f"[CloudBuild] GCP sync recovered: {guessed_key}")
+                                logger.info(
+                                    f"[CloudBuild] GCP sync recovered: {guessed_key}"
+                                )
                                 break
                         except Exception:
                             continue
@@ -1930,10 +1928,13 @@ async def gcp_direct_sync(
                         try:
                             from google.cloud import storage as gcs_storage
                             from config import GCS_BUILDS_BUCKET
+
                             gcs_client = gcs_storage.Client()
                             bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
                             prefix = f"builds/{build_id}/{art['platform']}/"
-                            blobs = list(bucket.list_blobs(prefix=prefix, max_results=10))
+                            blobs = list(
+                                bucket.list_blobs(prefix=prefix, max_results=10)
+                            )
                             for blob in blobs:
                                 if blob.name.endswith((".zip", ".exe", ".tar.gz")):
                                     await conn.execute(
@@ -1944,7 +1945,9 @@ async def gcp_direct_sync(
                                     )
                                     break
                         except Exception as list_err:
-                            logger.warning(f"[CloudBuild] GCS listing failed: {list_err}")
+                            logger.warning(
+                                f"[CloudBuild] GCS listing failed: {list_err}"
+                            )
 
         build = await conn.fetchrow(
             "SELECT * FROM cloud_builds WHERE id = $1", build_id
@@ -1958,13 +1961,16 @@ async def gcp_direct_sync(
             download_url = None
             if art["status"] == "completed" and art["download_key"]:
                 download_url = generate_gcs_signed_url(art["download_key"])
-            artifact_list.append({
-                "platform": art["platform"],
-                "status": art["status"],
-                "download_url": download_url,
-                "filename": art["download_filename"] or f"{art['platform']}_build.zip",
-                "error": art["error_message"],
-            })
+            artifact_list.append(
+                {
+                    "platform": art["platform"],
+                    "status": art["status"],
+                    "download_url": download_url,
+                    "filename": art["download_filename"]
+                    or f"{art['platform']}_build.zip",
+                    "error": art["error_message"],
+                }
+            )
 
         return {
             "id": build["id"],
