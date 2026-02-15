@@ -712,10 +712,16 @@ class CloudRunner:
             logger.error(error_msg)
 
             # Write to error file for the workflow to pick up
+            # Write to both output_dir AND source_dir for compatibility
             err_file = self.output_dir / "error_message.txt"
+            err_file_src = self.source_dir / "error_message.txt"
+
             # Ensure output dir exists
             self.output_dir.mkdir(parents=True, exist_ok=True)
             with open(err_file, "w") as f:
+                f.write(error_msg)
+            # Also write to source dir for cloud build compatibility
+            with open(err_file_src, "w") as f:
                 f.write(error_msg)
 
             sys.exit(1)
@@ -897,36 +903,23 @@ class CloudRunner:
             sys.executable,
             "-m",
             "nuitka",
-            "--standalone",
-            # "--onefile", # Moved to logic below
-            # "--remove-output", # Removed: causes race conditions with scons-report.txt
+            "--onefile",  # Single self-contained EXE with all DLLs embedded
+            "--standalone",  # Required base for onefile
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--disable-ccache",  # Disable ccache to reduce external process calls
-            # "--show-progress", # Disabled to reduce CI log spam
         ]
 
         # Add macOS specific flags
         if sys.platform == "darwin":
             cmd.append("--macos-create-app-bundle")
 
-        # Fast Build Logic (Skip compression)
-        fast_build = self.config.get("fast_build", False)
-        if fast_build or sys.platform == "win32":
-            if sys.platform == "win32":
-                logger.warning(
-                    "Windows detected: Disabling --onefile for stability in Wine"
-                )
-                # FIX: Use pefile instead of depends.exe to avoid Wine crashes (missing MFC42.dll)
-                # Newer Nuitka uses --dependency-tool=pefile, older uses experimental flag
-                # We add both for compatibility, Nuitka ignores unknown experimental flags usually
-                cmd.append("--experimental=use_pefile_recursion")
-            else:
-                logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
-            # In fast build or Windows/Wine, we output to a directory
-            # The packaging step in CI will zip this directory
+        # Windows/Wine specific handling
+        if sys.platform == "win32":
+            logger.info("Windows/Wine: Using --onefile for single EXE output")
+            # Use pefile for dependency detection (works better in Wine)
+            cmd.append("--experimental=use_pefile_recursion")
         else:
-            cmd.append("--onefile")
+            logger.info("Using --onefile mode (single self-contained binary)")
 
         cmd.extend(
             [f"--output-filename={output_exe}", f"--output-dir={self.output_dir}"]
@@ -1128,6 +1121,9 @@ def main():
         if sys.platform == "win32" or os.environ.get("WINEPREFIX"):
             # Cloud Build expects 'build_output_windows_wine'
             platform_suffix = "windows_wine"
+        elif sys.platform == "linux":
+            # Standardize Linux output directory name
+            platform_suffix = "linux"
 
         output_dir = source_dir / f"build_output_{platform_suffix}"
         output_dir.mkdir(exist_ok=True)

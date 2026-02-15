@@ -300,23 +300,19 @@ steps:
         output_name="${_OUTPUT_NAME}"
         echo "[Cloud Build] Looking for Windows build output..."
 
-        # Find the main.dist folder (standalone mode creates this with exe + DLLs)
-        dist_dir=""
+        # With --onefile, Nuitka creates a single self-contained EXE
+        # The EXE will be directly in build_output_windows_wine folder
+        found_exe=""
         
-        if [ -d "./project/source/build_output_windows_wine/main.dist" ]; then
-          dist_dir="./project/source/build_output_windows_wine/main.dist"
-          echo "[Cloud Build] Found standalone dist folder: $$dist_dir"
-          # Count files in dist folder
-          file_count=$$(ls -1 "$$dist_dir" 2>/dev/null | wc -l)
-          echo "[Cloud Build] Dist folder contains $$file_count files (exe + DLLs)"
+        # First check for onefile output (single EXE in output dir)
+        if [ -f "./project/source/build_output_windows_wine/${output_name}.exe" ]; then
+          found_exe="./project/source/build_output_windows_wine/${output_name}.exe"
+          echo "[Cloud Build] Found onefile EXE: $$found_exe"
         else
-          # Fallback: look for exe directly (shouldn't happen with --standalone)
+          # Search for any exe in the output directory
           found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
           if [ -n "$$found_exe" ]; then
-            echo "[Cloud Build] Found single exe: $$found_exe"
-            mkdir -p ./project/source/build_output_windows_wine/main.dist
-            cp "$$found_exe" ./project/source/build_output_windows_wine/main.dist/
-            dist_dir="./project/source/build_output_windows_wine/main.dist"
+            echo "[Cloud Build] Found EXE: $$found_exe"
           fi
         fi
 
@@ -324,39 +320,26 @@ steps:
         windows_status="failed"
         windows_error=""
 
-        if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
-          echo "[Cloud Build] Packaging Windows build..."
+        if [ -n "$$found_exe" ] && [ -f "$$found_exe" ]; then
+          exe_size=$$(ls -lh "$$found_exe" | awk '{print $$5}')
+          echo "[Cloud Build] EXE size: $$exe_size"
           
-          # List all files being packaged
-          echo "[Cloud Build] Files to package:"
-          ls -la "$$dist_dir"
-          
-          # Create zip with ALL contents from dist folder (exe + DLLs + subfolders)
-          # Using zip command for reliability
+          # For onefile mode, just copy the single EXE (no zip needed)
           mkdir -p /workspace/artifacts
-          cd "$$dist_dir"
+          cp "$$found_exe" "/workspace/artifacts/${output_name}.exe"
           
-          # Package using wine python (more reliable in Wine environment)
-          wine python -c "import shutil; shutil.make_archive('/workspace/artifacts/${output_name}-windows', 'zip', '.')"
-          
-          cd /workspace
-          
-          # Verify zip was created
-          if [ -f "/workspace/artifacts/${output_name}-windows.zip" ]; then
-            zip_size=$$(ls -lh "/workspace/artifacts/${output_name}-windows.zip" | awk '{print $$5}')
-            echo "[Cloud Build] Created zip: $${zip_size}"
-            
-            windows_artifacts="${output_name}-windows.zip"
+          if [ -f "/workspace/artifacts/${output_name}.exe" ]; then
+            windows_artifacts="${output_name}.exe"
             windows_status="completed"
-            echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (contains exe + all DLLs)"
+            echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (self-contained onefile EXE)"
           else
-            windows_error="Failed to create zip package"
+            windows_error="Failed to copy EXE to artifacts"
           fi
         else
           if [ -f "./project/source/error_message.txt" ]; then
             windows_error=$$(cat ./project/source/error_message.txt)
           else
-            windows_error="Windows build output not found"
+            windows_error="Windows EXE not found in build output"
           fi
         fi
 

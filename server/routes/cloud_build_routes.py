@@ -1943,17 +1943,22 @@ async def gcp_direct_sync(
                         art["id"],
                     )
 
-                if not art["download_key"]:
-                    # Try multiple filename patterns
-                    possible_filenames = [
-                        f"{output_name}-{art['platform']}.zip",
-                        f"{output_name}-{art['platform']}.tar.gz"
-                        if art["platform"] == "linux"
-                        else None,
-                        f"{art['platform']}_build.zip",
-                        f"{output_name}.exe" if art["platform"] == "windows" else None,
-                    ]
-                    possible_filenames = [f for f in possible_filenames if f]
+if not art["download_key"]:
+                    # Try multiple filename patterns (prioritize onefile EXE for Windows)
+                    possible_filenames = []
+                    
+                    if art["platform"] == "windows":
+                        # Onefile mode: single self-contained EXE
+                        possible_filenames.append(f"{output_name}.exe")
+                        # Fallback: zip file with DLLs (standalone mode)
+                        possible_filenames.append(f"{output_name}-windows.zip")
+                    
+                    if art["platform"] == "linux":
+                        # Onefile mode: single binary
+                        possible_filenames.append(f"{output_name}")
+                        # Fallback: tar.gz
+                        possible_filenames.append(f"{output_name}-linux.tar.gz")
+                        possible_filenames.append(f"{output_name}.tar.gz")
 
                     for filename_guess in possible_filenames:
                         guessed_key = (
