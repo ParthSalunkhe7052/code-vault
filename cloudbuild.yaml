@@ -369,7 +369,7 @@ steps:
         fi
         echo "[Cloud Build] Uploading Windows: $$windows_artifact"
         gsutil cp "/workspace/artifacts/$$windows_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/windows/$$windows_artifact"
-    waitFor: ['build-windows']
+    waitFor: ['build-windows', 'build-nodejs']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
@@ -386,16 +386,55 @@ steps:
           exit 0
         fi
         echo "[Cloud Build] ===== Building for Node.js ====="
+        
+        # Install Python for the runner script
+        apt-get update -qq && apt-get install -y -qq python3 > /dev/null 2>&1
+        
+        # Install pkg globally
         npm install -g @yao-pkg/pkg --quiet
+        
         cd "./project/source"
-        if [ -f "package.json" ]; then npm install --quiet; fi
+        
+        # Run the Node.js build runner
+        if [ -f ".github/scripts/cloud_runner_nodejs.py" ]; then
+          python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)"
+        else
+          echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
+          # Fallback: Create package.json if missing
+          if [ ! -f "package.json" ]; then
+            entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
+            echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\"}" > package.json
+          fi
+          npm install --quiet 2>/dev/null || true
+          mkdir -p /workspace/artifacts
+          pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/
+        fi
+        
+        # Copy artifacts to workspace
         mkdir -p /workspace/artifacts
-        pkg . --target node20-linux-x64,node20-win-x64 --out-path /workspace/artifacts/
-        echo "completed" > /workspace/build_status_linux
-        echo "completed" > /workspace/build_status_windows
-        output_name="${_OUTPUT_NAME}"
-        echo "$$output_name-linux" > /workspace/linux_artifacts
-        echo "$$output_name-win.exe" > /workspace/windows_artifacts
+        
+        # Find and copy Windows artifact
+        if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
+          cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
+          echo "completed" > /workspace/build_status_windows
+          echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+        elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
+          echo "completed" > /workspace/build_status_windows
+          echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+        else
+          # Search for any exe
+          found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
+          if [ -n "$found_exe" ]; then
+            cp "$found_exe" /workspace/artifacts/
+            echo "completed" > /workspace/build_status_windows
+            echo "$(basename $found_exe)" > /workspace/windows_artifacts
+          else
+            echo "failed" > /workspace/build_status_windows
+            echo "Node.js build output not found" > /workspace/windows_error
+          fi
+        fi
+        
+        echo "[Cloud Build] Node.js build complete"
     waitFor: ['download-config']
     volumes:
       - name: 'artifacts'

@@ -360,6 +360,23 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                 logger.info(f"[Upload] Successfully copied nuitka_patch.py to source")
             else:
                 logger.warning(f"[Upload] nuitka_patch.py not found at {patch_source}")
+
+            # Also copy cloud_runner_nodejs.py for Node.js builds
+            nodejs_runner_source = (
+                project_root / ".github" / "scripts" / "cloud_runner_nodejs.py"
+            )
+            if nodejs_runner_source.exists():
+                nodejs_runner_dest = (
+                    source_dir / ".github" / "scripts" / "cloud_runner_nodejs.py"
+                )
+                shutil.copy2(nodejs_runner_source, nodejs_runner_dest)
+                logger.info(
+                    f"[Upload] Successfully copied cloud_runner_nodejs.py to source"
+                )
+            else:
+                logger.warning(
+                    f"[Upload] cloud_runner_nodejs.py not found at {nodejs_runner_source}"
+                )
         except Exception as e:
             logger.error(f"[Upload] Failed to copy build scripts: {e}")
             import traceback
