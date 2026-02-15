@@ -56,9 +56,10 @@ steps:
         
         # Restore Nuitka cache (skip if cache is too large - causes slow builds)
         if gsutil -q stat "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null; then
-          cache_size=$$(gsutil ls -l "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null | awk '{print $$1}')
+          # Get just the size number
+          cache_size=$$(gsutil du "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null | awk '{print $$1}' | cut -d'.' -f1)
           # Skip if cache is larger than 100MB (causes slow downloads)
-          if [ "$$cache_size" -gt 104857600 ]; then
+          if [ -n "$$cache_size" ] && [ "$$cache_size" -gt 104857600 ]; then
             echo "[Cloud Build] Skipping Nuitka cache (too large: $$cache_size bytes)"
           else
             echo "[Cloud Build] Restoring Nuitka cache..."

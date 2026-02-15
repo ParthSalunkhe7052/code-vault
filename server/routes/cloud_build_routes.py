@@ -1814,16 +1814,29 @@ async def sync_build_status(
                         )
 
                     if not art["download_key"]:
-                        possible_filenames = [
-                            f"{output_name}-{art['platform']}.zip",
-                            f"{output_name}-{art['platform']}.tar.gz"
-                            if art["platform"] == "linux"
-                            else None,
-                            f"{art['platform']}_build.zip",
-                            f"{build_id}_{art['platform']}.zip",
-                            f"source.{art['platform']}.zip",
-                        ]
-                        possible_filenames = [f for f in possible_filenames if f]
+                        # Determine possible filenames based on platform
+                        possible_filenames = []
+
+                        if art["platform"] == "windows":
+                            # Onefile mode: single self-contained EXE (prioritize this)
+                            possible_filenames.append(f"{output_name}.exe")
+                            # Fallback: zip file with DLLs (standalone mode)
+                            possible_filenames.append(f"{output_name}-windows.zip")
+                            possible_filenames.append(f"{output_name}.zip")
+                        elif art["platform"] == "linux":
+                            # Onefile mode: single binary
+                            possible_filenames.append(f"{output_name}")
+                            # Fallback: tar.gz
+                            possible_filenames.append(f"{output_name}-linux.tar.gz")
+                            possible_filenames.append(f"{output_name}.tar.gz")
+                        else:
+                            possible_filenames.append(
+                                f"{output_name}-{art['platform']}.zip"
+                            )
+
+                        # Generic fallbacks
+                        possible_filenames.append(f"{art['platform']}_build.zip")
+                        possible_filenames.append(f"{build_id}_{art['platform']}.zip")
 
                         for filename_guess in possible_filenames:
                             guessed_key = (
