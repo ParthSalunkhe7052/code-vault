@@ -428,7 +428,8 @@ steps:
             cat package.json
             
             mkdir -p /workspace/artifacts
-            npx @yao-pkg/pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/ --compress GZip 2>&1 || true
+            # Use --output with full path, NOT --out-path (pkg doesn't allow both)
+            npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/artifacts/${_OUTPUT_NAME}.exe" --compress GZip 2>&1 || true
           }
         else
           echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
@@ -441,7 +442,8 @@ steps:
           cat package.json
           npm install --quiet 2>/dev/null || true
           mkdir -p /workspace/artifacts
-          npx @yao-pkg/pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/ --compress GZip
+          # Use --output with full path, NOT --out-path (pkg doesn't allow both)
+          npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/artifacts/${_OUTPUT_NAME}.exe" --compress GZip
         fi
         
         # Copy artifacts to workspace

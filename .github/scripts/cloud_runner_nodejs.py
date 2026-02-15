@@ -380,8 +380,11 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
         else:
             output_filename = self.output_name
 
-        package_json = self.source_dir / "package.json"
+        # Use full output path (combines out-path and filename)
+        full_output_path = output_dir / output_filename
 
+        # pkg command - don't use --config, pkg reads package.json automatically
+        # Don't use both --output and --out-path, use --output with full path
         cmd = [
             "npx",
             "@yao-pkg/pkg",
@@ -389,15 +392,10 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
             "--target",
             pkg_target,
             "--output",
-            output_filename,
-            "--out-path",
-            str(output_dir),
+            str(full_output_path),
             "--compress",
             "GZip",
         ]
-
-        if package_json.exists():
-            cmd.extend(["--config", str(package_json)])
 
         logger.info(f"Running: {' '.join(cmd)}")
 
@@ -435,13 +433,12 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
 
                 return False
 
-            output_path = output_dir / output_filename
-            if output_path.exists():
-                size_kb = output_path.stat().st_size / 1024
+            if full_output_path.exists():
+                size_kb = full_output_path.stat().st_size / 1024
                 logger.info(f"Build complete: {output_filename} ({size_kb:.1f} KB)")
                 return True
             else:
-                logger.error(f"Output not found at: {output_path}")
+                logger.error(f"Output not found at: {full_output_path}")
                 logger.info(f"Directory contents: {list(output_dir.iterdir())}")
                 return False
 
