@@ -369,7 +369,7 @@ steps:
         fi
         echo "[Cloud Build] Uploading Windows: $$windows_artifact"
         gsutil cp "/workspace/artifacts/$$windows_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/windows/$$windows_artifact"
-    waitFor: ['build-windows', 'build-nodejs']
+    waitFor: ['build-windows']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
@@ -441,6 +441,32 @@ steps:
         path: '/workspace/artifacts'
 
   - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-nodejs'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Only run if this is a Node.js build
+        if [[ "${_LANGUAGE}" != "nodejs" ]]; then
+          exit 0
+        fi
+        windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+        if [[ "$$windows_status" != "completed" ]]; then
+          echo "[Cloud Build] Skipping Node.js upload (status: $$windows_status)"
+          exit 0
+        fi
+        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+        if [ -z "$$windows_artifact" ]; then
+          exit 0
+        fi
+        echo "[Cloud Build] Uploading Node.js artifact: $$windows_artifact"
+        gsutil cp "/workspace/artifacts/$$windows_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/windows/$$windows_artifact"
+    waitFor: ['build-nodejs']
+    volumes:
+      - name: 'artifacts'
+        path: '/workspace/artifacts'
+
+  - name: 'gcr.io/cloud-builders/gsutil'
     id: 'save-cache'
     entrypoint: 'bash'
     args:
@@ -483,7 +509,7 @@ steps:
         echo "[Cloud Build] Skipping Nuitka cache save (disabled to prevent slow builds)"
         
         echo "[Cloud Build] Cache save complete"
-    waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
+    waitFor: ['upload-linux', 'upload-windows', 'upload-nodejs']
 
   - name: 'gcr.io/cloud-builders/curl'
     id: 'webhook-callback'
