@@ -31,24 +31,46 @@ steps:
       - |
         set +e
         echo "[Cloud Build] Attempting to restore cache..."
+        
+        # Restore pip cache
         if gsutil -q stat "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz" 2>/dev/null; then
           echo "[Cloud Build] Restoring pip cache..."
           gsutil cp "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz" /tmp/pip-cache.tar.gz
           mkdir -p /root/.cache/pip
           tar -xzf /tmp/pip-cache.tar.gz -C /root/.cache/pip 2>/dev/null || true
+          echo "[Cloud Build] pip cache restored"
+        else
+          echo "[Cloud Build] pip cache not found (first build or cache expired)"
         fi
+        
+        # Restore ccache
         if gsutil -q stat "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz" 2>/dev/null; then
           echo "[Cloud Build] Restoring ccache..."
           gsutil cp "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz" /tmp/ccache.tar.gz
           mkdir -p /workspace/.ccache
           tar -xzf /tmp/ccache.tar.gz -C /workspace/.ccache 2>/dev/null || true
+          echo "[Cloud Build] ccache restored"
+        else
+          echo "[Cloud Build] ccache not found"
         fi
+        
+        # Restore Nuitka cache (skip if cache is too large - causes slow builds)
         if gsutil -q stat "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null; then
-          echo "[Cloud Build] Restoring Nuitka cache..."
-          gsutil cp "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" /tmp/nuitka-cache.tar.gz
-          mkdir -p /workspace/.nuitka-cache
-          tar -xzf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache 2>/dev/null || true
+          cache_size=$$(gsutil ls -l "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null | awk '{print $$1}')
+          # Skip if cache is larger than 100MB (causes slow downloads)
+          if [ "$$cache_size" -gt 104857600 ]; then
+            echo "[Cloud Build] Skipping Nuitka cache (too large: $$cache_size bytes)"
+          else
+            echo "[Cloud Build] Restoring Nuitka cache..."
+            gsutil cp "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" /tmp/nuitka-cache.tar.gz
+            mkdir -p /workspace/.nuitka-cache
+            tar -xzf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache 2>/dev/null || true
+            echo "[Cloud Build] Nuitka cache restored"
+          fi
+        else
+          echo "[Cloud Build] Nuitka cache not found"
         fi
+        
         echo "[Cloud Build] Cache restore complete"
     waitFor: ['-']
 
@@ -102,7 +124,7 @@ steps:
         gsutil cp "${_CONFIG_URL}" /workspace/config.json
     waitFor: ['extract-source']
 
-  - name: 'python:3.11-slim'
+  - name: 'gcr.io/cloudbuild-486309/codevault-builder:latest'
     id: 'build-linux'
     entrypoint: 'bash'
     args:
@@ -115,23 +137,11 @@ steps:
           exit 0
         fi
 
-        echo "[Cloud Build] ===== Building for Linux (6 parallel jobs) ====="
+        echo "[Cloud Build] ===== Building for Linux (6 parallel jobs, standalone mode) ====="
 
-        apt-get update -qq && apt-get install -y -qq patchelf build-essential ccache > /dev/null 2>&1
-        export CCACHE_DIR=/workspace/.ccache
-        export CCACHE_MAXSIZE=500M
-        mkdir -p $$CCACHE_DIR
-        export PATH="/usr/lib/ccache:$$PATH"
-
-        # Restore Nuitka cache if exists
-        if [ -d /workspace/.nuitka-cache ]; then
-          echo "[Cloud Build] Restoring Nuitka cache..."
-          export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
-          mkdir -p $$HOME/.cache/Nuitka
-          cp -r /workspace/.nuitka-cache/. $$HOME/.cache/Nuitka/ 2>/dev/null || true
-        fi
-
-        pip install --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography
+        # Pre-installed in codevault-builder image: patchelf, build-essential, ccache, python3-tk, python3-dev
+        # Install Nuitka with pinned version for consistency
+        pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
 
         if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
           echo "cloud_runner.py not found" > ./project/source/error_message.txt
@@ -141,11 +151,22 @@ steps:
 
         decoded_config=$$(cat /workspace/config.json)
         export NUITKA_JOBS=6
+        export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
+        mkdir -p $$NUITKA_CACHE_DIR
+        
+        # Restore Nuitka cache if exists
+        if [ -d /workspace/.nuitka-cache ]; then
+          echo "[Cloud Build] Restoring Nuitka cache..."
+          mkdir -p $$HOME/.cache/Nuitka
+          cp -r /workspace/.nuitka-cache/. $$HOME/.cache/Nuitka/ 2>/dev/null || true
+        fi
+        
         python3 "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "./project/source" || true
 
         cd "./project/source"
         output_name="${_OUTPUT_NAME}"
 
+        # Check for standalone output directory (build_output_linux)
         if [ -d "build_output_linux" ]; then
           found_binary=$$(find build_output_linux -type f -name "$$output_name" 2>/dev/null | head -1)
           if [ -n "$$found_binary" ]; then
@@ -159,10 +180,11 @@ steps:
 
         if [ -f "$$output_name" ]; then
           chmod +x "$$output_name"
-          tar -czf "$$output_name-linux.tar.gz" "$$output_name"
+          # Package the standalone binary as tar.gz
+          tar -czf "$$output_name.tar.gz" "$$output_name"
           mkdir -p /workspace/artifacts
-          mv "$$output_name-linux.tar.gz" /workspace/artifacts/
-          linux_artifacts="$$output_name-linux.tar.gz"
+          mv "$$output_name.tar.gz" /workspace/artifacts/
+          linux_artifacts="$$output_name.tar.gz"
           linux_status="completed"
           echo "[Cloud Build] Linux artifact ready: $$linux_artifacts"
         else
@@ -209,8 +231,31 @@ steps:
         if [ -z "$$linux_artifact" ]; then
           exit 0
         fi
-        echo "[Cloud Build] Uploading Linux: $$linux_artifact"
-        gsutil cp "/workspace/artifacts/$$linux_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$$linux_artifact"
+        
+        # Retry logic for upload
+        max_retries=3
+        retry_count=0
+        upload_success=false
+        
+        while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
+          if [ $$retry_count -gt 0 ]; then
+            echo "[Cloud Build] Retrying upload (attempt $$((retry_count+1))/$$max_retries)..."
+            sleep 2
+          fi
+          
+          echo "[Cloud Build] Uploading Linux: $$linux_artifact"
+          if gsutil cp "/workspace/artifacts/$$linux_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$$linux_artifact" 2>/dev/null; then
+            upload_success=true
+            echo "[Cloud Build] Linux upload successful"
+          else
+            retry_count=$$((retry_count+1))
+          fi
+        done
+        
+        if [ "$$upload_success" != "true" ]; then
+          echo "[Cloud Build] Linux upload failed after $$max_retries attempts"
+          exit 1
+        fi
     waitFor: ['build-linux']
     volumes:
       - name: 'artifacts'
@@ -253,13 +298,25 @@ steps:
         wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))"
 
         output_name="${_OUTPUT_NAME}"
-        echo "[Cloud Build] Looking for Windows exe: $$output_name.exe"
+        echo "[Cloud Build] Looking for Windows build output..."
 
-        if [ -d "./project/source/build_output_windows_wine" ]; then
+        # Find the main.dist folder (standalone mode creates this with exe + DLLs)
+        dist_dir=""
+        
+        if [ -d "./project/source/build_output_windows_wine/main.dist" ]; then
+          dist_dir="./project/source/build_output_windows_wine/main.dist"
+          echo "[Cloud Build] Found standalone dist folder: $$dist_dir"
+          # Count files in dist folder
+          file_count=$$(ls -1 "$$dist_dir" 2>/dev/null | wc -l)
+          echo "[Cloud Build] Dist folder contains $$file_count files (exe + DLLs)"
+        else
+          # Fallback: look for exe directly (shouldn't happen with --standalone)
           found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
           if [ -n "$$found_exe" ]; then
-            echo "[Cloud Build] Found exe: $$found_exe"
-            cp "$$found_exe" "./project/source/$$output_name.exe"
+            echo "[Cloud Build] Found single exe: $$found_exe"
+            mkdir -p ./project/source/build_output_windows_wine/main.dist
+            cp "$$found_exe" ./project/source/build_output_windows_wine/main.dist/
+            dist_dir="./project/source/build_output_windows_wine/main.dist"
           fi
         fi
 
@@ -267,20 +324,39 @@ steps:
         windows_status="failed"
         windows_error=""
 
-        if [ -f "./project/source/$$output_name.exe" ]; then
-          echo "[Cloud Build] Packaging $$output_name.exe"
-          # Wine image: use wine python for zipping
-          wine python -c "import zipfile; zipfile.ZipFile('$$output_name-windows.zip', 'w', zipfile.ZIP_DEFLATED).write('./project/source/$$output_name.exe', '$$output_name.exe')"
+        if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
+          echo "[Cloud Build] Packaging Windows build..."
+          
+          # List all files being packaged
+          echo "[Cloud Build] Files to package:"
+          ls -la "$$dist_dir"
+          
+          # Create zip with ALL contents from dist folder (exe + DLLs + subfolders)
+          # Using zip command for reliability
           mkdir -p /workspace/artifacts
-          mv "$$output_name-windows.zip" /workspace/artifacts/
-          windows_artifacts="$$output_name-windows.zip"
-          windows_status="completed"
-          echo "[Cloud Build] Windows artifact ready: $$windows_artifacts"
+          cd "$$dist_dir"
+          
+          # Package using wine python (more reliable in Wine environment)
+          wine python -c "import shutil; shutil.make_archive('/workspace/artifacts/${output_name}-windows', 'zip', '.')"
+          
+          cd /workspace
+          
+          # Verify zip was created
+          if [ -f "/workspace/artifacts/${output_name}-windows.zip" ]; then
+            zip_size=$$(ls -lh "/workspace/artifacts/${output_name}-windows.zip" | awk '{print $$5}')
+            echo "[Cloud Build] Created zip: $${zip_size}"
+            
+            windows_artifacts="${output_name}-windows.zip"
+            windows_status="completed"
+            echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (contains exe + all DLLs)"
+          else
+            windows_error="Failed to create zip package"
+          fi
         else
           if [ -f "./project/source/error_message.txt" ]; then
             windows_error=$$(cat ./project/source/error_message.txt)
           else
-            windows_error="Windows exe '$$output_name.exe' not found"
+            windows_error="Windows build output not found"
           fi
         fi
 
@@ -349,31 +425,41 @@ steps:
       - |
         set +e
         echo "[Cloud Build] Saving cache..."
+        
+        # Save pip cache
         if [ -d /root/.cache/pip ]; then
           pip_cache_size=$$(du -s /root/.cache/pip 2>/dev/null | cut -f1)
           if [ "$$pip_cache_size" -gt 1000 ]; then
             tar -czf /tmp/pip-cache.tar.gz -C /root/.cache/pip . 2>/dev/null
             gsutil cp /tmp/pip-cache.tar.gz "gs://${_GCS_BUCKET}/cache/pip-cache-default.tar.gz"
+            echo "[Cloud Build] Saved pip cache ($$pip_cache_size KB)"
+          else
+            echo "[Cloud Build] pip cache empty ($$pip_cache_size KB), skipping"
           fi
+        else
+          echo "[Cloud Build] pip cache not found, skipping"
         fi
+        
+        # Save ccache
         if [ -d /workspace/.ccache ]; then
           ccache_size=$$(du -s /workspace/.ccache 2>/dev/null | cut -f1)
           if [ "$$ccache_size" -gt 1000 ]; then
             tar -czf /tmp/ccache.tar.gz -C /workspace/.ccache . 2>/dev/null
             gsutil cp /tmp/ccache.tar.gz "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz"
+            echo "[Cloud Build] Saved ccache ($$ccache_size KB)"
+          else
+            echo "[Cloud Build] ccache empty ($$ccache_size KB), skipping"
           fi
+        else
+          echo "[Cloud Build] ccache not found, skipping"
         fi
-        if [ -d /workspace/.nuitka-cache ]; then
-          nuitka_cache_size=$$(du -s /workspace/.nuitka-cache 2>/dev/null | cut -f1)
-          # Limit cache to 200MB to avoid long uploads
-          if [ "$$nuitka_cache_size" -gt 1000 ] && [ "$$nuitka_cache_size" -lt 200000 ]; then
-            tar -czf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache . 2>/dev/null
-            gsutil cp /tmp/nuitka-cache.tar.gz "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz"
-            echo "[Cloud Build] Saved Nuitka cache ($$nuitka_cache_size KB)"
-          elif [ "$$nuitka_cache_size" -ge 200000 ]; then
-            echo "[Cloud Build] Nuitka cache too large ($$nuitka_cache_size KB), skipping save"
-          fi
-        fi
+        
+        # Save Nuitka cache - DISABLED (causes slow builds when cache grows too large)
+        # The first build of each project is slightly slower, but subsequent builds are fast
+        # due to Nuitka's own internal caching in the build directory
+        echo "[Cloud Build] Skipping Nuitka cache save (disabled to prevent slow builds)"
+        
+        echo "[Cloud Build] Cache save complete"
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
 
   - name: 'gcr.io/cloud-builders/curl'
