@@ -665,28 +665,71 @@ async def start_cloud_build(
             project_settings = json.loads(project_settings) if project_settings else {}
 
         # 3. Source Validation
-        # Security: Validate project_id and construct safe source directory path
+        source_dir = None
+        source_from_project_files = False
+
+        # First, try to find source directory from zip upload
         safe_project_dir = validate_safe_path(UPLOAD_DIR, request.project_id)
-        source_dir = safe_project_dir / "source"
+        zip_source_dir = safe_project_dir / "source"
+        zip_source_dir = zip_source_dir.resolve()
 
-        # Validate the constructed path is within UPLOAD_DIR
-        source_dir = source_dir.resolve()
-        if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
-            raise HTTPException(400, "Invalid source directory path")
+        if str(zip_source_dir).startswith(str(UPLOAD_DIR.resolve())):
+            if zip_source_dir.exists() and list(zip_source_dir.iterdir()):
+                source_dir = zip_source_dir
 
-        if not source_dir.exists():
-            # Fallback path logic
-            projects_base = UPLOAD_DIR / "projects"
-            projects_base.mkdir(parents=True, exist_ok=True)
-            safe_alt = validate_safe_path(projects_base, request.project_id)
-            if (safe_alt / "source").exists():
-                source_dir = safe_alt / "source"
-                # Re-validate after path change
-                source_dir = source_dir.resolve()
-                if not str(source_dir).startswith(str(projects_base.resolve())):
-                    raise HTTPException(400, "Invalid source directory path")
-            else:
-                raise HTTPException(400, "No source files found.")
+        # If no zip source, check project_files table for single file uploads
+        if not source_dir:
+            project_files = await conn.fetch(
+                """SELECT id, filename, original_filename, file_path, is_cloud 
+                   FROM project_files WHERE project_id = $1""",
+                request.project_id,
+            )
+
+            if project_files:
+                source_from_project_files = True
+                import tempfile
+                import shutil
+
+                temp_source_dir = Path(
+                    tempfile.mkdtemp(prefix=f"source_{request.project_id}_")
+                )
+                temp_source_dir.mkdir(parents=True, exist_ok=True)
+
+                for pf in project_files:
+                    try:
+                        file_content = await storage_service.download_file(
+                            pf["file_path"], not pf["is_cloud"]
+                        )
+                        if file_content:
+                            safe_filename = pf["original_filename"] or pf["filename"]
+                            safe_filename = "".join(
+                                c for c in safe_filename if c.isalnum() or c in "._-"
+                            )
+                            if not safe_filename:
+                                safe_filename = f"file_{pf['id']}"
+                            dest_path = temp_source_dir / safe_filename
+                            dest_path.write_bytes(file_content)
+                            logger.info(
+                                f"[CloudBuild] Downloaded project file: {safe_filename}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[CloudBuild] Could not download file: {pf['file_path']}"
+                            )
+                    except Exception as dl_err:
+                        logger.warning(
+                            f"[CloudBuild] Error downloading file {pf['filename']}: {dl_err}"
+                        )
+
+                if list(temp_source_dir.iterdir()):
+                    source_dir = temp_source_dir
+                else:
+                    shutil.rmtree(temp_source_dir, ignore_errors=True)
+
+        if not source_dir:
+            raise HTTPException(
+                400, "No source files found. Upload a ZIP or individual files first."
+            )
 
         if not list(source_dir.iterdir()):
             raise HTTPException(400, "Source directory is empty.")
@@ -704,9 +747,40 @@ async def start_cloud_build(
             val = project_settings.get(key)
             return val if val else default
 
-        entry_file = get_setting(
-            "entry_file", "main.py" if language == "python" else "index.js"
-        )
+        # Determine entry file - check settings first, then auto-detect from source
+        entry_file = get_setting("entry_file", None)
+
+        if not entry_file:
+            source_files = list(source_dir.iterdir())
+            py_files = [f.name for f in source_files if f.suffix == ".py"]
+            js_files = [f.name for f in source_files if f.suffix in (".js", ".ts")]
+
+            if language == "python":
+                if len(py_files) == 1:
+                    entry_file = py_files[0]
+                elif "main.py" in py_files:
+                    entry_file = "main.py"
+                elif "app.py" in py_files:
+                    entry_file = "app.py"
+                elif py_files:
+                    entry_file = py_files[0]
+                else:
+                    entry_file = "main.py"
+            elif language == "nodejs":
+                if len(js_files) == 1:
+                    entry_file = js_files[0]
+                elif "index.js" in js_files:
+                    entry_file = "index.js"
+                elif "main.js" in js_files:
+                    entry_file = "main.js"
+                elif js_files:
+                    entry_file = js_files[0]
+                else:
+                    entry_file = "index.js"
+            else:
+                entry_file = "main.py"
+
+        logger.info(f"[CloudBuild] Using entry file: {entry_file}")
 
         # Fix: Ensure output_name is never empty
         project_name = (
