@@ -14,7 +14,6 @@ substitutions:
   _CONFIG_URL: ''
   _OUTPUT_NAME: 'app'
   _BUILD_ID: 'unknown'
-  _PROJECT_ID: 'unknown'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -314,8 +313,7 @@ steps:
       - |
         set -e
         if [[ "${_LANGUAGE}" != "nodejs" ]]; then
-          echo "skipped" > /workspace/build_status_linux
-          echo "skipped" > /workspace/build_status_windows
+          echo "[Cloud Build] Skipping Node.js build (not nodejs project)"
           exit 0
         fi
         echo "[Cloud Build] ===== Building for Node.js ====="
@@ -358,10 +356,13 @@ steps:
         fi
         if [ -d /workspace/.nuitka-cache ]; then
           nuitka_cache_size=$$(du -s /workspace/.nuitka-cache 2>/dev/null | cut -f1)
-          if [ "$$nuitka_cache_size" -gt 1000 ]; then
+          # Limit cache to 200MB to avoid long uploads
+          if [ "$$nuitka_cache_size" -gt 1000 ] && [ "$$nuitka_cache_size" -lt 200000 ]; then
             tar -czf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache . 2>/dev/null
             gsutil cp /tmp/nuitka-cache.tar.gz "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz"
             echo "[Cloud Build] Saved Nuitka cache ($$nuitka_cache_size KB)"
+          elif [ "$$nuitka_cache_size" -ge 200000 ]; then
+            echo "[Cloud Build] Nuitka cache too large ($$nuitka_cache_size KB), skipping save"
           fi
         fi
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']

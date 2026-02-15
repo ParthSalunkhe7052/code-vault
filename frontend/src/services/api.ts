@@ -277,6 +277,10 @@ export const cloudBuild = {
     getStatus: (buildId: string, sync: boolean = false): Promise<any> => 
         api.get(`/cloud-build/${buildId}/status`, { params: sync ? { sync: true } : {} }).then(res => res.data),
     
+    // Direct GCP sync - bypasses webhook issues
+    gcpSync: (buildId: string): Promise<any> => 
+        api.get(`/cloud-build/${buildId}/gcp-sync`).then(res => res.data),
+    
     // Cancel a running build
     cancel: (buildId: string): Promise<{ success: boolean }> => 
         api.post(`/cloud-build/${buildId}/cancel`).then(res => res.data),

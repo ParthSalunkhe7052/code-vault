@@ -43,8 +43,26 @@ const [retrying, setRetrying] = useState(false);
 
   const fetchStatus = async (forceSync = false) => {
     try {
-      const isRunning = buildStatus?.status && ['pending', 'queued', 'running'].includes(buildStatus.status);
-      const data = await cloudBuild.getStatus(buildId, isRunning || forceSync);
+      const isCompleted = buildStatus?.status && ['completed', 'failed', 'cancelled'].includes(buildStatus.status);
+      
+      // Try normal status first
+      let data = await cloudBuild.getStatus(buildId, !isCompleted || forceSync);
+      
+      // If build completed but artifacts missing download URLs, try GCP direct sync
+      const needsGcpSync = data.status === 'completed' && 
+        data.artifacts?.some((a: any) => a.status === 'completed' && !a.download_url);
+      
+      if (needsGcpSync || (forceSync && data.status === 'completed')) {
+        try {
+          const gcpData = await cloudBuild.gcpSync(buildId);
+          if (gcpData.artifacts?.some((a: any) => a.download_url)) {
+            data = gcpData;
+          }
+        } catch (gcpErr) {
+          console.warn('GCP sync fallback failed:', gcpErr);
+        }
+      }
+      
       setBuildStatus(data);
       setArtifacts(data.artifacts || []);
       setLoading(false);
@@ -92,7 +110,7 @@ const [retrying, setRetrying] = useState(false);
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const data = await cloudBuild.getStatus(buildId, true);
+      const data = await cloudBuild.gcpSync(buildId);
       setBuildStatus(data);
       setArtifacts(data.artifacts || []);
       setError(null);
