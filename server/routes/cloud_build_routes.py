@@ -1847,31 +1847,75 @@ async def gcp_direct_sync(
             raise HTTPException(404, "Build not found")
 
         remote_build_id = get_remote_build_id(build)
-        if not remote_build_id:
-            return {
-                "message": "Build not yet submitted to Cloud Build",
-                "status": build["status"],
-                "synced": False,
-            }
+        gcp_status_obtained = False
+        real_gcp_status = None
 
-        from cloud_build_integration import CloudBuildClient
+        # Try to get status from GCP if we have the build ID
+        if remote_build_id:
+            try:
+                from cloud_build_integration import CloudBuildClient
 
-        cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-        gcp_status = cloud_build.get_build_status(remote_build_id)
+                cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
+                gcp_status = cloud_build.get_build_status(remote_build_id)
+                real_gcp_status = gcp_status.get("status", "")
+                gcp_status_obtained = True
 
-        real_gcp_status = gcp_status.get("status", "")
+                status_map = {
+                    "QUEUED": "queued",
+                    "WORKING": "running",
+                    "SUCCESS": "completed",
+                    "FAILURE": "failed",
+                    "CANCELLED": "cancelled",
+                    "EXPIRED": "failed",
+                }
+                db_status = status_map.get(real_gcp_status, build["status"])
+            except Exception as e:
+                logger.warning(
+                    f"[CloudBuild] Could not get GCP status for {remote_build_id}: {e}"
+                )
+                db_status = build["status"]
+        else:
+            # No GCP build ID stored - try to recover via GCS listing
+            db_status = build["status"]
 
-        status_map = {
-            "QUEUED": "queued",
-            "WORKING": "running",
-            "SUCCESS": "completed",
-            "FAILURE": "failed",
-            "CANCELLED": "cancelled",
-            "EXPIRED": "failed",
-        }
+        # If build is still pending/running and we don't have GCP status, check GCS for artifacts
+        # This handles the case where webhook failed and we never got the GCP build ID
+        if build["status"] in ["pending", "queued", "running"]:
+            if not remote_build_id or not gcp_status_obtained:
+                # Try to find artifacts directly in GCS
+                output_name = build.get("output_name") or "app"
+                target_platforms = json.loads(
+                    build.get("target_platforms") or '["windows"]'
+                )
 
-        db_status = status_map.get(real_gcp_status, build["status"])
+                artifacts_found = False
+                for platform in target_platforms:
+                    try:
+                        from google.cloud import storage as gcs_storage
+                        from config import GCS_BUILDS_BUCKET
 
+                        gcs_client = gcs_storage.Client()
+                        bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+                        prefix = f"builds/{build_id}/{platform}/"
+
+                        blobs = list(bucket.list_blobs(prefix=prefix, max_results=10))
+                        for blob in blobs:
+                            if blob.name.endswith((".zip", ".exe", ".tar.gz")):
+                                artifacts_found = True
+                                break
+                        if artifacts_found:
+                            break
+                    except Exception as list_err:
+                        logger.warning(f"[CloudBuild] GCS listing failed: {list_err}")
+
+                if artifacts_found:
+                    db_status = "completed"
+                    real_gcp_status = "SUCCESS"
+                    logger.info(
+                        f"[CloudBuild] Found artifacts in GCS, marking as completed: {build_id}"
+                    )
+
+        # Update status if changed
         if db_status != build["status"]:
             await conn.execute(
                 """UPDATE cloud_builds 
@@ -1884,6 +1928,7 @@ async def gcp_direct_sync(
                 build_id,
             )
 
+        # Handle completed builds - recover artifacts
         if db_status == "completed":
             output_name = build.get("output_name") or "app"
             artifacts = await conn.fetch(
@@ -1899,10 +1944,16 @@ async def gcp_direct_sync(
                     )
 
                 if not art["download_key"]:
+                    # Try multiple filename patterns
                     possible_filenames = [
                         f"{output_name}-{art['platform']}.zip",
+                        f"{output_name}-{art['platform']}.tar.gz"
+                        if art["platform"] == "linux"
+                        else None,
                         f"{art['platform']}_build.zip",
+                        f"{output_name}.exe" if art["platform"] == "windows" else None,
                     ]
+                    possible_filenames = [f for f in possible_filenames if f]
 
                     for filename_guess in possible_filenames:
                         guessed_key = (
@@ -1924,6 +1975,7 @@ async def gcp_direct_sync(
                         except Exception:
                             continue
 
+                    # If still no download key, try GCS listing
                     if not art.get("download_key"):
                         try:
                             from google.cloud import storage as gcs_storage
@@ -1943,12 +1995,16 @@ async def gcp_direct_sync(
                                         blob.name.split("/")[-1],
                                         art["id"],
                                     )
+                                    logger.info(
+                                        f"[CloudBuild] GCP sync found via listing: {blob.name}"
+                                    )
                                     break
                         except Exception as list_err:
                             logger.warning(
                                 f"[CloudBuild] GCS listing failed: {list_err}"
                             )
 
+        # Refresh data after updates
         build = await conn.fetchrow(
             "SELECT * FROM cloud_builds WHERE id = $1", build_id
         )
@@ -1975,14 +2031,16 @@ async def gcp_direct_sync(
         return {
             "id": build["id"],
             "status": build["status"],
-            "gcp_status": real_gcp_status,
+            "gcp_status": real_gcp_status or "unknown",
             "artifacts": artifact_list,
             "synced": True,
-            "message": f"Synced from GCP: {real_gcp_status}",
+            "message": f"Synced from GCP: {real_gcp_status or 'via artifact detection'}",
         }
 
     except Exception as e:
-        logger.error(f"[CloudBuild] GCP sync failed: {e}")
+        import traceback
+
+        logger.error(f"[CloudBuild] GCP sync failed: {e}\n{traceback.format_exc()}")
         raise HTTPException(500, f"Failed to sync with GCP: {str(e)}")
     finally:
         await release_db(conn)

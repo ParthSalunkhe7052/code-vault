@@ -41,21 +41,47 @@ const MultiPlatformBuildStatus = ({
 const [retrying, setRetrying] = useState(false);
   const pollIntervalRef = useRef(null);
 
-  const fetchStatus = async (forceSync = false) => {
+const fetchStatus = async (forceSync = false) => {
     try {
       const isCompleted = buildStatus?.status && ['completed', 'failed', 'cancelled'].includes(buildStatus.status);
       
-      // Try normal status first
+      // CRITICAL FIX: Always try GCP sync for non-completed builds to handle webhook failures
+      // This ensures we recover artifacts even when the webhook HTTP 000 error occurs
+      if (!isCompleted || forceSync) {
+        try {
+          // Try GCP sync first - this bypasses webhook issues
+          const gcpData = await cloudBuild.gcpSync(buildId);
+          if (gcpData.status === 'completed' && gcpData.artifacts?.some((a) => a.download_url)) {
+            setBuildStatus(gcpData);
+            setArtifacts(gcpData.artifacts || []);
+            setLoading(false);
+            setError(null);
+            
+            const allDone = (gcpData.artifacts || []).every(
+              a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
+            );
+            if (allDone && onAllComplete) {
+              onAllComplete(gcpData.artifacts);
+            }
+            return allDone || gcpData.status === 'cancelled';
+          }
+          // If GCP sync didn't give us completed artifacts, fall through to regular status
+        } catch (gcpErr) {
+          console.warn('GCP sync failed, falling back to regular status:', gcpErr);
+        }
+      }
+      
+      // Regular status fetch as fallback
       let data = await cloudBuild.getStatus(buildId, !isCompleted || forceSync);
       
       // If build completed but artifacts missing download URLs, try GCP direct sync
       const needsGcpSync = data.status === 'completed' && 
-        data.artifacts?.some((a: any) => a.status === 'completed' && !a.download_url);
+        data.artifacts?.some((a) => a.status === 'completed' && !a.download_url);
       
       if (needsGcpSync || (forceSync && data.status === 'completed')) {
         try {
           const gcpData = await cloudBuild.gcpSync(buildId);
-          if (gcpData.artifacts?.some((a: any) => a.download_url)) {
+          if (gcpData.artifacts?.some((a) => a.download_url)) {
             data = gcpData;
           }
         } catch (gcpErr) {

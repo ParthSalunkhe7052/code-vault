@@ -41,6 +41,47 @@ def validate_safe_path(base_dir: Path, user_input: str) -> Path:
         raise HTTPException(400, "Invalid path component")
 
 
+def get_gcs_client_with_credentials():
+    """Get GCS client with proper credentials (same as CloudBuildClient)."""
+    import os
+    import json
+    from google.cloud import storage as gcs_storage
+    from google.oauth2 import service_account
+
+    # Try service account JSON from environment (best for Heroku)
+    service_account_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+    if service_account_json:
+        try:
+            credentials = service_account.Credentials.from_service_account_info(
+                json.loads(service_account_json),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            return gcs_storage.Client(credentials=credentials), credentials
+        except Exception as e:
+            logger.warning(
+                f"[CloudBuild] Failed to use GCP_SERVICE_ACCOUNT_JSON for GCS: {e}"
+            )
+
+    # Try service account file
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if credentials_path and os.path.exists(credentials_path):
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            return gcs_storage.Client(credentials=credentials), credentials
+        except Exception as e:
+            logger.warning(f"[CloudBuild] Failed to use credentials file for GCS: {e}")
+
+    # Fall back to default client
+    try:
+        return gcs_storage.Client(), None
+    except Exception as e:
+        logger.error(f"[CloudBuild] Failed to create GCS client: {e}")
+        return None, None
+
+
 def generate_gcs_signed_url(download_key: str) -> Optional[str]:
     """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions).
 
@@ -51,14 +92,21 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
     Returns signed URL valid for 1 hour, or None if generation fails.
     """
     try:
-        from google.cloud import storage as gcs_storage
         from config import GCS_BUILDS_BUCKET
 
-        gcs_client = gcs_storage.Client()
+        gcs_client, credentials = get_gcs_client_with_credentials()
+        if not gcs_client:
+            logger.error(
+                "[CloudBuild] No GCS client available for signed URL generation"
+            )
+            return None
+
         bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
         blob = bucket.blob(download_key)
 
-        if blob.exists():
+        # Check if blob exists - use signed URL generation directly for reliability
+        # blob.exists() can fail silently with wrong credentials
+        try:
             signed_url = blob.generate_signed_url(
                 version="v4",
                 expiration=timedelta(hours=1),
@@ -66,8 +114,14 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
             )
             logger.info(f"[CloudBuild] Generated GCS signed URL for {download_key}")
             return signed_url
+        except Exception as sign_error:
+            # If signing fails, blob might not exist or credentials issue
+            logger.debug(
+                f"[CloudBuild] Signed URL generation failed for {download_key}: {sign_error}"
+            )
+            return None
     except Exception as gcs_error:
-        logger.debug(f"[CloudBuild] GCS signed URL failed: {gcs_error}")
+        logger.warning(f"[CloudBuild] GCS signed URL failed: {gcs_error}")
 
     if storage_service.is_cloud_enabled() and storage_service.client:
         try:

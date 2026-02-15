@@ -127,6 +127,8 @@ steps:
         if [ -d /workspace/.nuitka-cache ]; then
           echo "[Cloud Build] Restoring Nuitka cache..."
           export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
+          mkdir -p $$HOME/.cache/Nuitka
+          cp -r /workspace/.nuitka-cache/. $$HOME/.cache/Nuitka/ 2>/dev/null || true
         fi
 
         pip install --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography
@@ -175,10 +177,17 @@ steps:
         echo "$$linux_artifacts" > /workspace/linux_artifacts
         echo "$$linux_error" > /workspace/linux_error
         
-        # Save Nuitka cache
-        if [ -d "$$HOME/.cache/nuitka" ]; then
+        # Save Nuitka cache (Nuitka uses ~/.cache/Nuitka on Linux)
+        if [ -d "$$HOME/.cache/Nuitka" ]; then
+          mkdir -p /workspace/.nuitka-cache
+          cp -r $$HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
+          nuitka_cache_size=$$(du -s /workspace/.nuitka-cache 2>/dev/null | cut -f1)
+        elif [ -d "$$HOME/.cache/nuitka" ]; then
           mkdir -p /workspace/.nuitka-cache
           cp -r $$HOME/.cache/nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
+          nuitka_cache_size=$$(du -s /workspace/.nuitka-cache 2>/dev/null | cut -f1)
+        else
+          nuitka_cache_size=0
         fi
     waitFor: ['download-config']
     volumes:
@@ -427,7 +436,9 @@ steps:
 
         error_msg_escaped=$$(echo "$$error_msg" | sed 's/"/\\"/g' | tr '\n' ' ')
 
-        payload="{\"build_id\":\"${_BUILD_ID}\",\"cloud_build_id\":\"${_BUILD_ID}\",\"status\":\"$$overall_status\",\"linux_status\":\"$$linux_status\",\"windows_status\":\"$$windows_status\",\"linux_download_key\":\"$$linux_download_key\",\"windows_download_key\":\"$$windows_download_key\",\"filename\":\"$$filename\",\"error\":\"$$error_msg_escaped\",\"timestamp\":$$(date +%s)}"
+        # $BUILD_ID is the actual GCP Cloud Build ID (built-in variable)
+        # ${_BUILD_ID} is our CodeVault build ID (passed as substitution)
+        payload="{\"build_id\":\"${_BUILD_ID}\",\"cloud_build_id\":\"$BUILD_ID\",\"status\":\"$$overall_status\",\"linux_status\":\"$$linux_status\",\"windows_status\":\"$$windows_status\",\"linux_download_key\":\"$$linux_download_key\",\"windows_download_key\":\"$$windows_download_key\",\"filename\":\"$$filename\",\"error\":\"$$error_msg_escaped\",\"timestamp\":$$(date +%s)}"
 
         if [ -n "${_CALLBACK_SECRET}" ]; then
           sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "${_CALLBACK_SECRET}" | awk '{print $$2}')
