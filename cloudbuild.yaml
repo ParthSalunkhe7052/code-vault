@@ -386,6 +386,8 @@ steps:
           exit 0
         fi
         echo "[Cloud Build] ===== Building for Node.js ====="
+        echo "[Cloud Build] Build ID: ${_BUILD_ID}"
+        echo "[Cloud Build] Output name: ${_OUTPUT_NAME}"
         
         # Install Python for the runner script
         apt-get update -qq && apt-get install -y -qq python3 > /dev/null 2>&1
@@ -395,32 +397,70 @@ steps:
         
         cd "./project/source"
         
+        # Debug: Show directory contents
+        echo "[Cloud Build] Directory contents:"
+        ls -la
+        echo ""
+        
+        # Debug: Show config
+        echo "[Cloud Build] Config:"
+        cat /workspace/config.json
+        echo ""
+        
         # Run the Node.js build runner
         if [ -f ".github/scripts/cloud_runner_nodejs.py" ]; then
-          python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)"
+          echo "[Cloud Build] Running cloud_runner_nodejs.py..."
+          python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)" 2>&1 || {
+            exit_code=$?
+            echo "[Cloud Build] Runner failed with exit code: $exit_code"
+            echo "[Cloud Build] Attempting direct pkg fallback..."
+            
+            # Direct pkg fallback
+            if [ -f "package.json" ]; then
+              echo "[Cloud Build] Using existing package.json"
+            else
+              entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
+              echo "[Cloud Build] Creating package.json with main: $entry_file"
+              echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\", \"private\": true}" > package.json
+            fi
+            
+            echo "[Cloud Build] package.json content:"
+            cat package.json
+            
+            mkdir -p /workspace/artifacts
+            npx @yao-pkg/pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/ --compress GZip 2>&1 || true
+          }
         else
           echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
           # Fallback: Create package.json if missing
           if [ ! -f "package.json" ]; then
             entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
-            echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\"}" > package.json
+            echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\", \"private\": true}" > package.json
           fi
+          echo "[Cloud Build] package.json content:"
+          cat package.json
           npm install --quiet 2>/dev/null || true
           mkdir -p /workspace/artifacts
-          pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/
+          npx @yao-pkg/pkg . --target node20-win-x64 --output "${_OUTPUT_NAME}.exe" --out-path /workspace/artifacts/ --compress GZip
         fi
         
         # Copy artifacts to workspace
         mkdir -p /workspace/artifacts
+        
+        # Debug: Show artifacts directory
+        echo "[Cloud Build] Artifacts directory contents:"
+        ls -la /workspace/artifacts/ 2>/dev/null || echo "Artifacts directory empty or not found"
         
         # Find and copy Windows artifact
         if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
           cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
           echo "completed" > /workspace/build_status_windows
           echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+          echo "[Cloud Build] Found artifact in build_output_windows"
         elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
           echo "completed" > /workspace/build_status_windows
           echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+          echo "[Cloud Build] Found artifact in /workspace/artifacts"
         else
           # Search for any exe
           found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
@@ -428,13 +468,15 @@ steps:
             cp "$found_exe" /workspace/artifacts/
             echo "completed" > /workspace/build_status_windows
             echo "$(basename $found_exe)" > /workspace/windows_artifacts
+            echo "[Cloud Build] Found artifact via search: $found_exe"
           else
             echo "failed" > /workspace/build_status_windows
             echo "Node.js build output not found" > /workspace/windows_error
+            echo "[Cloud Build] ERROR: No exe file found anywhere!"
           fi
         fi
         
-        echo "[Cloud Build] Node.js build complete"
+        echo "[Cloud Build] Node.js build step complete"
     waitFor: ['download-config']
     volumes:
       - name: 'artifacts'

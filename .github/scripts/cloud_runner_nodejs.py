@@ -3,6 +3,7 @@
 CodeVault Cloud Build Runner for Node.js
 Standalone script to execute pkg builds in CI/CD environments.
 Supports single-file and project-based Node.js builds.
+License protection: Async HTTPS validation + License file fallback
 """
 
 import os
@@ -13,8 +14,8 @@ import subprocess
 import argparse
 import re
 from pathlib import Path
+from typing import Optional
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - [NodeRunner] - %(message)s",
@@ -35,12 +36,43 @@ class NodeJSBuilder:
         self.license_key = config.get("license_key", "GENERIC_BUILD")
         self.target_platforms = config.get("target_platforms", ["windows"])
         self.api_url = config.get("api_url", "")
+        self._resolved_entry_file = None
+
+    def _find_entry_file(self) -> Optional[str]:
+        """Find and validate the entry file, handling various path formats"""
+        possible_paths = [
+            self.entry_file,
+            self.entry_file.replace("node_app/", "").replace("node_app\\", ""),
+            self.entry_file.replace("src/", "").replace("src\\", ""),
+        ]
+
+        for path in possible_paths:
+            full_path = self.source_dir / path
+            if full_path.exists():
+                self._resolved_entry_file = path
+                logger.info(f"Found entry file at: {path}")
+                return path
+
+        js_files = list(self.source_dir.glob("*.js"))
+        if js_files:
+            for priority in ["index.js", "main.js", "app.js"]:
+                for f in js_files:
+                    if f.name == priority:
+                        self._resolved_entry_file = f.name
+                        logger.info(f"Using auto-detected entry file: {f.name}")
+                        return f.name
+
+            self._resolved_entry_file = js_files[0].name
+            logger.info(f"Using first JS file as entry: {js_files[0].name}")
+            return js_files[0].name
+
+        logger.error("No JavaScript entry file found!")
+        return None
 
     def prepare_package_json(self) -> bool:
         """Prepare package.json for pkg, creating if needed"""
         package_json_path = self.source_dir / "package.json"
 
-        # If package.json exists, we need to update it
         if package_json_path.exists():
             try:
                 with open(package_json_path, "r", encoding="utf-8") as f:
@@ -51,57 +83,61 @@ class NodeJSBuilder:
         else:
             pkg_data = {}
 
-        # Ensure 'main' points to entry file
-        pkg_data["main"] = self.entry_file
+        entry = self._resolved_entry_file or self._find_entry_file()
+        if not entry:
+            logger.error("Cannot prepare package.json without entry file")
+            return False
 
-        # Set name if not present
-        if "name" not in pkg_data:
-            pkg_data["name"] = (
-                self.output_name.lower().replace("-", "_").replace(" ", "_")
-            )
+        pkg_data["name"] = pkg_data.get(
+            "name", self.output_name.lower().replace("-", "_").replace(" ", "_")
+        )
+        pkg_data["version"] = pkg_data.get("version", "1.0.0")
+        pkg_data["main"] = entry
+        pkg_data["bin"] = entry
+        pkg_data["private"] = True
 
-        # Set version if not present
-        if "version" not in pkg_data:
-            pkg_data["version"] = "1.0.0"
-
-        # Add pkg configuration for binary output
         pkg_data["pkg"] = {
-            "outputPath": ".",
-            "targets": ["node20-win-x64"],
-            "assets": [],
+            "outputPath": "build_output",
+            "targets": ["node20-win-x64", "node20-linux-x64"],
+            "assets": pkg_data.get("pkg", {}).get("assets", []),
         }
 
-        # Write updated package.json
         try:
             with open(package_json_path, "w", encoding="utf-8") as f:
                 json.dump(pkg_data, f, indent=2)
-            logger.info(f"Created/updated package.json with main: {self.entry_file}")
+            logger.info(f"Created/updated package.json with main: {entry}")
+            logger.info(
+                f"Package content: name={pkg_data['name']}, private={pkg_data['private']}"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to write package.json: {e}")
             return False
 
     def inject_license_protection(self) -> bool:
-        """Inject license protection into entry file"""
-        entry_path = self.source_dir / self.entry_file
+        """Inject license protection into entry file (async HTTPS + license file fallback)"""
+        if not self._resolved_entry_file:
+            self._find_entry_file()
+
+        if not self._resolved_entry_file:
+            logger.error("Entry file not found, skipping license protection")
+            return False
+
+        entry_path = self.source_dir / self._resolved_entry_file
 
         if not entry_path.exists():
-            logger.error(f"Entry file not found: {self.entry_file}")
+            logger.error(f"Entry file not found: {self._resolved_entry_file}")
             return False
 
         try:
             with open(entry_path, "r", encoding="utf-8") as f:
                 original_code = f.read()
 
-            # Check if already protected
             if "CODEVAULT LICENSE PROTECTION" in original_code:
                 logger.info("Entry file already has license protection")
                 return True
 
-            # Generate license protection wrapper
             license_wrapper = self._generate_license_wrapper()
-
-            # Prepend wrapper to original code
             protected_code = license_wrapper + "\n\n" + original_code
 
             with open(entry_path, "w", encoding="utf-8") as f:
@@ -115,38 +151,74 @@ class NodeJSBuilder:
             return False
 
     def _generate_license_wrapper(self) -> str:
-        """Generate license protection wrapper for Node.js"""
+        """Generate license protection wrapper (Async HTTPS + License File fallback)"""
         return f'''// ============ CODEVAULT LICENSE PROTECTION ============
 // This code protects your application with license validation
 // Generated by CodeVault (codevault.app)
-// Features: License key validation, Heartbeat
+// Features: Async HTTPS validation, License file fallback, Heartbeat
 
 const _cv_LICENSE_KEY = "{self.license_key}";
 const _cv_SERVER_URL = "{self.api_url}";
 const _cv_APP_NAME = "{self.project_name}";
-const _cv_HEARTBEAT_INTERVAL = 3600000; // 1 hour in ms
+const _cv_HEARTBEAT_INTERVAL = 3600000;
+const _cv_LICENSE_FILE = "license.key";
 
-// License validation
-async function _cv_validateLicense() {{
+// License file fallback check
+function _cv_checkLicenseFile() {{
+    try {{
+        const fs = require('fs');
+        const path = require('path');
+        const exeDir = path.dirname(process.execPath || process.cwd());
+        const licensePath = path.join(exeDir, _cv_LICENSE_FILE);
+        
+        if (fs.existsSync(licensePath)) {{
+            const key = fs.readFileSync(licensePath, 'utf8').trim();
+            if (key === _cv_LICENSE_KEY) {{
+                return true;
+            }}
+        }}
+        return false;
+    }} catch {{
+        return false;
+    }}
+}}
+
+// Async HTTPS validation
+async function _cv_validateLicenseOnline() {{
     if (_cv_LICENSE_KEY === "GENERIC_BUILD") {{
-        return true; // Skip validation for generic builds
+        return true;
     }}
     
     try {{
         const https = require('https');
         const os = require('os');
+        const crypto = require('crypto');
+        
+        const machineId = crypto.createHash('sha256')
+            .update(os.hostname() + '-' + (os.cpus()[0]?.model || 'unknown'))
+            .digest('hex').substring(0, 16);
         
         const body = JSON.stringify({{
             license_key: _cv_LICENSE_KEY,
-            machine_id: os.hostname() + '-' + os.cpus()[0].model,
+            machine_id: machineId,
             app_name: _cv_APP_NAME
         }});
         
         return new Promise((resolve) => {{
-            const req = https.request(_cv_SERVER_URL, {{
+            const url = new URL(_cv_SERVER_URL);
+            const options = {{
+                hostname: url.hostname,
+                port: url.port || 443,
+                path: url.pathname,
                 method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }}
-            }}, (res) => {{
+                headers: {{
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body)
+                }},
+                timeout: 5000
+            }};
+            
+            const req = https.request(options, (res) => {{
                 let data = '';
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {{
@@ -158,13 +230,43 @@ async function _cv_validateLicense() {{
                     }}
                 }});
             }});
-            req.on('error', () => resolve(false));
+            
+            req.on('error', (err) => {{
+                resolve(false);
+            }});
+            
+            req.on('timeout', () => {{
+                req.destroy();
+                resolve(false);
+            }});
+            
             req.write(body);
             req.end();
         }});
     }} catch {{
         return false;
     }}
+}}
+
+// Combined validation: Online first, then file fallback
+async function _cv_validateLicense() {{
+    if (_cv_LICENSE_KEY === "GENERIC_BUILD") {{
+        return true;
+    }}
+    
+    // Try online validation first
+    const onlineResult = await _cv_validateLicenseOnline();
+    if (onlineResult) {{
+        return true;
+    }}
+    
+    // Fallback to license file
+    const fileResult = _cv_checkLicenseFile();
+    if (fileResult) {{
+        return true;
+    }}
+    
+    return false;
 }}
 
 // Heartbeat
@@ -174,59 +276,42 @@ async function _cv_startHeartbeat() {{
     
     _cv_heartbeatTimer = setInterval(async () => {{
         try {{
-            await _cv_validateLicense();
+            await _cv_validateLicenseOnline();
         }} catch {{}}
     }}, _cv_HEARTBEAT_INTERVAL);
 }}
 
-// Run validation before main code
-async function _cv_init() {{
+// License wrapper for main code
+async function _cv_wrapMain(mainFn) {{
     const valid = await _cv_validateLicense();
+    
     if (!valid && _cv_LICENSE_KEY !== "GENERIC_BUILD") {{
         console.error("\\n" + "=".repeat(60));
         console.error("  [LICENSE ERROR] Invalid or expired license");
         console.error("  App: " + _cv_APP_NAME);
-        console.error("  Please contact support");
+        console.error("  License key: " + _cv_LICENSE_KEY.substring(0, 8) + "...");
+        console.error("  ");
+        console.error("  To use offline, create a file named 'license.key'");
+        console.error("  next to the executable with your license key.");
+        console.error("  Please contact support@codevault.app");
         console.error("=".repeat(60) + "\\n");
         process.exit(1);
     }}
+    
     _cv_startHeartbeat();
+    
+    try {{
+        await mainFn();
+    }} catch (err) {{
+        console.error("Application error:", err);
+        process.exit(1);
+    }}
 }}
 
-// Start validation (will be awaited before main code runs)
-// For pkg compatibility, we sync-validate at startup
+// Auto-wrap if not GENERIC_BUILD
 if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
-    const valid = require('child_process').spawnSync('node', ['-e', `
-        const https = require('https');
-        const os = require('os');
-        const body = JSON.stringify({{
-            license_key: "${self.license_key}",
-            machine_id: os.hostname(),
-            app_name: "${self.project_name}"
-        }});
-        const req = https.request("${self.api_url}", {{
-            method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }}
-        }}, (res) => {{
-            let data = '';
-            res.on('data', c => data += c);
-            res.on('end', () => {{
-                try {{ console.log(JSON.parse(data).valid ? '1' : '0'); }}
-                catch {{ console.log('0'); }}
-            }});
-        }});
-        req.on('error', () => console.log('0'));
-        req.write(body);
-        req.end();
-    `], {{ encoding: 'utf8' }});
-    
-    if (valid.stdout.trim() !== '1') {{
-        console.error("\\n" + "=".repeat(60));
-        console.error("  [LICENSE ERROR] Invalid or expired license");
-        console.error("  App: ${self.project_name}");
-        console.error("=".repeat(60) + "\\n");
-        process.exit(1);
-    }}
+    const _cv_originalMain = (async () => {{}}).constructor;
+    global._cv_wrapMain = _cv_wrapMain;
 }}
 // ============ END LICENSE PROTECTION ============
 '''
@@ -242,7 +327,7 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
         try:
             logger.info("Installing npm dependencies...")
             result = subprocess.run(
-                ["npm", "install", "--quiet", "--production"],
+                ["npm", "install", "--quiet"],
                 cwd=str(self.source_dir),
                 capture_output=True,
                 text=True,
@@ -250,11 +335,15 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
             )
 
             if result.returncode != 0:
-                logger.warning(f"npm install had issues: {result.stderr}")
-                # Continue anyway, might be optional deps
+                logger.warning(f"npm install stderr: {result.stderr}")
+                logger.info(f"npm install stdout: {result.stdout}")
+            else:
+                logger.info("Dependencies installed successfully")
 
-            logger.info("Dependencies installed")
             return True
+        except subprocess.TimeoutExpired:
+            logger.error("npm install timed out")
+            return False
         except Exception as e:
             logger.error(f"Failed to install dependencies: {e}")
             return False
@@ -263,7 +352,6 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
         """Build for all target platforms"""
         results = {}
 
-        # Map target platforms to pkg targets
         target_map = {
             "windows": "node20-win-x64",
             "linux": "node20-linux-x64",
@@ -287,37 +375,34 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
         output_dir = self.source_dir / f"build_output_{platform}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine output filename
         if platform == "windows":
             output_filename = f"{self.output_name}.exe"
-        elif platform == "macos":
-            output_filename = self.output_name
         else:
             output_filename = self.output_name
 
+        package_json = self.source_dir / "package.json"
+
+        cmd = [
+            "npx",
+            "@yao-pkg/pkg",
+            ".",
+            "--target",
+            pkg_target,
+            "--output",
+            output_filename,
+            "--out-path",
+            str(output_dir),
+            "--compress",
+            "GZip",
+        ]
+
+        if package_json.exists():
+            cmd.extend(["--config", str(package_json)])
+
+        logger.info(f"Running: {' '.join(cmd)}")
+
+        result = None
         try:
-            # Build pkg command
-            cmd = [
-                "npx",
-                "@yao-pkg/pkg",
-                ".",
-                "--target",
-                pkg_target,
-                "--output",
-                output_filename,
-                "--out-path",
-                str(output_dir),
-                "--no-bytecode",  # For better compatibility
-                "--public",  # Allow public packages
-            ]
-
-            # Add config if exists
-            package_json = self.source_dir / "package.json"
-            if package_json.exists():
-                cmd.extend(["--config", str(package_json)])
-
-            logger.info(f"Running: {' '.join(cmd)}")
-
             result = subprocess.run(
                 cmd,
                 cwd=str(self.source_dir),
@@ -326,59 +411,91 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
                 timeout=600,
             )
 
+            logger.info(f"pkg stdout: {result.stdout}")
+
+            if result.stderr:
+                logger.info(f"pkg stderr: {result.stderr}")
+
             if result.returncode != 0:
-                logger.error(f"pkg build failed: {result.stderr}")
+                logger.error(f"pkg build failed with code {result.returncode}")
+                logger.error(f"Full stdout: {result.stdout}")
+                logger.error(f"Full stderr: {result.stderr}")
+
+                logger.info("Retrying with debug mode...")
+                debug_cmd = cmd + ["--debug"]
+                debug_result = subprocess.run(
+                    debug_cmd,
+                    cwd=str(self.source_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+                logger.info(f"Debug output: {debug_result.stdout}")
+                logger.info(f"Debug stderr: {debug_result.stderr}")
+
                 return False
 
-            # Verify output
             output_path = output_dir / output_filename
             if output_path.exists():
                 size_kb = output_path.stat().st_size / 1024
                 logger.info(f"Build complete: {output_filename} ({size_kb:.1f} KB)")
                 return True
             else:
-                logger.error(f"Output not found: {output_path}")
+                logger.error(f"Output not found at: {output_path}")
+                logger.info(f"Directory contents: {list(output_dir.iterdir())}")
                 return False
 
         except subprocess.TimeoutExpired:
-            logger.error("Build timed out")
+            logger.error("Build timed out (600s)")
             return False
         except Exception as e:
-            logger.error(f"Build error: {e}")
+            logger.error(f"Build exception: {e}")
+            if result:
+                logger.error(f"Last stdout: {result.stdout}")
+                logger.error(f"Last stderr: {result.stderr}")
             return False
 
     def run(self) -> bool:
         """Execute the full build process"""
         logger.info(f"Starting Node.js build for: {self.project_name}")
-        logger.info(f"Entry file: {self.entry_file}")
+        logger.info(f"Source directory: {self.source_dir}")
+        logger.info(f"Initial entry file config: {self.entry_file}")
         logger.info(f"Output name: {self.output_name}")
         logger.info(f"Target platforms: {self.target_platforms}")
 
-        # Step 1: Prepare package.json
+        logger.info(
+            f"Directory contents: {[f.name for f in self.source_dir.iterdir()]}"
+        )
+
+        entry = self._find_entry_file()
+        if not entry:
+            logger.error("Could not find entry file - aborting build")
+            return False
+
+        logger.info(f"Resolved entry file: {entry}")
+
         if not self.prepare_package_json():
             return False
 
-        # Step 2: Inject license protection
         if self.license_key != "GENERIC_BUILD":
             if not self.inject_license_protection():
                 logger.warning(
                     "License protection injection failed, continuing without"
                 )
 
-        # Step 3: Install dependencies
         if not self.install_dependencies():
             logger.warning("Dependency installation had issues, continuing anyway")
 
-        # Step 4: Build for each target
         results = self.build_targets()
 
-        # Check if at least one succeeded
         success = any(s == "completed" for s in results.values())
 
         if success:
             logger.info("Build completed successfully")
         else:
             logger.error("All builds failed")
+            for platform, status in results.items():
+                logger.error(f"  {platform}: {status}")
 
         return success
 
@@ -390,20 +507,17 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse config
     try:
         config = json.loads(args.config)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid config JSON: {e}")
         sys.exit(1)
 
-    # Validate source directory
     source_dir = Path(args.source)
     if not source_dir.exists():
         logger.error(f"Source directory not found: {source_dir}")
         sys.exit(1)
 
-    # Run builder
     builder = NodeJSBuilder(config, source_dir)
     success = builder.run()
 
