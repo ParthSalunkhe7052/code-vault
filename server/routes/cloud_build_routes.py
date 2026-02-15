@@ -1943,16 +1943,16 @@ async def gcp_direct_sync(
                         art["id"],
                     )
 
-if not art["download_key"]:
+                if not art["download_key"]:
                     # Try multiple filename patterns (prioritize onefile EXE for Windows)
                     possible_filenames = []
-                    
+
                     if art["platform"] == "windows":
                         # Onefile mode: single self-contained EXE
                         possible_filenames.append(f"{output_name}.exe")
                         # Fallback: zip file with DLLs (standalone mode)
                         possible_filenames.append(f"{output_name}-windows.zip")
-                    
+
                     if art["platform"] == "linux":
                         # Onefile mode: single binary
                         possible_filenames.append(f"{output_name}")
