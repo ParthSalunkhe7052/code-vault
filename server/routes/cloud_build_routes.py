@@ -666,7 +666,6 @@ async def start_cloud_build(
 
         # 3. Source Validation
         source_dir = None
-        source_from_project_files = False
 
         # First, try to find source directory from zip upload
         safe_project_dir = validate_safe_path(UPLOAD_DIR, request.project_id)
@@ -686,14 +685,16 @@ async def start_cloud_build(
             )
 
             if project_files:
-                source_from_project_files = True
-                import tempfile
                 import shutil
 
-                temp_source_dir = Path(
-                    tempfile.mkdtemp(prefix=f"source_{request.project_id}_")
-                )
-                temp_source_dir.mkdir(parents=True, exist_ok=True)
+                # Create permanent source directory for this project
+                persistent_source_dir = safe_project_dir / "source"
+                persistent_source_dir.mkdir(parents=True, exist_ok=True)
+                persistent_source_dir = persistent_source_dir.resolve()
+
+                # Validate path
+                if not str(persistent_source_dir).startswith(str(UPLOAD_DIR.resolve())):
+                    raise HTTPException(400, "Invalid source directory path")
 
                 for pf in project_files:
                     try:
@@ -707,10 +708,10 @@ async def start_cloud_build(
                             )
                             if not safe_filename:
                                 safe_filename = f"file_{pf['id']}"
-                            dest_path = temp_source_dir / safe_filename
+                            dest_path = persistent_source_dir / safe_filename
                             dest_path.write_bytes(file_content)
                             logger.info(
-                                f"[CloudBuild] Downloaded project file: {safe_filename}"
+                                f"[CloudBuild] Downloaded project file to source: {safe_filename}"
                             )
                         else:
                             logger.warning(
@@ -721,10 +722,11 @@ async def start_cloud_build(
                             f"[CloudBuild] Error downloading file {pf['filename']}: {dl_err}"
                         )
 
-                if list(temp_source_dir.iterdir()):
-                    source_dir = temp_source_dir
-                else:
-                    shutil.rmtree(temp_source_dir, ignore_errors=True)
+                if list(persistent_source_dir.iterdir()):
+                    source_dir = persistent_source_dir
+                    logger.info(
+                        f"[CloudBuild] Created source dir from project_files: {source_dir}"
+                    )
 
         if not source_dir:
             raise HTTPException(
@@ -2634,6 +2636,58 @@ async def process_build_queue():
                                 if (safe_alt / "source").exists():
                                     source_dir = safe_alt / "source"
 
+                                # If still no source, try to download from project_files
+                                if not source_dir.exists() or not list(
+                                    source_dir.iterdir()
+                                ):
+                                    project_files = await conn.fetch(
+                                        """SELECT id, filename, original_filename, file_path, is_cloud 
+                                           FROM project_files WHERE project_id = $1""",
+                                        project_id,
+                                    )
+                                    if project_files:
+                                        import shutil
+
+                                        persistent_source = safe_project_dir / "source"
+                                        persistent_source.mkdir(
+                                            parents=True, exist_ok=True
+                                        )
+
+                                        for pf in project_files:
+                                            try:
+                                                file_content = (
+                                                    await storage_service.download_file(
+                                                        pf["file_path"],
+                                                        not pf["is_cloud"],
+                                                    )
+                                                )
+                                                if file_content:
+                                                    safe_fn = (
+                                                        pf["original_filename"]
+                                                        or pf["filename"]
+                                                    )
+                                                    safe_fn = "".join(
+                                                        c
+                                                        for c in safe_fn
+                                                        if c.isalnum() or c in "._-"
+                                                    )
+                                                    if not safe_fn:
+                                                        safe_fn = f"file_{pf['id']}"
+                                                    (
+                                                        persistent_source / safe_fn
+                                                    ).write_bytes(file_content)
+                                            except Exception as dl_err:
+                                                logger.warning(
+                                                    f"Error downloading file {pf['filename']}: {dl_err}"
+                                                )
+
+                                        if list(persistent_source.iterdir()):
+                                            source_dir = persistent_source
+                                        else:
+                                            shutil.rmtree(
+                                                persistent_source, ignore_errors=True
+                                            )
+
                             if source_dir.exists() and list(source_dir.iterdir()):
                                 # Trigger the build
                                 logger.info(
@@ -2713,6 +2767,48 @@ async def trigger_build_directly(build_id: str, config: dict, project_id: str):
                 source_dir = source_dir.resolve()
                 if not str(source_dir).startswith(str(projects_base.resolve())):
                     raise HTTPException(400, "Invalid source directory path")
+
+        # If still no source, try to download from project_files
+        if not source_dir.exists() or not list(source_dir.iterdir()):
+            conn = await get_db()
+            try:
+                project_files = await conn.fetch(
+                    """SELECT id, filename, original_filename, file_path, is_cloud 
+                       FROM project_files WHERE project_id = $1""",
+                    project_id,
+                )
+                if project_files:
+                    import shutil
+
+                    persistent_source = safe_project_dir / "source"
+                    persistent_source.mkdir(parents=True, exist_ok=True)
+
+                    for pf in project_files:
+                        try:
+                            file_content = await storage_service.download_file(
+                                pf["file_path"], not pf["is_cloud"]
+                            )
+                            if file_content:
+                                safe_fn = pf["original_filename"] or pf["filename"]
+                                safe_fn = "".join(
+                                    c for c in safe_fn if c.isalnum() or c in "._-"
+                                )
+                                if not safe_fn:
+                                    safe_fn = f"file_{pf['id']}"
+                                (persistent_source / safe_fn).write_bytes(file_content)
+                        except Exception as dl_err:
+                            logger.warning(
+                                f"Error downloading file {pf['filename']}: {dl_err}"
+                            )
+
+                    if list(persistent_source.iterdir()):
+                        source_dir = persistent_source
+                    else:
+                        shutil.rmtree(persistent_source, ignore_errors=True)
+            finally:
+                if conn:
+                    await release_db(conn)
+                    conn = None
 
         started = await trigger_cloud_build(build_id, config, source_dir)
         if not started:
