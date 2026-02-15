@@ -24,6 +24,7 @@ interface BuildContextType {
     startBuild: (projectId: string, jobId: string) => void;
     getBuild: (projectId: string) => BuildState;
     updateBuildStatus: (projectId: string, statusData: any) => void;
+    clearBuild: (projectId: string) => void;
 }
 
 const BuildContext = createContext<BuildContextType | null>(null);
@@ -381,6 +382,35 @@ export const BuildProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         connectWebSocket(projectId, jobId);
     }, [connectWebSocket]);
 
+/**
+     * Clear a build from state (used after cancel/reset)
+     */
+    const clearBuild = useCallback((projectId: string) => {
+        removePersistedBuild(projectId);
+        
+        // Stop any active polling
+        const build = builds[projectId];
+        if (build?.jobId && activePollers.current.has(build.jobId)) {
+            const interval = activePollers.current.get(build.jobId);
+            if (interval) clearInterval(interval);
+            activePollers.current.delete(build.jobId);
+        }
+        
+        // Close any active WebSocket
+        if (build?.jobId && activeSockets.current.has(build.jobId)) {
+            const ws = activeSockets.current.get(build.jobId);
+            if (ws) ws.close();
+            activeSockets.current.delete(build.jobId);
+        }
+        
+        // Clear from state
+        setBuilds(prev => {
+            const next = { ...prev };
+            delete next[projectId];
+            return next;
+        });
+    }, [builds]);
+
     const getBuild = useCallback((projectId: string) => {
         return builds[projectId] || {
             status: 'idle',
@@ -397,7 +427,8 @@ export const BuildProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         startBuild,
         getBuild,
         updateBuildStatus,
-    }), [builds, startBuild, getBuild, updateBuildStatus]);
+        clearBuild,
+    }), [builds, startBuild, getBuild, updateBuildStatus, clearBuild]);
 
     return (
         <BuildContext.Provider value={value}>
@@ -416,7 +447,7 @@ export function useBuild() {
 
 // Keep useProjectBuild for backward compatibility
 export function useProjectBuild(projectId: string) {
-    const { getBuild, startBuild, updateBuildStatus } = useBuild();
+    const { getBuild, startBuild, updateBuildStatus, clearBuild } = useBuild();
     const build = getBuild(projectId); 
 
     return {
@@ -427,7 +458,7 @@ export function useProjectBuild(projectId: string) {
         addLog: () => {},
         complete: () => {},
         fail: () => {},
-        cancel: () => {},
+        cancel: () => clearBuild(projectId),
     };
 }
 

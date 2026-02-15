@@ -330,58 +330,34 @@ export function CloudBuildButton({
     setBuildId(null);
     if (pollIntervalRef.current) {
       clearTimeout(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    // Clear from global context
+    if (projectBuild && projectBuild.cancel) {
+      projectBuild.cancel();
     }
   };
 
-  const cancelBuild = async () => {
+const cancelBuild = async () => {
     if (!buildId) return;
     
-    // Allow cancel in building, starting, or if status might be stale
-    if (!['building', 'starting', 'pending', 'queued'].includes(status)) {
-      // Even if UI shows different status, try to cancel anyway
-      // Cloud Build will tell us if it's already done
+    // Stop polling immediately
+    if (pollIntervalRef.current) {
+      clearTimeout(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
     
     try {
       setError(null);
       const response = await api.post(`/cloud-build/${buildId}/cancel`);
       
-      // Handle response from server
-      const result = response.data;
+      // Reset to idle immediately - user can start a new build
+      resetBuild();
       
-      if (result.status === 'cancelled') {
-        setStatus('cancelled');
-        if (result.synced_from_cloud) {
-          setError('Build was already cancelled or completed');
-        } else {
-          setError('Build cancelled by user');
-        }
-      } else if (result.status === 'completed') {
-        setStatus('completed');
-        setError('Build already completed');
-        // Refresh to get download URL
-        pollStatus(buildId);
-      } else if (result.status === 'failed') {
-        setStatus('failed');
-        setError('Build already failed');
-      } else {
-        setStatus(result.status);
-        setError(result.message || 'Build status updated');
-      }
-      
-      if (pollIntervalRef.current) {
-        clearTimeout(pollIntervalRef.current);
-      }
     } catch (err) {
       console.error('Failed to cancel build:', err);
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to cancel build';
-      setError(errorMsg);
-      
-      // If we get a 400/404, the build might already be done
-      // Refresh status to check
-      if (err.response?.status === 400 || err.response?.status === 404) {
-        pollStatus(buildId);
-      }
+      // Even on error, reset so user isn't stuck
+      resetBuild();
     }
   };
 
@@ -507,17 +483,18 @@ export function CloudBuildButton({
         </div>
       )}
 
-      {status === 'cancelled' && (
-        <div className="space-y-3 p-4 bg-amber-500/10 rounded-lg border border-amber-500/20">
-          <div className="flex items-center gap-2 text-amber-400 font-medium">
+{status === 'cancelled' && (
+        <div className="space-y-3 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+          <div className="flex items-center gap-2 text-slate-400 font-medium">
             <XCircle className="w-5 h-5" />
             Build cancelled
           </div>
           <button
             onClick={resetBuild}
-            className="text-sm text-amber-400 hover:text-amber-300 underline underline-offset-4"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-purple-500/25 w-full"
           >
-            Start new build
+            <Cloud className="w-5 h-5" />
+            {getButtonText()}
           </button>
         </div>
       )}

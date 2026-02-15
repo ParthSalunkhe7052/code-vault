@@ -146,15 +146,28 @@ const fetchStatus = async (forceSync = false) => {
     setLoading(false);
   };
 
-  const handleCancel = async () => {
+const handleCancel = async () => {
     if (cancelling) return;
     setCancelling(true);
+    
+    // Stop polling immediately
+    if (pollIntervalRef.current) {
+      clearTimeout(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    
     try {
       await cloudBuild.cancel(buildId);
-      handleRefresh();
+      // Clear state and notify parent
+      setBuildStatus({ status: 'cancelled' });
+      setArtifacts([]);
       onCancel?.();
     } catch (err) {
       console.error('Failed to cancel build:', err);
+      // Even on error, clear the state
+      setBuildStatus({ status: 'cancelled' });
+      setArtifacts([]);
+      onCancel?.();
     }
     setCancelling(false);
   };
