@@ -495,7 +495,8 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "target_platforms": target_platforms_str,
             "source_url": source_url,
             "config": config,
-            "callback_url": f"{public_api_url}/api/v1/cloud-build/webhook",
+            # Use direct Heroku URL for webhook (custom domain may have DNS issues)
+            "callback_url": "https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook",
             "callback_secret": BUILD_CALLBACK_SECRET or "",
             "plan_tier": config.get("plan_tier", "free"),
             "compatibility_mode": config.get("compatibility_mode", False),
@@ -1547,6 +1548,8 @@ async def get_build_status(
             "SELECT * FROM cloud_build_artifacts WHERE build_id = $1", build_id
         )
 
+        language = build.get("language") or "python"
+
         artifact_list = []
         for art in artifacts:
             download_url = None
@@ -1572,18 +1575,16 @@ async def get_build_status(
                             art["id"],
                         )
 
-                    possible_filenames = [
-                        f"{output_name}-{art['platform']}.zip",
-                        f"{output_name}-{art['platform']}.tar.gz"
-                        if art["platform"] == "linux"
-                        else None,
-                        f"{output_name}.exe" if art["platform"] == "windows" else None,
-                        f"{output_name}" if art["platform"] == "linux" else None,
-                        f"{art['platform']}_build.zip",
-                        f"{build_id}_{art['platform']}.zip",
-                    ]
+                    # Use new priority-based filename detection
+                    from routes.cloud_build_utils import (
+                        get_artifact_filename_priority,
+                        find_artifact_in_gcs,
+                        check_gcs_blob_exists,
+                    )
 
-                    possible_filenames = [f for f in possible_filenames if f]
+                    possible_filenames = get_artifact_filename_priority(
+                        art["platform"], language, output_name
+                    )
 
                     for filename_guess in possible_filenames:
                         guessed_key = (
@@ -1591,8 +1592,8 @@ async def get_build_status(
                         )
 
                         try:
-                            test_url = generate_gcs_signed_url(guessed_key)
-                            if test_url:
+                            # Check if file exists before generating URL
+                            if check_gcs_blob_exists(guessed_key):
                                 download_key = guessed_key
                                 logger.info(
                                     f"[CloudBuild] Recovered missing download key: {download_key}"
@@ -1611,35 +1612,19 @@ async def get_build_status(
                             )
                             continue
 
+                    # If still not found, use GCS listing
                     if not download_key:
-                        try:
-                            from google.cloud import storage as gcs_storage
-                            from config import GCS_BUILDS_BUCKET
-
-                            gcs_client = gcs_storage.Client()
-                            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
-                            prefix = f"builds/{build_id}/{art['platform']}/"
-
-                            blobs = list(
-                                bucket.list_blobs(prefix=prefix, max_results=10)
+                        found = find_artifact_in_gcs(build_id, art["platform"])
+                        if found:
+                            download_key, filename = found
+                            logger.info(
+                                f"[CloudBuild] Found artifact via GCS listing: {download_key}"
                             )
-                            for blob in blobs:
-                                if blob.name.endswith((".zip", ".exe", ".tar.gz")):
-                                    download_key = blob.name
-                                    filename = blob.name.split("/")[-1]
-                                    logger.info(
-                                        f"[CloudBuild] Found artifact via GCS listing: {download_key}"
-                                    )
-                                    await conn.execute(
-                                        "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2, status = 'completed' WHERE id = $3",
-                                        download_key,
-                                        filename,
-                                        art["id"],
-                                    )
-                                    break
-                        except Exception as list_error:
-                            logger.warning(
-                                f"[CloudBuild] GCS listing failed: {list_error}"
+                            await conn.execute(
+                                "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2, status = 'completed' WHERE id = $3",
+                                download_key,
+                                filename,
+                                art["id"],
                             )
 
             if art["status"] == "completed" and download_key:
@@ -1824,44 +1809,31 @@ async def sync_build_status(
                             """UPDATE cloud_build_artifacts 
                                SET status = 'completed', completed_at = NOW() 
                                WHERE id = $1""",
-                            art["id"],
+art["id"],
                         )
                         logger.info(
                             f"[CloudBuild] Sync marked artifact {art['platform']} as completed"
                         )
 
                     if not art["download_key"]:
-                        # Determine possible filenames based on platform
-                        possible_filenames = []
-
-                        if art["platform"] == "windows":
-                            # Onefile mode: single self-contained EXE (prioritize this)
-                            possible_filenames.append(f"{output_name}.exe")
-                            # Fallback: zip file with DLLs (standalone mode)
-                            possible_filenames.append(f"{output_name}-windows.zip")
-                            possible_filenames.append(f"{output_name}.zip")
-                        elif art["platform"] == "linux":
-                            # Onefile mode: single binary
-                            possible_filenames.append(f"{output_name}")
-                            # Fallback: tar.gz
-                            possible_filenames.append(f"{output_name}-linux.tar.gz")
-                            possible_filenames.append(f"{output_name}.tar.gz")
-                        else:
-                            possible_filenames.append(
-                                f"{output_name}-{art['platform']}.zip"
-                            )
-
-                        # Generic fallbacks
-                        possible_filenames.append(f"{art['platform']}_build.zip")
-                        possible_filenames.append(f"{build_id}_{art['platform']}.zip")
+                        # Use the new priority-based filename detection
+                        from routes.cloud_build_utils import (
+                            get_artifact_filename_priority,
+                            find_artifact_in_gcs,
+                            check_gcs_blob_exists,
+                        )
+                        
+                        language = build.get("language") or "python"
+                        possible_filenames = get_artifact_filename_priority(
+                            art["platform"], language, output_name
+                        )
 
                         for filename_guess in possible_filenames:
                             guessed_key = (
                                 f"builds/{build_id}/{art['platform']}/{filename_guess}"
                             )
                             try:
-                                test_url = generate_gcs_signed_url(guessed_key)
-                                if test_url:
+                                if check_gcs_blob_exists(guessed_key):
                                     await conn.execute(
                                         "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
                                         guessed_key,
@@ -1876,32 +1848,17 @@ async def sync_build_status(
                                 continue
 
                         if not art.get("download_key"):
-                            try:
-                                from google.cloud import storage as gcs_storage
-                                from config import GCS_BUILDS_BUCKET
-
-                                gcs_client = gcs_storage.Client()
-                                bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
-                                prefix = f"builds/{build_id}/{art['platform']}/"
-
-                                blobs = list(
-                                    bucket.list_blobs(prefix=prefix, max_results=10)
+                            found = find_artifact_in_gcs(build_id, art["platform"])
+                            if found:
+                                download_key, filename = found
+                                await conn.execute(
+                                    "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                    download_key,
+                                    filename,
+                                    art["id"],
                                 )
-                                for blob in blobs:
-                                    if blob.name.endswith((".zip", ".exe", ".tar.gz")):
-                                        await conn.execute(
-                                            "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
-                                            blob.name,
-                                            blob.name.split("/")[-1],
-                                            art["id"],
-                                        )
-                                        logger.info(
-                                            f"[CloudBuild] Sync found artifact via GCS listing: {blob.name}"
-                                        )
-                                        break
-                            except Exception as list_err:
-                                logger.warning(
-                                    f"[CloudBuild] GCS listing failed: {list_err}"
+                                logger.info(
+                                    f"[CloudBuild] Sync found artifact via GCS listing: {download_key}"
                                 )
 
             logger.info(

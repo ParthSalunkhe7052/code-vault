@@ -5,7 +5,7 @@
 # Supports multi-platform builds: Windows, Linux
 
 substitutions:
-  _CALLBACK_URL: 'https://api.codevault.parth7.me/api/v1/cloud-build/webhook'
+  _CALLBACK_URL: 'https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook'
   _CALLBACK_SECRET: ''
   _TARGET_PLATFORMS: 'linux,windows'
   _LANGUAGE: 'python'

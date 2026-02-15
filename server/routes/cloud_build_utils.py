@@ -10,7 +10,7 @@ import hmac
 import hashlib
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 from datetime import timedelta
 
 from fastapi import HTTPException
@@ -43,12 +43,10 @@ def validate_safe_path(base_dir: Path, user_input: str) -> Path:
 
 def get_gcs_client_with_credentials():
     """Get GCS client with proper credentials (same as CloudBuildClient)."""
-    import os
     import json
     from google.cloud import storage as gcs_storage
     from google.oauth2 import service_account
 
-    # Try service account JSON from environment (best for Heroku)
     service_account_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
     if service_account_json:
         try:
@@ -62,7 +60,6 @@ def get_gcs_client_with_credentials():
                 f"[CloudBuild] Failed to use GCP_SERVICE_ACCOUNT_JSON for GCS: {e}"
             )
 
-    # Try service account file
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if credentials_path and os.path.exists(credentials_path):
         try:
@@ -74,7 +71,6 @@ def get_gcs_client_with_credentials():
         except Exception as e:
             logger.warning(f"[CloudBuild] Failed to use credentials file for GCS: {e}")
 
-    # Fall back to default client
     try:
         return gcs_storage.Client(), None
     except Exception as e:
@@ -82,12 +78,120 @@ def get_gcs_client_with_credentials():
         return None, None
 
 
-def generate_gcs_signed_url(download_key: str) -> Optional[str]:
+def check_gcs_blob_exists(download_key: str) -> bool:
+    """Check if a blob exists in GCS before generating signed URL."""
+    try:
+        from config import GCS_BUILDS_BUCKET
+
+        gcs_client, _ = get_gcs_client_with_credentials()
+        if not gcs_client:
+            return False
+
+        bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+        blob = bucket.blob(download_key)
+        return blob.exists()
+    except Exception as e:
+        logger.debug(
+            f"[CloudBuild] Blob existence check failed for {download_key}: {e}"
+        )
+        return False
+
+
+def find_artifact_in_gcs(build_id: str, platform: str) -> Optional[Tuple[str, str]]:
+    """Find artifact in GCS by listing the build directory.
+
+    Returns:
+        Tuple of (download_key, filename) or None if not found.
+    """
+    try:
+        from config import GCS_BUILDS_BUCKET
+
+        gcs_client, _ = get_gcs_client_with_credentials()
+        if not gcs_client:
+            return None
+
+        bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+        prefix = f"builds/{build_id}/{platform}/"
+
+        blobs = list(bucket.list_blobs(prefix=prefix, max_results=20))
+
+        # Priority order for different artifact types
+        extensions_priority = [".exe", ".zip", ".tar.gz", ""]
+
+        for ext in extensions_priority:
+            for blob in blobs:
+                name = blob.name
+                if name == prefix:
+                    continue
+                if ext and name.endswith(ext):
+                    filename = name.split("/")[-1]
+                    logger.info(f"[CloudBuild] Found artifact in GCS: {name}")
+                    return name, filename
+                elif not ext and not name.endswith("/"):
+                    filename = name.split("/")[-1]
+                    if "." not in filename or filename.endswith(
+                        (".exe", ".zip", ".tar.gz")
+                    ):
+                        logger.info(f"[CloudBuild] Found artifact in GCS: {name}")
+                        return name, filename
+
+        logger.warning(f"[CloudBuild] No artifact found in GCS at {prefix}")
+        return None
+    except Exception as e:
+        logger.error(f"[CloudBuild] GCS listing failed: {e}")
+        return None
+
+
+def get_artifact_filename_priority(
+    platform: str, language: str, output_name: str
+) -> List[str]:
+    """Get prioritized list of possible artifact filenames.
+
+    Order based on:
+    - Language (nodejs -> exe, python -> check both)
+    - Platform (windows -> exe/zip, linux -> binary/tar.gz)
+    - Build type (onefile is now default)
+    """
+    filenames = []
+
+    if platform == "windows":
+        # Node.js always produces .exe
+        if language == "nodejs":
+            filenames.append(f"{output_name}.exe")
+        else:
+            # Python: prioritize onefile (.exe) over standalone (.zip)
+            filenames.append(f"{output_name}.exe")
+            filenames.append(f"{output_name}-windows.zip")
+            filenames.append(f"{output_name}.zip")
+    elif platform == "linux":
+        # Prioritize onefile binary over tar.gz
+        filenames.append(f"{output_name}")
+        filenames.append(f"{output_name}-linux.tar.gz")
+        filenames.append(f"{output_name}.tar.gz")
+    elif platform == "macos":
+        filenames.append(f"{output_name}")
+        filenames.append(f"{output_name}-macos.zip")
+        filenames.append(f"{output_name}.zip")
+
+    # Generic fallbacks
+    filenames.append(f"{platform}_build.zip")
+    filenames.append(f"{platform}_build.exe")
+
+    return filenames
+
+
+def generate_gcs_signed_url(
+    download_key: str, verify_exists: bool = True
+) -> Optional[str]:
     """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions).
 
     Priority:
     1. Try GCS first (for Cloud Build artifacts)
     2. Fallback to R2 (for GitHub Actions artifacts)
+
+    Args:
+        download_key: The GCS/R2 object key
+        verify_exists: If True, verify blob exists before generating URL
 
     Returns signed URL valid for 1 hour, or None if generation fails.
     """
@@ -104,8 +208,12 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
         bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
         blob = bucket.blob(download_key)
 
-        # Check if blob exists - use signed URL generation directly for reliability
-        # blob.exists() can fail silently with wrong credentials
+        # Verify blob exists if requested
+        if verify_exists:
+            if not blob.exists():
+                logger.warning(f"[CloudBuild] Blob does not exist: {download_key}")
+                return None
+
         try:
             signed_url = blob.generate_signed_url(
                 version="v4",
@@ -115,7 +223,6 @@ def generate_gcs_signed_url(download_key: str) -> Optional[str]:
             logger.info(f"[CloudBuild] Generated GCS signed URL for {download_key}")
             return signed_url
         except Exception as sign_error:
-            # If signing fails, blob might not exist or credentials issue
             logger.debug(
                 f"[CloudBuild] Signed URL generation failed for {download_key}: {sign_error}"
             )
