@@ -38,42 +38,40 @@ const MultiPlatformBuildStatus = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [retrying, setRetrying] = useState(false);
+const [retrying, setRetrying] = useState(false);
   const pollIntervalRef = useRef(null);
+
+  const fetchStatus = async (forceSync = false) => {
+    try {
+      const isRunning = buildStatus?.status && ['pending', 'queued', 'running'].includes(buildStatus.status);
+      const data = await cloudBuild.getStatus(buildId, isRunning || forceSync);
+      setBuildStatus(data);
+      setArtifacts(data.artifacts || []);
+      setLoading(false);
+      setError(null);
+
+      const allDone = (data.artifacts || []).every(
+        a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
+      );
+      
+      if (allDone && onAllComplete) {
+        onAllComplete(data.artifacts);
+      }
+      
+      return allDone || data.status === 'cancelled';
+    } catch (err) {
+      console.error('Failed to fetch build status:', err);
+      setError('Failed to fetch build status');
+      setLoading(false);
+      return true;
+    }
+  };
 
   useEffect(() => {
     if (!buildId) return;
 
-    const fetchStatus = async () => {
-      try {
-        const data = await cloudBuild.getStatus(buildId);
-        setBuildStatus(data);
-        setArtifacts(data.artifacts || []);
-        setLoading(false);
-        setError(null);
-
-        // Check if all done
-        const allDone = (data.artifacts || []).every(
-          a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
-        );
-        
-        if (allDone && onAllComplete) {
-          onAllComplete(data.artifacts);
-        }
-        
-        return allDone || data.status === 'cancelled';
-      } catch (err) {
-        console.error('Failed to fetch build status:', err);
-        setError('Failed to fetch build status');
-        setLoading(false);
-        return true; // Stop polling on error
-      }
-    };
-
-    // Initial fetch
     fetchStatus();
 
-    // Set up polling if autoRefresh is enabled
     if (autoRefresh) {
       const poll = async () => {
         const done = await fetchStatus();
@@ -94,7 +92,7 @@ const MultiPlatformBuildStatus = ({
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const data = await cloudBuild.getStatus(buildId);
+      const data = await cloudBuild.getStatus(buildId, true);
       setBuildStatus(data);
       setArtifacts(data.artifacts || []);
       setError(null);

@@ -44,6 +44,12 @@ steps:
           mkdir -p /workspace/.ccache
           tar -xzf /tmp/ccache.tar.gz -C /workspace/.ccache 2>/dev/null || true
         fi
+        if gsutil -q stat "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" 2>/dev/null; then
+          echo "[Cloud Build] Restoring Nuitka cache..."
+          gsutil cp "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz" /tmp/nuitka-cache.tar.gz
+          mkdir -p /workspace/.nuitka-cache
+          tar -xzf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache 2>/dev/null || true
+        fi
         echo "[Cloud Build] Cache restore complete"
     waitFor: ['-']
 
@@ -118,6 +124,12 @@ steps:
         mkdir -p $$CCACHE_DIR
         export PATH="/usr/lib/ccache:$$PATH"
 
+        # Restore Nuitka cache if exists
+        if [ -d /workspace/.nuitka-cache ]; then
+          echo "[Cloud Build] Restoring Nuitka cache..."
+          export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
+        fi
+
         pip install --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography
 
         if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
@@ -163,6 +175,12 @@ steps:
         echo "$$linux_status" > /workspace/build_status_linux
         echo "$$linux_artifacts" > /workspace/linux_artifacts
         echo "$$linux_error" > /workspace/linux_error
+        
+        # Save Nuitka cache
+        if [ -d "$$HOME/.cache/nuitka" ]; then
+          mkdir -p /workspace/.nuitka-cache
+          cp -r $$HOME/.cache/nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
+        fi
     waitFor: ['download-config']
     volumes:
       - name: 'artifacts'
@@ -338,6 +356,14 @@ steps:
             gsutil cp /tmp/ccache.tar.gz "gs://${_GCS_BUCKET}/cache/ccache-default.tar.gz"
           fi
         fi
+        if [ -d /workspace/.nuitka-cache ]; then
+          nuitka_cache_size=$$(du -s /workspace/.nuitka-cache 2>/dev/null | cut -f1)
+          if [ "$$nuitka_cache_size" -gt 1000 ]; then
+            tar -czf /tmp/nuitka-cache.tar.gz -C /workspace/.nuitka-cache . 2>/dev/null
+            gsutil cp /tmp/nuitka-cache.tar.gz "gs://${_GCS_BUCKET}/cache/nuitka-cache-default.tar.gz"
+            echo "[Cloud Build] Saved Nuitka cache ($$nuitka_cache_size KB)"
+          fi
+        fi
     waitFor: ['upload-linux', 'upload-windows', 'build-nodejs']
 
   - name: 'gcr.io/cloud-builders/curl'
@@ -411,31 +437,25 @@ steps:
         echo "[Cloud Build] Sending webhook to: ${_CALLBACK_URL}"
         echo "[Cloud Build] Payload: $$payload"
 
-        # Test connectivity first
-        echo "[Cloud Build] Testing connectivity..."
-        curl -v --connect-timeout 10 "${_CALLBACK_URL}" 2>&1 | head -20 || true
-
-        max_retries=5
-        retry_delay=5
+        max_retries=2
+        retry_delay=2
         for i in $$(seq 1 $$max_retries); do
           echo "[Cloud Build] Attempt $$i/$$max_retries..."
 
-          # Use verbose output for debugging
           if [ -n "$$sig" ]; then
-            response=$$(curl -v -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
+            response=$$(curl -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
               -H "Content-Type: application/json" \
               -H "X-Signature: $$sig" \
-              -d "$$payload" 2>&1)
+              -d "$$payload" --connect-timeout 5 --max-time 10 2>&1)
           else
-            response=$$(curl -v -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
+            response=$$(curl -s -w "\n%{http_code}" -X POST "${_CALLBACK_URL}" \
               -H "Content-Type: application/json" \
-              -d "$$payload" 2>&1)
+              -d "$$payload" --connect-timeout 5 --max-time 10 2>&1)
           fi
 
           http_code=$$(echo "$$response" | tail -1)
-          body=$$(echo "$$response" | head -n -1)
 
-          echo "[Cloud Build] Response: $$response"
+          echo "[Cloud Build] Response: HTTP $$http_code"
 
           if [[ "$$http_code" == "200" || "$$http_code" == "201" ]]; then
             echo "[Cloud Build] Success (HTTP $$http_code)"
@@ -445,7 +465,7 @@ steps:
             if [[ $$i -lt $$max_retries ]]; then
               echo "[Cloud Build] Retrying in $${retry_delay}s..."
               sleep $$retry_delay
-              retry_delay=$$((retry_delay * 2))
+              retry_delay=$$((retry_delay + 2))
             fi
           fi
         done

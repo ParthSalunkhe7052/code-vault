@@ -273,9 +273,9 @@ export const cloudBuild = {
     start: (projectId: string, data: any = {}): Promise<{ job_id: string; status: string }> => 
         api.post('/cloud-build/start', { project_id: projectId, ...data }).then(res => res.data),
     
-    // Get build status with stage progress
-    getStatus: (buildId: string): Promise<any> => 
-        api.get(`/cloud-build/${buildId}/status`).then(res => res.data),
+    // Get build status with stage progress (sync=true syncs with GCP for running builds)
+    getStatus: (buildId: string, sync: boolean = false): Promise<any> => 
+        api.get(`/cloud-build/${buildId}/status`, { params: sync ? { sync: true } : {} }).then(res => res.data),
     
     // Cancel a running build
     cancel: (buildId: string): Promise<{ success: boolean }> => 
