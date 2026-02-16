@@ -726,6 +726,9 @@ async function _cv_wrapMain(mainFn) {{
                     continue
                 if js_file.name.startswith("."):
                     continue
+                # Exclude .github directory (contains build scripts, not source JS)
+                if ".github" in str(js_file):
+                    continue
                 js_files.append(js_file)
 
             if not js_files:

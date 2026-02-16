@@ -1632,10 +1632,19 @@ async def get_build_status(
             download_url = None
             download_key = art["download_key"]
 
+            # Also check build-level download_key as fallback
+            build_download_key = build.get("download_key")
+
             if (
                 art["status"] in ["completed", "pending", "running"]
                 and not download_key
             ):
+                # Try build-level download_key first as fallback
+                if build_download_key and art["platform"] in build_download_key:
+                    download_key = build_download_key
+                    logger.info(
+                        f"[CloudBuild] Using build-level download_key for {art['platform']}: {download_key}"
+                    )
                 if build["status"] == "completed" or art["status"] == "completed":
                     output_name = build.get("output_name") or "app"
 
@@ -1703,6 +1712,57 @@ async def get_build_status(
                                 filename,
                                 art["id"],
                             )
+
+            if art["status"] == "completed" and not download_key:
+                # Even if status is completed, if there's no download_key, try to recover it
+                logger.info(
+                    f"[CloudBuild] Artifact {art['platform']} is completed but missing download_key, attempting recovery"
+                )
+                output_name = build.get("output_name") or "app"
+
+                from routes.cloud_build_utils import (
+                    get_artifact_filename_priority,
+                    find_artifact_in_gcs,
+                    check_gcs_blob_exists,
+                )
+
+                possible_filenames = get_artifact_filename_priority(
+                    art["platform"], language, output_name
+                )
+
+                for filename_guess in possible_filenames:
+                    guessed_key = (
+                        f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                    )
+                    try:
+                        if check_gcs_blob_exists(guessed_key):
+                            download_key = guessed_key
+                            logger.info(
+                                f"[CloudBuild] Recovered download key: {download_key}"
+                            )
+                            await conn.execute(
+                                "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                download_key,
+                                filename_guess,
+                                art["id"],
+                            )
+                            break
+                    except Exception:
+                        continue
+
+                if not download_key:
+                    found = find_artifact_in_gcs(build_id, art["platform"])
+                    if found:
+                        download_key, filename = found
+                        logger.info(
+                            f"[CloudBuild] Found via GCS listing: {download_key}"
+                        )
+                        await conn.execute(
+                            "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                            download_key,
+                            filename,
+                            art["id"],
+                        )
 
             if art["status"] == "completed" and download_key:
                 download_url = generate_gcs_signed_url(download_key)

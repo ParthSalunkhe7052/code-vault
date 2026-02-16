@@ -132,7 +132,14 @@ steps:
       - '-c'
       - |
         set -e
-        if [[ "${_TARGET_PLATFORMS}" != *"linux"* || "${_LANGUAGE}" != "python" ]]; then
+        # Check language FIRST - skip entire Python build for non-Python projects
+        if [[ "${_LANGUAGE}" != "python" ]]; then
+          echo "[Cloud Build] Skipping Linux build (not a Python project)"
+          echo "skipped" > /workspace/artifacts/build_status_linux
+          exit 0
+        fi
+        
+        if [[ "${_TARGET_PLATFORMS}" != *"linux"* ]]; then
           echo "[Cloud Build] Skipping Linux build"
           echo "skipped" > /workspace/artifacts/build_status_linux
           exit 0
@@ -269,7 +276,14 @@ steps:
       - '-c'
       - |
         set -e
-        if [[ "${_TARGET_PLATFORMS}" != *"windows"* || "${_LANGUAGE}" != "python" ]]; then
+        # Check language FIRST - skip entire Python build for non-Python projects
+        if [[ "${_LANGUAGE}" != "python" ]]; then
+          echo "[Cloud Build] Skipping Windows build (not a Python project)"
+          echo "skipped" > /workspace/artifacts/build_status_windows
+          exit 0
+        fi
+        
+        if [[ "${_TARGET_PLATFORMS}" != *"windows"* ]]; then
           echo "[Cloud Build] Skipping Windows build"
           echo "skipped" > /workspace/artifacts/build_status_windows
           exit 0
