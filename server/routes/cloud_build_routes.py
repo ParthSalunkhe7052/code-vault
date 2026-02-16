@@ -79,6 +79,12 @@ class CloudBuildWebhookPayload(BaseModel):
     download_url: Optional[str] = Field(None, max_length=1000)
     linux_download_key: Optional[str] = Field(None, max_length=500)
     windows_download_key: Optional[str] = Field(None, max_length=500)
+    linux_status: Optional[str] = Field(
+        None, pattern=r"^(pending|queued|running|completed|failed|cancelled|skipped)$"
+    )
+    windows_status: Optional[str] = Field(
+        None, pattern=r"^(pending|queued|running|completed|failed|cancelled|skipped)$"
+    )
     filename: Optional[str] = Field(None, max_length=255)
     error: Optional[str] = Field(None, max_length=2000)
     progress: Optional[int] = Field(None, ge=0, le=100)
@@ -1029,6 +1035,8 @@ async def build_webhook(request: Request):
     download_key = payload.download_key
     filename = payload.filename
     error = payload.error
+    linux_status = payload.linux_status
+    windows_status = payload.windows_status
 
     # Generate event ID for idempotency
     event_id = generate_webhook_event_id(build_id, platform, status)
@@ -1093,9 +1101,72 @@ async def build_webhook(request: Request):
                     platform,
                 )
 
+            # Update individual artifacts with download keys from overall callback
+            # This handles the case where webhook sends both linux_download_key and windows_download_key
+            if not platform:
+                if linux_download_key:
+                    linux_filename = linux_download_key.split("/")[-1]
+                    linux_artifact_status = linux_status or "completed"
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, download_key = $2, download_filename = $3, 
+                            completed_at = NOW()
+                        WHERE build_id = $4 AND platform = 'linux' AND status IN ('pending', 'running', 'completed')
+                        """,
+                        linux_artifact_status,
+                        linux_download_key,
+                        linux_filename,
+                        build_id,
+                    )
+                    logger.info(
+                        f"[CloudBuild] Updated Linux artifact with key: {linux_download_key}, status: {linux_artifact_status}"
+                    )
+                elif linux_status:
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, error_message = $2, completed_at = NOW()
+                        WHERE build_id = $3 AND platform = 'linux' AND status IN ('pending', 'running')
+                        """,
+                        linux_status,
+                        error if linux_status == "failed" else None,
+                        build_id,
+                    )
+
+                if windows_download_key:
+                    windows_filename = windows_download_key.split("/")[-1]
+                    windows_artifact_status = windows_status or "completed"
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, download_key = $2, download_filename = $3, 
+                            completed_at = NOW()
+                        WHERE build_id = $4 AND platform = 'windows' AND status IN ('pending', 'running', 'completed')
+                        """,
+                        windows_artifact_status,
+                        windows_download_key,
+                        windows_filename,
+                        build_id,
+                    )
+                    logger.info(
+                        f"[CloudBuild] Updated Windows artifact with key: {windows_download_key}, status: {windows_artifact_status}"
+                    )
+                elif windows_status:
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, error_message = $2, completed_at = NOW()
+                        WHERE build_id = $3 AND platform = 'windows' AND status IN ('pending', 'running')
+                        """,
+                        windows_status,
+                        error if windows_status == "failed" else None,
+                        build_id,
+                    )
+
             # Overall callbacks may omit per-platform statuses (for unsupported targets),
             # so mark remaining in-flight artifacts terminal based on overall result.
-            if not platform and status in ["completed", "failed", "cancelled"]:
+            if not platform and status in ["failed", "cancelled"]:
                 fallback_status = "cancelled" if status == "cancelled" else "failed"
                 fallback_error = None
                 if fallback_status == "failed":
@@ -1809,7 +1880,7 @@ async def sync_build_status(
                             """UPDATE cloud_build_artifacts 
                                SET status = 'completed', completed_at = NOW() 
                                WHERE id = $1""",
-art["id"],
+                            art["id"],
                         )
                         logger.info(
                             f"[CloudBuild] Sync marked artifact {art['platform']} as completed"
@@ -1822,7 +1893,7 @@ art["id"],
                             find_artifact_in_gcs,
                             check_gcs_blob_exists,
                         )
-                        
+
                         language = build.get("language") or "python"
                         possible_filenames = get_artifact_filename_priority(
                             art["platform"], language, output_name

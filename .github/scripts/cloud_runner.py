@@ -50,6 +50,8 @@ _CV_PUBLIC_KEY = """{public_key}"""
 _CV_BINARY_HASH = "{binary_hash}"
 _CV_HEARTBEAT_INTERVAL = {heartbeat_interval}
 _CV_APP_NAME = "{app_name}"
+_CV_LEASE_ENABLED = {lease_enabled}
+_CV_SHOW_BRANDING = {show_branding}
 
 # Lease configuration
 _CV_LEASE_DURATION = 24 * 60 * 60  # 24 hours
@@ -363,6 +365,8 @@ def _cv_create_lease(license_key, hwid, server_time, duration=_CV_LEASE_DURATION
 
 def _cv_save_lease(lease_data):
     """Save encrypted lease to file using atomic write."""
+    if not _CV_LEASE_ENABLED:
+        return False
     try:
         lease_path = _cv_get_lease_path()
         encrypted = _cv_encrypt_lease(lease_data)
@@ -389,6 +393,8 @@ def _cv_save_lease(lease_data):
 
 def _cv_load_lease():
     """Load and decrypt lease from file."""
+    if not _CV_LEASE_ENABLED:
+        return None
     try:
         lease_path = _cv_get_lease_path()
         if _cv_os.path.exists(lease_path):
@@ -855,11 +861,11 @@ class CloudRunner:
         public_key = self.config.get("signing_public_key") or self.config.get(
             "public_key", ""
         )
-        binary_hash = self.config.get("binary_hash", "skip")  # Skip if not computed yet
-        heartbeat_interval = self.config.get(
-            "heartbeat_interval", 300
-        )  # 5 minutes default
+        binary_hash = self.config.get("binary_hash", "skip")
+        heartbeat_interval = self.config.get("heartbeat_interval", 300)
         app_name = self.config.get("app_name", "Protected Application")
+        lease_enabled = self.config.get("lease_enabled", True)
+        show_branding = self.config.get("show_branding", True)
 
         if license_key == "demo":
             wrapper = PYTHON_DEMO_WRAPPER
@@ -871,6 +877,8 @@ class CloudRunner:
                 .replace("{binary_hash}", binary_hash)
                 .replace("{heartbeat_interval}", str(heartbeat_interval))
                 .replace("{app_name}", app_name)
+                .replace("{lease_enabled}", "True" if lease_enabled else "False")
+                .replace("{show_branding}", "True" if show_branding else "False")
             )
 
         entry_path.write_text(wrapper + "\n\n" + original_code, encoding="utf-8")

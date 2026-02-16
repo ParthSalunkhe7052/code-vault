@@ -19,7 +19,7 @@ FROM python:3.11-slim
 
 LABEL maintainer="CodeVault Team"
 LABEL description="Pre-built image for CodeVault Cloud Build with Nuitka and dependencies"
-LABEL version="2.0"
+LABEL version="3.0"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -29,6 +29,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 
 # Install system dependencies in single layer
+# Note: python3-dev is needed for compiling C extensions (use python3-full for better compatibility)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     patchelf \
     build-essential \
@@ -37,10 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     zip \
     tar \
+    python3-tk \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 # Pre-install Python build dependencies (major time saver)
+# Pinning Nuitka to 2.4.8 for stability
 RUN pip install --no-cache-dir \
     nuitka==2.4.8 \
     ordered-set \

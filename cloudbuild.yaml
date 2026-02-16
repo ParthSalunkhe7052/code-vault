@@ -453,29 +453,66 @@ steps:
         echo "[Cloud Build] Artifacts directory contents:"
         ls -la /workspace/artifacts/ 2>/dev/null || echo "Artifacts directory empty or not found"
         
+        # Parse target platforms from config
+        target_platforms=$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
+        echo "[Cloud Build] Target platforms: $target_platforms"
+        
         # Find and copy Windows artifact
-        if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
-          cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
-          echo "completed" > /workspace/build_status_windows
-          echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
-          echo "[Cloud Build] Found artifact in build_output_windows"
-        elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
-          echo "completed" > /workspace/build_status_windows
-          echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
-          echo "[Cloud Build] Found artifact in /workspace/artifacts"
-        else
-          # Search for any exe
-          found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
-          if [ -n "$found_exe" ]; then
-            cp "$found_exe" /workspace/artifacts/
+        if [[ "$target_platforms" == *"windows"* ]]; then
+          if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
+            cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
             echo "completed" > /workspace/build_status_windows
-            echo "$(basename $found_exe)" > /workspace/windows_artifacts
-            echo "[Cloud Build] Found artifact via search: $found_exe"
+            echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+            echo "[Cloud Build] Found Windows artifact in build_output_windows"
+          elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
+            echo "completed" > /workspace/build_status_windows
+            echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+            echo "[Cloud Build] Found Windows artifact in /workspace/artifacts"
           else
-            echo "failed" > /workspace/build_status_windows
-            echo "Node.js build output not found" > /workspace/windows_error
-            echo "[Cloud Build] ERROR: No exe file found anywhere!"
+            # Search for any exe
+            found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
+            if [ -n "$found_exe" ]; then
+              cp "$found_exe" /workspace/artifacts/
+              echo "completed" > /workspace/build_status_windows
+              echo "$(basename $found_exe)" > /workspace/windows_artifacts
+              echo "[Cloud Build] Found Windows artifact via search: $found_exe"
+            else
+              echo "failed" > /workspace/build_status_windows
+              echo "Node.js Windows build output not found" > /workspace/windows_error
+              echo "[Cloud Build] ERROR: No Windows exe file found anywhere!"
+            fi
           fi
+        else
+          echo "skipped" > /workspace/build_status_windows
+          echo "[Cloud Build] Windows build skipped (not in target platforms)"
+        fi
+        
+        # Find and copy Linux artifact
+        if [[ "$target_platforms" == *"linux"* ]]; then
+          if [ -f "build_output_linux/${_OUTPUT_NAME}" ]; then
+            cp "build_output_linux/${_OUTPUT_NAME}" /workspace/artifacts/
+            chmod +x "/workspace/artifacts/${_OUTPUT_NAME}"
+            echo "completed" > /workspace/build_status_linux
+            echo "${_OUTPUT_NAME}" > /workspace/linux_artifacts
+            echo "[Cloud Build] Found Linux artifact in build_output_linux"
+          else
+            # Search for any linux binary
+            found_linux=$(find ./build_output_linux -type f -executable 2>/dev/null | head -1)
+            if [ -n "$found_linux" ]; then
+              cp "$found_linux" /workspace/artifacts/
+              chmod +x "/workspace/artifacts/$(basename $found_linux)"
+              echo "completed" > /workspace/build_status_linux
+              echo "$(basename $found_linux)" > /workspace/linux_artifacts
+              echo "[Cloud Build] Found Linux artifact via search: $found_linux"
+            else
+              echo "failed" > /workspace/build_status_linux
+              echo "Node.js Linux build output not found" > /workspace/linux_error
+              echo "[Cloud Build] ERROR: No Linux binary found!"
+            fi
+          fi
+        else
+          echo "skipped" > /workspace/build_status_linux
+          echo "[Cloud Build] Linux build skipped (not in target platforms)"
         fi
         
         echo "[Cloud Build] Node.js build step complete"
@@ -496,15 +533,41 @@ steps:
         fi
         windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
         if [[ "$$windows_status" != "completed" ]]; then
-          echo "[Cloud Build] Skipping Node.js upload (status: $$windows_status)"
+          echo "[Cloud Build] Skipping Node.js Windows upload (status: $$windows_status)"
           exit 0
         fi
         windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
         if [ -z "$$windows_artifact" ]; then
           exit 0
         fi
-        echo "[Cloud Build] Uploading Node.js artifact: $$windows_artifact"
+        echo "[Cloud Build] Uploading Node.js Windows artifact: $$windows_artifact"
         gsutil cp "/workspace/artifacts/$$windows_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/windows/$$windows_artifact"
+    waitFor: ['build-nodejs']
+    volumes:
+      - name: 'artifacts'
+        path: '/workspace/artifacts'
+
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-nodejs-linux'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Only run if this is a Node.js build
+        if [[ "${_LANGUAGE}" != "nodejs" ]]; then
+          exit 0
+        fi
+        linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+        if [[ "$$linux_status" != "completed" ]]; then
+          echo "[Cloud Build] Skipping Node.js Linux upload (status: $$linux_status)"
+          exit 0
+        fi
+        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+        if [ -z "$$linux_artifact" ]; then
+          exit 0
+        fi
+        echo "[Cloud Build] Uploading Node.js Linux artifact: $$linux_artifact"
+        gsutil cp "/workspace/artifacts/$$linux_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$$linux_artifact"
     waitFor: ['build-nodejs']
     volumes:
       - name: 'artifacts'
@@ -553,7 +616,7 @@ steps:
         echo "[Cloud Build] Skipping Nuitka cache save (disabled to prevent slow builds)"
         
         echo "[Cloud Build] Cache save complete"
-    waitFor: ['upload-linux', 'upload-windows', 'upload-nodejs']
+    waitFor: ['upload-linux', 'upload-windows', 'upload-nodejs', 'upload-nodejs-linux']
 
   - name: 'gcr.io/cloud-builders/curl'
     id: 'webhook-callback'

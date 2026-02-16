@@ -1,16 +1,19 @@
 """Python license wrapper generator using unified template."""
 
-from templates.unified_license_wrapper import get_license_wrapper as _get_unified_wrapper
+from templates.unified_license_wrapper import (
+    get_license_wrapper as _get_unified_wrapper,
+)
 from validators import (
     validate_license_key as _validate_license_key,
     validate_server_url as _validate_server_url,
-    ValidationError
+    ValidationError,
 )
 
 
 # Backward compatibility alias - needed for tests
 class WrapperGenerationError(ValidationError):
     """Legacy alias for ValidationError - used by external code."""
+
     pass
 
 
@@ -37,7 +40,8 @@ def get_python_wrapper(
     lease_enabled: bool = True,
     show_branding: bool = True,
     public_key: str = "",
-    heartbeat_interval: int = 300
+    binary_hash: str = "skip",
+    heartbeat_interval: int = 300,
 ) -> str:
     """
     Get Python license wrapper code using unified template.
@@ -49,6 +53,7 @@ def get_python_wrapper(
         lease_enabled: Whether offline lease mode is enabled (default: True)
         show_branding: Whether to show CodeVault branding (default: True for free tier)
         public_key: Ed25519 public key PEM for signature verification
+        binary_hash: SHA-256 hash of binary for integrity checking (default: "skip")
         heartbeat_interval: Interval in seconds for background heartbeat (default: 300)
 
     Returns:
@@ -60,14 +65,15 @@ def get_python_wrapper(
     # Validate inputs
     validated_license_key = validate_license_key(license_key)
     validated_server_url = validate_server_url(server_url)
-    
+
     # Use unified template
     return _get_unified_wrapper(
         license_key=validated_license_key,
         server_url=validated_server_url,
         lease_enabled=lease_enabled,
         public_key=public_key,
+        binary_hash=binary_hash,
         heartbeat_interval=heartbeat_interval,
         app_name="Protected Application",
-        show_branding=show_branding
+        show_branding=show_branding,
     )

@@ -148,32 +148,35 @@ def get_artifact_filename_priority(
     """Get prioritized list of possible artifact filenames.
 
     Order based on:
-    - Language (nodejs -> exe, python -> check both)
-    - Platform (windows -> exe/zip, linux -> binary/tar.gz)
+    - Language (nodejs -> exe/binary, python -> exe/tar.gz)
+    - Platform (windows -> exe, linux -> binary/tar.gz)
     - Build type (onefile is now default)
     """
     filenames = []
 
     if platform == "windows":
-        # Node.js always produces .exe
         if language == "nodejs":
             filenames.append(f"{output_name}.exe")
         else:
-            # Python: prioritize onefile (.exe) over standalone (.zip)
             filenames.append(f"{output_name}.exe")
             filenames.append(f"{output_name}-windows.zip")
             filenames.append(f"{output_name}.zip")
     elif platform == "linux":
-        # Prioritize onefile binary over tar.gz
-        filenames.append(f"{output_name}")
-        filenames.append(f"{output_name}-linux.tar.gz")
-        filenames.append(f"{output_name}.tar.gz")
+        if language == "nodejs":
+            filenames.append(f"{output_name}")
+            filenames.append(f"{output_name}.bin")
+        else:
+            filenames.append(f"{output_name}.tar.gz")
+            filenames.append(f"{output_name}-linux.tar.gz")
+            filenames.append(f"{output_name}")
     elif platform == "macos":
-        filenames.append(f"{output_name}")
-        filenames.append(f"{output_name}-macos.zip")
-        filenames.append(f"{output_name}.zip")
+        if language == "nodejs":
+            filenames.append(f"{output_name}")
+        else:
+            filenames.append(f"{output_name}")
+            filenames.append(f"{output_name}-macos.zip")
+            filenames.append(f"{output_name}.zip")
 
-    # Generic fallbacks
     filenames.append(f"{platform}_build.zip")
     filenames.append(f"{platform}_build.exe")
 

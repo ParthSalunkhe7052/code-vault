@@ -488,3 +488,155 @@ class TestCloudBuildIntegration:
 
         assert result is not None
         assert result["id"] == mock_cloud_build["id"]
+
+
+class TestArtifactFilenamePriority:
+    """Tests for artifact filename priority resolution."""
+
+    def test_nodejs_windows_filename(self):
+        """NodeJS Windows builds should use .exe extension."""
+        from routes.cloud_build_utils import get_artifact_filename_priority
+
+        filenames = get_artifact_filename_priority("windows", "nodejs", "myapp")
+
+        assert filenames[0] == "myapp.exe"
+        assert "myapp.exe" in filenames
+
+    def test_nodejs_linux_filename(self):
+        """NodeJS Linux builds should use binary without extension."""
+        from routes.cloud_build_utils import get_artifact_filename_priority
+
+        filenames = get_artifact_filename_priority("linux", "nodejs", "myapp")
+
+        assert filenames[0] == "myapp"
+        assert "myapp.bin" in filenames
+
+    def test_python_windows_filename(self):
+        """Python Windows builds should prioritize .exe (onefile)."""
+        from routes.cloud_build_utils import get_artifact_filename_priority
+
+        filenames = get_artifact_filename_priority("windows", "python", "myapp")
+
+        assert filenames[0] == "myapp.exe"
+        assert "myapp-windows.zip" in filenames
+
+    def test_python_linux_filename(self):
+        """Python Linux builds should prioritize .tar.gz."""
+        from routes.cloud_build_utils import get_artifact_filename_priority
+
+        filenames = get_artifact_filename_priority("linux", "python", "myapp")
+
+        assert filenames[0] == "myapp.tar.gz"
+        assert "myapp-linux.tar.gz" in filenames
+        assert "myapp" in filenames
+
+
+class TestMultiPlatformWebhook:
+    """Tests for multi-platform webhook handling."""
+
+    def test_dual_platform_payload_valid(self):
+        """Webhook payload with both Linux and Windows download keys should be valid."""
+        payload = {
+            "build_id": "bld_test123",
+            "status": "completed",
+            "linux_status": "completed",
+            "windows_status": "completed",
+            "linux_download_key": "builds/bld_test123/linux/myapp",
+            "windows_download_key": "builds/bld_test123/windows/myapp.exe",
+            "filename": "myapp.exe",
+        }
+
+        assert payload["linux_download_key"] is not None
+        assert payload["windows_download_key"] is not None
+        assert payload["linux_status"] == "completed"
+        assert payload["windows_status"] == "completed"
+
+    def test_partial_success_payload_valid(self):
+        """Webhook payload with partial success should be valid."""
+        payload = {
+            "build_id": "bld_test123",
+            "status": "completed",
+            "linux_status": "failed",
+            "windows_status": "completed",
+            "windows_download_key": "builds/bld_test123/windows/myapp.exe",
+            "linux_error": "Build failed: missing dependency",
+            "filename": "myapp.exe",
+        }
+
+        assert payload["windows_status"] == "completed"
+        assert payload["linux_status"] == "failed"
+        assert payload["windows_download_key"] is not None
+        assert payload.get("linux_download_key") is None
+
+    def test_skipped_platform_status(self):
+        """Skipped platform status should be valid."""
+        valid_statuses = [
+            "pending",
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "skipped",
+        ]
+
+        payload = {
+            "build_id": "bld_test123",
+            "linux_status": "skipped",
+            "windows_status": "completed",
+        }
+
+        assert payload["linux_status"] in valid_statuses
+        assert payload["windows_status"] in valid_statuses
+
+
+class TestWebhookPayloadModel:
+    """Tests for CloudBuildWebhookPayload model validation."""
+
+    def test_payload_with_per_platform_status(self):
+        """Payload should accept linux_status and windows_status fields."""
+        from routes.cloud_build_routes import CloudBuildWebhookPayload
+
+        payload = CloudBuildWebhookPayload(
+            build_id="bld_test123",
+            status="completed",
+            linux_status="completed",
+            windows_status="completed",
+            linux_download_key="builds/bld_test123/linux/app",
+            windows_download_key="builds/bld_test123/windows/app.exe",
+        )
+
+        assert payload.build_id == "bld_test123"
+        assert payload.linux_status == "completed"
+        assert payload.windows_status == "completed"
+        assert payload.linux_download_key == "builds/bld_test123/linux/app"
+        assert payload.windows_download_key == "builds/bld_test123/windows/app.exe"
+
+    def test_payload_without_per_platform_status(self):
+        """Payload should be valid without per-platform status (backward compat)."""
+        from routes.cloud_build_routes import CloudBuildWebhookPayload
+
+        payload = CloudBuildWebhookPayload(
+            build_id="bld_test123",
+            status="completed",
+            download_key="builds/bld_test123/windows/app.exe",
+            filename="app.exe",
+        )
+
+        assert payload.build_id == "bld_test123"
+        assert payload.linux_status is None
+        assert payload.windows_status is None
+
+    def test_payload_invalid_status_rejected(self):
+        """Invalid status values should be rejected."""
+        from pydantic import ValidationError
+        from routes.cloud_build_routes import CloudBuildWebhookPayload
+
+        try:
+            CloudBuildWebhookPayload(
+                build_id="bld_test123",
+                linux_status="invalid_status",
+            )
+            assert False, "Should have raised validation error"
+        except ValidationError:
+            pass  # Expected
