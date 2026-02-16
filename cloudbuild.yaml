@@ -432,6 +432,11 @@ steps:
             # Direct pkg fallback
             if [ -f "package.json" ]; then
               echo "[Cloud Build] Using existing package.json"
+              # Fix common JSON issues in package.json (unescaped quotes in scripts)
+              # Replace patterns like "test": "echo "Error: with "test": "echo \"
+              sed -i 's/"echo \([^"]*\)\(["]\)/"echo \\"\1\\"\2/g' package.json || true
+              # Also fix npm scripts
+              sed -i 's/"npm \([^"]*\)\(["]\)/"npm \\"\1\\"\2/g' package.json || true
             else
               entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
               echo "[Cloud Build] Creating package.json with main: $entry_file"
@@ -449,8 +454,12 @@ steps:
           echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
           # Fallback: Create package.json if missing
           if [ ! -f "package.json" ]; then
-            entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
+            entry_file=$(ls *.js 2>/dev/null | head 1 || echo "index.js")
             echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\", \"private\": true}" > package.json
+          else
+            # Fix common JSON issues in package.json (unescaped quotes in scripts)
+            sed -i 's/"echo \([^"]*\)\(["]\)/"echo \\"\1\\"\2/g' package.json || true
+            sed -i 's/"npm \([^"]*\)\(["]\)/"npm \\"\1\\"\2/g' package.json || true
           fi
           echo "[Cloud Build] package.json content:"
           cat package.json
