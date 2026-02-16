@@ -458,16 +458,20 @@ steps:
         echo "[Cloud Build] Target platforms: $target_platforms"
         
         # Find and copy Windows artifact
+        echo "[Cloud Build] DEBUG: Checking for Windows artifact..."
         if [[ "$target_platforms" == *"windows"* ]]; then
+          echo "[Cloud Build] DEBUG: Windows is in target platforms"
           if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
             cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
             echo "completed" > /workspace/artifacts/build_status_windows
             echo "${_OUTPUT_NAME}.exe" > /workspace/artifacts/windows_artifacts
             echo "[Cloud Build] Found Windows artifact in build_output_windows"
+            echo "[Cloud Build] DEBUG: Wrote windows_status=completed"
           elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
             echo "completed" > /workspace/artifacts/build_status_windows
             echo "${_OUTPUT_NAME}.exe" > /workspace/artifacts/windows_artifacts
             echo "[Cloud Build] Found Windows artifact in /workspace/artifacts"
+            echo "[Cloud Build] DEBUG: Wrote windows_status=completed"
           else
             # Search for any exe
             found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
@@ -476,15 +480,18 @@ steps:
               echo "completed" > /workspace/artifacts/build_status_windows
               echo "$(basename $found_exe)" > /workspace/artifacts/windows_artifacts
               echo "[Cloud Build] Found Windows artifact via search: $found_exe"
+              echo "[Cloud Build] DEBUG: Wrote windows_status=completed"
             else
               echo "failed" > /workspace/artifacts/build_status_windows
               echo "Node.js Windows build output not found" > /workspace/artifacts/windows_error
               echo "[Cloud Build] ERROR: No Windows exe file found anywhere!"
+              echo "[Cloud Build] DEBUG: Wrote windows_status=failed"
             fi
           fi
         else
           echo "skipped" > /workspace/artifacts/build_status_windows
           echo "[Cloud Build] Windows build skipped (not in target platforms)"
+          echo "[Cloud Build] DEBUG: Wrote windows_status=skipped"
         fi
         
         # Find and copy Linux artifact
@@ -629,15 +636,22 @@ steps:
         echo "[Cloud Build] Preparing webhook callback..."
         echo "============================================"
         
+        # Debug: show artifacts directory contents
+        echo "[Cloud Build] DEBUG: Artifacts directory contents:"
+        ls -la /workspace/artifacts/ 2>/dev/null || echo "Artifacts dir not found"
+        
         # Download config for language detection
         gsutil cp "gs://codevault-builds/builds/${_BUILD_ID}/config.json" /workspace/config.json 2>/dev/null || echo "Config not found"
 
         # Read status files - check both Python and Node.js build outputs
         linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
         windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
+        windows_artifact=$$(cat /workspace/artifacts/windows_artifacts 2>/dev/null || echo "")
+        linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null || echo "")
         
         # Debug: show what was read
         echo "[Cloud Build] DEBUG: linux_status=$$linux_status, windows_status=$$windows_status"
+        echo "[Cloud Build] DEBUG: windows_artifact=$$windows_artifact, linux_artifact=$$linux_artifact"
         
         # Determine language from config - can't use Cloud Build substitutions in webhook step
         build_language=$(cat /workspace/config.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('language', ''))" 2>/dev/null || echo "")
@@ -657,8 +671,16 @@ steps:
           fi
         fi
         
-        linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null || echo "")
-        windows_artifact=$$(cat /workspace/artifacts/windows_artifacts 2>/dev/null || echo "")
+        # If we have an artifact but status is wrong, fix it
+        if [[ -n "$$windows_artifact" && "$$windows_status" == "skipped" ]]; then
+          echo "[Cloud Build] DEBUG: Fixing windows_status (had artifact but status was skipped)"
+          windows_status="completed"
+        fi
+        if [[ -n "$$linux_artifact" && "$$linux_status" == "skipped" ]]; then
+          echo "[Cloud Build] DEBUG: Fixing linux_status (had artifact but status was skipped)"
+          linux_status="completed"
+        fi
+        
         linux_error=$$(cat /workspace/artifacts/linux_error 2>/dev/null || echo "")
         windows_error=$$(cat /workspace/artifacts/windows_error 2>/dev/null || echo "")
 
