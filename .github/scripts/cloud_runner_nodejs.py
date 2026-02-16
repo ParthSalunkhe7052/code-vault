@@ -36,6 +36,7 @@ class NodeJSBuilder:
         self.license_key = config.get("license_key", "GENERIC_BUILD")
         self.target_platforms = config.get("target_platforms", ["windows"])
         self.api_url = config.get("api_url", "")
+        self.skip_obfuscation = config.get("skip_obfuscation", True)
         self._resolved_entry_file = None
 
     def _find_entry_file(self) -> Optional[str]:
@@ -348,6 +349,101 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
             logger.error(f"Failed to install dependencies: {e}")
             return False
 
+    def run_obfuscation(self) -> bool:
+        """Run JavaScript obfuscation on source files"""
+        if self.skip_obfuscation:
+            logger.info("Skipping obfuscation (disabled in config)")
+            return True
+
+        logger.info("Installing JavaScript Obfuscator...")
+
+        try:
+            result = subprocess.run(
+                ["npm", "install", "-g", "javascript-obfuscator", "--quiet"],
+                cwd=str(self.source_dir),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                logger.warning(f"Failed to install obfuscator: {result.stderr}")
+                logger.info("Continuing without obfuscation")
+                return True
+
+            logger.info("Obfuscating JavaScript files...")
+
+            js_files = []
+            for js_file in self.source_dir.rglob("*.js"):
+                if "node_modules" in str(js_file):
+                    continue
+                if js_file.name.startswith("."):
+                    continue
+                js_files.append(js_file)
+
+            if not js_files:
+                logger.warning("No JavaScript files found to obfuscate")
+                return True
+
+            obfuscate_args = [
+                "--compact",
+                "true",
+                "--rename-globals",
+                "true",
+                "--string-array",
+                "true",
+                "--string-array-threshold",
+                "0.75",
+                "--string-array-encoding",
+                "rc4",
+                "--string-array-shuffle",
+                "true",
+                "--identifier-names-generator",
+                "hexadecimal",
+                "--control-flow-flattening",
+                "true",
+                "--dead-code-injection",
+                "true",
+                "--self-defending",
+                "true",
+                "--ignore-imports",
+                "true",
+            ]
+
+            for js_file in js_files:
+                cmd = [
+                    "npx",
+                    "javascript-obfuscator",
+                    str(js_file),
+                    "--output",
+                    str(js_file),
+                ] + obfuscate_args
+
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(self.source_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+                if result.returncode != 0:
+                    logger.warning(
+                        f"Failed to obfuscate {js_file.name}: {result.stderr}"
+                    )
+                else:
+                    logger.info(f"Obfuscated: {js_file.name}")
+
+            logger.info("Obfuscation complete")
+            return True
+
+        except subprocess.TimeoutExpired:
+            logger.warning("Obfuscation timed out, continuing without obfuscation")
+            return True
+        except Exception as e:
+            logger.warning(f"Obfuscation error: {e}, continuing without obfuscation")
+            return True
+
     def build_targets(self) -> dict:
         """Build for all target platforms"""
         results = {}
@@ -482,6 +578,9 @@ if (_cv_LICENSE_KEY !== "GENERIC_BUILD") {{
 
         if not self.install_dependencies():
             logger.warning("Dependency installation had issues, continuing anyway")
+
+        if not self.run_obfuscation():
+            logger.warning("Obfuscation failed, continuing without")
 
         results = self.build_targets()
 

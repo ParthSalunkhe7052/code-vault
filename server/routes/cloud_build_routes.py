@@ -847,6 +847,8 @@ async def start_cloud_build(
             "api_url": f"{public_api_url}/api/v1/license/validate",
             "plan_tier": tier["tier"],  # Pass tier for dynamic timeout
             "compatibility_mode": request.compatibility_mode,
+            "skip_obfuscation": project_settings.get("skip_obfuscation", True),
+            "enable_lease": project_settings.get("enable_lease", False),
         }
 
         # Insert Main Build
