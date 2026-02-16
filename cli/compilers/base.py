@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Callable
 
 class BaseCompiler(ABC):
     """
@@ -30,9 +30,11 @@ class BaseCompiler(ABC):
         pass
 
     @abstractmethod
-    async def compile(self) -> Tuple[bool, Optional[Path]]:
+    async def compile(self, progress_callback: Optional[Callable[[int, str], None]] = None) -> Tuple[bool, Optional[Path]]:
         """
         Execute the actual compilation/bundling.
+        Args:
+            progress_callback: Optional async-safe callback (percent, status_text)
         Returns:
             Tuple[bool, Optional[Path]]: (success: bool, build_dir: Path | None)
         """

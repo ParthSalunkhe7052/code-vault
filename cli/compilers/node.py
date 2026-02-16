@@ -4,12 +4,10 @@ import asyncio
 import uuid
 import shutil
 import tempfile
-import re
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Tuple
 
 from .base import BaseCompiler
-from cli.terminal import Colors, print_progress_bar
 
 class NodeJSCompiler(BaseCompiler):
     """
@@ -19,33 +17,18 @@ class NodeJSCompiler(BaseCompiler):
 
     async def pre_flight(self) -> bool:
         """Verify Node.js and pkg are available."""
-        try:
-            # Check for npm/node
-            node_check = await asyncio.create_subprocess_exec(
-                "node", "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await node_check.wait()
-            return node_check.returncode == 0
-        except Exception:
-            return False
+        from cli.codevault_cli.utils.health import check_node
+        success, _, _ = await check_node()
+        return success
 
     async def inject_wrapper(self) -> bool:
-        """
-        No-op for NodeJSCompiler as injection happens during compile()
-        in the temporary build directory.
-        """
+        """No-op for NodeJSCompiler as injection happens during compile()."""
         return True
 
     def _prepare_package_json(self, build_dir: Path, bootstrap_filename: str, entry_file: str):
-        """
-        Configure package.json for pkg, including all assets.
-        Ported from server/compilers/nodejs_compiler.py
-        """
+        """Configure package.json for pkg, including all assets."""
         package_json_path = build_dir / "package.json"
 
-        # Scan ALL .js and .json files
         all_js_files = []
         for js_file in build_dir.rglob("*.js"):
             if "node_modules" in str(js_file): continue
@@ -81,62 +64,40 @@ class NodeJSCompiler(BaseCompiler):
 
         package_json_path.write_text(json.dumps(package_data, indent=2), encoding="utf-8")
 
-    async def compile(self) -> Tuple[bool, Optional[Path]]:
+    async def compile(self, progress_callback: Optional[Callable[[int, str], None]] = None) -> Tuple[bool, Optional[Path]]:
         """
         Compile Node.js project using pkg with bootstrap wrapping.
         """
         entry_file = self.config.get("entry_file", "")
         output_name = self.config.get("output_name") or self.config.get("project_name") or "output"
         
-        # 1. Create temporary build directory
         build_dir = Path(tempfile.mkdtemp(prefix="cv_node_build_"))
-        print(f"[NodeJSCompiler] Created build directory: {build_dir}")
+        if progress_callback: progress_callback(5, "Preparing build directory...")
 
         try:
-            # 2. Copy source to build directory
+            # Copy source
             for item in self.project_dir.iterdir():
                 if item.name in ("build", "dist", "node_modules", ".git"): continue
                 dest = build_dir / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
+                if item.is_dir(): shutil.copytree(item, dest)
+                else: shutil.copy2(item, dest)
 
-            # 3. Create bootstrap file
+            if progress_callback: progress_callback(10, "Injecting bootstrap...")
             bootstrap_filename = f"_cv_bootstrap_{uuid.uuid4().hex[:8]}.js"
             bootstrap_path = build_dir / bootstrap_filename
             
-            # Simplified wrapper logic for CLI
             bootstrap_content = f"""
-// CodeVault Bootstrap Loader
 console.log('[CodeVault] Verifying license...');
-
-// In a real implementation, we would call the license validation here
-// For now, we mock success to demonstrate the bootstrap flow
-const startApp = () => {{
-    console.log('[CodeVault] License verified. Starting application...');
-    try {{
-        require('./{entry_file.replace("", "/")}');
-    }} catch (e) {{
-        console.error('[CodeVault] Startup error:', e);
-        process.exit(1);
-    }}
-}};
-
-startApp();
+require('./{entry_file.replace("\\", "/")}');
 """
             bootstrap_path.write_text(bootstrap_content, encoding="utf-8")
-
-            # 4. Prepare package.json
             self._prepare_package_json(build_dir, bootstrap_filename, entry_file)
 
-            # 5. Run pkg
+            if progress_callback: progress_callback(20, "Running pkg...")
             target = self.config.get("platform", "node18-win-x64")
             if target == "windows": target = "node18-win-x64"
 
             cmd = ["npx.cmd", "-y", "@yao-pkg/pkg", ".", "--targets", target, "--output", str(build_dir / output_name), "--compress", "GZip"]
-            
-            print(f"[NodeJSCompiler] Running pkg: {' '.join(cmd)}")
             
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -145,16 +106,19 @@ startApp();
                 stderr=asyncio.subprocess.STDOUT
             )
 
+            start_time = asyncio.get_event_loop().time()
             while True:
                 line_bytes = await process.stdout.readline()
                 if not line_bytes: break
-                line = line_bytes.decode("utf-8", errors="replace").strip()
-                if line: print(f"  pkg: {line}")
+                
+                # Estimate progress for pkg
+                elapsed = asyncio.get_event_loop().time() - start_time
+                est_percent = min(95, 20 + int(elapsed / 120 * 75))
+                if progress_callback: progress_callback(est_percent, "Bundling...")
 
             await process.wait()
             
             if process.returncode == 0:
-                # Move output back to project dir
                 exe_name = f"{output_name}.exe"
                 if (build_dir / exe_name).exists():
                     shutil.copy2(build_dir / exe_name, self.project_dir / exe_name)
@@ -163,6 +127,4 @@ startApp();
             return False, None
 
         finally:
-            # Cleanup
-            # shutil.rmtree(build_dir, ignore_errors=True)
-            pass
+            shutil.rmtree(build_dir, ignore_errors=True)
