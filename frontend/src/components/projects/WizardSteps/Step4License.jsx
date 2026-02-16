@@ -85,8 +85,8 @@ const Step4License = memo(({
             {/* Branding Notice for Free/Pro tier */}
             <BrandingNotice isPro={isPro} canRemoveBranding={canRemoveBranding} />
 
-            {/* Protection Mode Options - 3 Column Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Protection Mode Options - 2 Column Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
                 {/* 1. Generic Build - Hero Card */}
                 <div 
@@ -191,47 +191,6 @@ const Step4License = memo(({
                                 <span className="text-xs font-medium text-slate-500">Ideal for Shareware / Demos</span>
                             </div>
                         )}
-                    </div>
-                </div>
-
-                {/* 3. No Protection */}
-                <div 
-                    onClick={() => handleModeChange('none')}
-                    className={`
-                        relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 group
-                        ${protectionMode === 'none'
-                            ? 'border-red-500 bg-red-500/10 scale-[1.02] shadow-xl shadow-red-500/10'
-                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
-                        }
-                    `}
-                >
-                     {protectionMode === 'none' && (
-                        <div className="absolute top-0 right-0 p-3">
-                             <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center shadow-lg">
-                                <CheckCircle size={14} className="text-white" />
-                             </div>
-                        </div>
-                    )}
-
-                    <div className="p-6 h-full flex flex-col">
-                        <div className={`
-                            w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-colors
-                            ${protectionMode === 'none' ? 'bg-red-500 text-white shadow-lg shadow-red-500/30' : 'bg-white/10 text-slate-400'}
-                        `}>
-                            <Unlock size={28} />
-                        </div>
-
-                        <h3 className="text-xl font-bold text-white mb-2">Unprotected</h3>
-                        <p className="text-sm text-slate-400 mb-6 flex-1">
-                            No license key required. The executable can be run by anyone, anywhere.
-                        </p>
-
-                        <div className="mt-auto p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2">
-                            <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5" />
-                            <p className="text-xs text-red-200">
-                                Warning: This removes all piracy protection. Only use for free tools.
-                            </p>
-                        </div>
                     </div>
                 </div>
             </div>

@@ -114,6 +114,8 @@ const Step5Build = ({
                         projectId={projectId} 
                         licenseId={licenseId} 
                         targetPlatforms={selectedPlatforms}
+                        licenseMode={protectionMode}
+                        demoDuration={demoDuration}
                         className="w-full"
                     />
                 </div>

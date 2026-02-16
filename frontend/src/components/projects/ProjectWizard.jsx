@@ -53,7 +53,7 @@ const ProjectWizard = ({
     const [completedSteps, setCompletedSteps] = useState([]);
     const [isDirty, setIsDirty] = useState(false); // Track if config has unsaved changes
     const [showQuickBuild, setShowQuickBuild] = useState(false); // Show quick build banner
-    const [protectionMode, setProtectionMode] = useState('generic'); // 'generic' | 'demo' | 'none'
+    const [protectionMode, setProtectionMode] = useState('generic'); // 'generic' | 'demo'
     const [showConsole, setShowConsole] = useState(true); // Will be set from settings in useEffect
     const [projectPath, setProjectPath] = useState('');
     const [showPrereqs, setShowPrereqs] = useState(false); // Prerequisites modal
@@ -454,7 +454,7 @@ const ProjectWizard = ({
                         language: language,
                         license_key: null,  // Generic build - no embedded key
                         server_url: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-                        license_mode: protectionMode === 'none' ? null : protectionMode === 'demo' ? 'demo' : 'generic',
+                        license_mode: protectionMode === 'demo' ? 'demo' : 'generic',
                         distribution_type: distributionType,
                         create_desktop_shortcut: createDesktopShortcut,
                         create_start_menu: createStartMenu,

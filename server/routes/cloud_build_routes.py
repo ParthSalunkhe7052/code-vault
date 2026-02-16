@@ -248,6 +248,8 @@ class CloudBuildRequest(BaseModel):
     license_id: Optional[str] = None
     target_platforms: List[str] = ["windows"]
     compatibility_mode: bool = False
+    license_mode: Optional[str] = "generic"  # 'generic' or 'demo'
+    demo_duration: Optional[int] = 60  # minutes
 
     @validator("target_platforms")
     def validate_platforms(cls, v):
@@ -844,6 +846,8 @@ async def start_cloud_build(
             "output_name": output_name,
             "target_platforms": request.target_platforms,
             "license_key": license_key,
+            "license_mode": request.license_mode or "generic",
+            "demo_duration": request.demo_duration or 60,
             "api_url": f"{public_api_url}/api/v1/license/validate",
             "plan_tier": tier["tier"],  # Pass tier for dynamic timeout
             "compatibility_mode": request.compatibility_mode,

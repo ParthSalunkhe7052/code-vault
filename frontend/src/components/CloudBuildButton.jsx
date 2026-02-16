@@ -19,6 +19,8 @@ const PLATFORM_INFO = {
  * @param {string} projectId - Project ID to build
  * @param {string} licenseId - Optional license ID to bake in
  * @param {string[]} targetPlatforms - Platforms to build for (default: ['windows'])
+ * @param {string} licenseMode - License mode: 'generic' or 'demo'
+ * @param {number} demoDuration - Demo duration in minutes
  * @param {function} onComplete - Callback when build completes
  * @param {string} className - Additional CSS classes
  */
@@ -26,6 +28,8 @@ export function CloudBuildButton({
   projectId, 
   licenseId, 
   targetPlatforms = ['windows'],
+  licenseMode = 'generic',
+  demoDuration = 60,
   onComplete, 
   className = "" 
 }) {
@@ -96,6 +100,8 @@ export function CloudBuildButton({
         project_id: projectId,
         license_id: licenseId,
         target_platforms: targetPlatforms, // Always send as array
+        license_mode: licenseMode,
+        demo_duration: demoDuration,
       };
       
       const response = await api.post(endpoint, payload);
