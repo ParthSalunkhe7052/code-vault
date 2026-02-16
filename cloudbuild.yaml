@@ -628,6 +628,9 @@ steps:
         echo "============================================"
         echo "[Cloud Build] Preparing webhook callback..."
         echo "============================================"
+        
+        # Download config for language detection
+        gsutil cp "gs://codevault-builds/builds/${_BUILD_ID}/config.json" /workspace/config.json 2>/dev/null || echo "Config not found"
 
         # Read status files - check both Python and Node.js build outputs
         linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
@@ -636,8 +639,12 @@ steps:
         # Debug: show what was read
         echo "[Cloud Build] DEBUG: linux_status=$$linux_status, windows_status=$$windows_status"
         
-        # For Node.js builds, also check Node.js status files
-        if [[ "${_LANGUAGE}" == "nodejs" ]]; then
+        # Determine language from config - can't use Cloud Build substitutions in webhook step
+        build_language=$(cat /workspace/config.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('language', ''))" 2>/dev/null || echo "")
+        echo "[Cloud Build] DEBUG: build_language=$$build_language"
+        
+        # For Node.js builds, also check Node.js status files (they may have different status than Python builds)
+        if [[ "$$build_language" == "nodejs" ]]; then
           nodejs_windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
           nodejs_linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
           echo "[Cloud Build] DEBUG: nodejs_windows_status=$$nodejs_windows_status, nodejs_linux_status=$$nodejs_linux_status"
