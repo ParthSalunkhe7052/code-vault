@@ -134,7 +134,7 @@ steps:
         set -e
         if [[ "${_TARGET_PLATFORMS}" != *"linux"* || "${_LANGUAGE}" != "python" ]]; then
           echo "[Cloud Build] Skipping Linux build"
-          echo "skipped" > /workspace/build_status_linux
+          echo "skipped" > /workspace/artifacts/build_status_linux
           exit 0
         fi
 
@@ -196,9 +196,9 @@ steps:
           fi
         fi
 
-        echo "$$linux_status" > /workspace/build_status_linux
-        echo "$$linux_artifacts" > /workspace/linux_artifacts
-        echo "$$linux_error" > /workspace/linux_error
+        echo "$$linux_status" > /workspace/artifacts/build_status_linux
+        echo "$$linux_artifacts" > /workspace/artifacts/linux_artifacts
+        echo "$$linux_error" > /workspace/artifacts/linux_error
         
         # Save Nuitka cache (Nuitka uses ~/.cache/Nuitka on Linux)
         if [ -d "$$HOME/.cache/Nuitka" ]; then
@@ -223,12 +223,12 @@ steps:
     args:
       - '-c'
       - |
-        linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+        linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
         if [[ "$$linux_status" != "completed" ]]; then
           echo "[Cloud Build] Skipping Linux upload (status: $$linux_status)"
           exit 0
         fi
-        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+        linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null)
         if [ -z "$$linux_artifact" ]; then
           exit 0
         fi
@@ -271,7 +271,7 @@ steps:
         set -e
         if [[ "${_TARGET_PLATFORMS}" != *"windows"* || "${_LANGUAGE}" != "python" ]]; then
           echo "[Cloud Build] Skipping Windows build"
-          echo "skipped" > /workspace/build_status_windows
+          echo "skipped" > /workspace/artifacts/build_status_windows
           exit 0
         fi
 
@@ -344,9 +344,9 @@ steps:
           fi
         fi
 
-        echo "$$windows_status" > /workspace/build_status_windows
-        echo "$$windows_artifacts" > /workspace/windows_artifacts
-        echo "$$windows_error" > /workspace/windows_error
+        echo "$$windows_status" > /workspace/artifacts/build_status_windows
+        echo "$$windows_artifacts" > /workspace/artifacts/windows_artifacts
+        echo "$$windows_error" > /workspace/artifacts/windows_error
     waitFor: ['download-config']
     volumes:
       - name: 'artifacts'
@@ -358,12 +358,12 @@ steps:
     args:
       - '-c'
       - |
-        windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+        windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
         if [[ "$$windows_status" != "completed" ]]; then
           echo "[Cloud Build] Skipping Windows upload (status: $$windows_status)"
           exit 0
         fi
-        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+        windows_artifact=$$(cat /workspace/artifacts/windows_artifacts 2>/dev/null)
         if [ -z "$$windows_artifact" ]; then
           exit 0
         fi
@@ -461,29 +461,29 @@ steps:
         if [[ "$target_platforms" == *"windows"* ]]; then
           if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
             cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
-            echo "completed" > /workspace/build_status_windows
-            echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+            echo "completed" > /workspace/artifacts/build_status_windows
+            echo "${_OUTPUT_NAME}.exe" > /workspace/artifacts/windows_artifacts
             echo "[Cloud Build] Found Windows artifact in build_output_windows"
           elif [ -f "/workspace/artifacts/${_OUTPUT_NAME}.exe" ]; then
-            echo "completed" > /workspace/build_status_windows
-            echo "${_OUTPUT_NAME}.exe" > /workspace/windows_artifacts
+            echo "completed" > /workspace/artifacts/build_status_windows
+            echo "${_OUTPUT_NAME}.exe" > /workspace/artifacts/windows_artifacts
             echo "[Cloud Build] Found Windows artifact in /workspace/artifacts"
           else
             # Search for any exe
             found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
             if [ -n "$found_exe" ]; then
               cp "$found_exe" /workspace/artifacts/
-              echo "completed" > /workspace/build_status_windows
-              echo "$(basename $found_exe)" > /workspace/windows_artifacts
+              echo "completed" > /workspace/artifacts/build_status_windows
+              echo "$(basename $found_exe)" > /workspace/artifacts/windows_artifacts
               echo "[Cloud Build] Found Windows artifact via search: $found_exe"
             else
-              echo "failed" > /workspace/build_status_windows
-              echo "Node.js Windows build output not found" > /workspace/windows_error
+              echo "failed" > /workspace/artifacts/build_status_windows
+              echo "Node.js Windows build output not found" > /workspace/artifacts/windows_error
               echo "[Cloud Build] ERROR: No Windows exe file found anywhere!"
             fi
           fi
         else
-          echo "skipped" > /workspace/build_status_windows
+          echo "skipped" > /workspace/artifacts/build_status_windows
           echo "[Cloud Build] Windows build skipped (not in target platforms)"
         fi
         
@@ -492,8 +492,8 @@ steps:
           if [ -f "build_output_linux/${_OUTPUT_NAME}" ]; then
             cp "build_output_linux/${_OUTPUT_NAME}" /workspace/artifacts/
             chmod +x "/workspace/artifacts/${_OUTPUT_NAME}"
-            echo "completed" > /workspace/build_status_linux
-            echo "${_OUTPUT_NAME}" > /workspace/linux_artifacts
+            echo "completed" > /workspace/artifacts/build_status_linux
+            echo "${_OUTPUT_NAME}" > /workspace/artifacts/linux_artifacts
             echo "[Cloud Build] Found Linux artifact in build_output_linux"
           else
             # Search for any linux binary
@@ -501,17 +501,17 @@ steps:
             if [ -n "$found_linux" ]; then
               cp "$found_linux" /workspace/artifacts/
               chmod +x "/workspace/artifacts/$(basename $found_linux)"
-              echo "completed" > /workspace/build_status_linux
-              echo "$(basename $found_linux)" > /workspace/linux_artifacts
+              echo "completed" > /workspace/artifacts/build_status_linux
+              echo "$(basename $found_linux)" > /workspace/artifacts/linux_artifacts
               echo "[Cloud Build] Found Linux artifact via search: $found_linux"
             else
-              echo "failed" > /workspace/build_status_linux
-              echo "Node.js Linux build output not found" > /workspace/linux_error
+              echo "failed" > /workspace/artifacts/build_status_linux
+              echo "Node.js Linux build output not found" > /workspace/artifacts/linux_error
               echo "[Cloud Build] ERROR: No Linux binary found!"
             fi
           fi
         else
-          echo "skipped" > /workspace/build_status_linux
+          echo "skipped" > /workspace/artifacts/build_status_linux
           echo "[Cloud Build] Linux build skipped (not in target platforms)"
         fi
         
@@ -531,12 +531,12 @@ steps:
         if [[ "${_LANGUAGE}" != "nodejs" ]]; then
           exit 0
         fi
-        windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+        windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
         if [[ "$$windows_status" != "completed" ]]; then
           echo "[Cloud Build] Skipping Node.js Windows upload (status: $$windows_status)"
           exit 0
         fi
-        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+        windows_artifact=$$(cat /workspace/artifacts/windows_artifacts 2>/dev/null)
         if [ -z "$$windows_artifact" ]; then
           exit 0
         fi
@@ -557,12 +557,12 @@ steps:
         if [[ "${_LANGUAGE}" != "nodejs" ]]; then
           exit 0
         fi
-        linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+        linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
         if [[ "$$linux_status" != "completed" ]]; then
           echo "[Cloud Build] Skipping Node.js Linux upload (status: $$linux_status)"
           exit 0
         fi
-        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+        linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null)
         if [ -z "$$linux_artifact" ]; then
           exit 0
         fi
@@ -629,24 +629,53 @@ steps:
         echo "[Cloud Build] Preparing webhook callback..."
         echo "============================================"
 
-        linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-        windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-        linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null || echo "")
-        windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null || echo "")
-        linux_error=$$(cat /workspace/linux_error 2>/dev/null || echo "")
-        windows_error=$$(cat /workspace/windows_error 2>/dev/null || echo "")
+        # Read status files - check both Python and Node.js build outputs
+        linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
+        windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
+        
+        # Debug: show what was read
+        echo "[Cloud Build] DEBUG: linux_status=$$linux_status, windows_status=$$windows_status"
+        
+        # For Node.js builds, also check Node.js status files
+        if [[ "${_LANGUAGE}" == "nodejs" ]]; then
+          nodejs_windows_status=$$(cat /workspace/artifacts/build_status_windows 2>/dev/null || echo "pending")
+          nodejs_linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
+          echo "[Cloud Build] DEBUG: nodejs_windows_status=$$nodejs_windows_status, nodejs_linux_status=$$nodejs_linux_status"
+          # Override with Node.js status if available
+          if [[ "$$nodejs_windows_status" != "pending" ]]; then
+            windows_status=$$nodejs_windows_status
+          fi
+          if [[ "$$nodejs_linux_status" != "pending" ]]; then
+            linux_status=$$nodejs_linux_status
+          fi
+        fi
+        
+        linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null || echo "")
+        windows_artifact=$$(cat /workspace/artifacts/windows_artifacts 2>/dev/null || echo "")
+        linux_error=$$(cat /workspace/artifacts/linux_error 2>/dev/null || echo "")
+        windows_error=$$(cat /workspace/artifacts/windows_error 2>/dev/null || echo "")
 
         echo "[Cloud Build] Linux: $$linux_status, artifact: $$linux_artifact"
         echo "[Cloud Build] Windows: $$windows_status, artifact: $$windows_artifact"
 
         all_skipped=true
-        if [[ "$$linux_status" != "skipped" ]]; then all_skipped=false; fi
-        if [[ "$$windows_status" != "skipped" ]]; then all_skipped=false; fi
+        any_completed=false
+        if [[ "$$linux_status" != "skipped" ]]; then 
+          all_skipped=false
+        fi
+        if [[ "$$windows_status" != "skipped" ]]; then 
+          all_skipped=false
+        fi
+        if [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then 
+          any_completed=true
+        fi
 
-        if [[ "$$all_skipped" == "true" ]]; then
-          overall_status="cancelled"
-        elif [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then
+        if [[ "$$any_completed" == "true" ]]; then
           overall_status="completed"
+        elif [[ "$$all_skipped" == "true" ]]; then
+          overall_status="cancelled"
+        elif [[ "$$linux_status" == "failed" || "$$windows_status" == "failed" ]]; then
+          overall_status="failed"
         else
           overall_status="failed"
         fi
@@ -726,3 +755,6 @@ steps:
 
         echo "[Cloud Build] Webhook completed"
     waitFor: ['save-cache']
+    volumes:
+      - name: 'artifacts'
+        path: '/workspace/artifacts'
