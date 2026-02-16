@@ -1,0 +1,30 @@
+# ==============================================
+# CodeVault Cloud Builder - Docker Image Build
+# ==============================================
+# Run this to build and push the pre-built Docker image to GCR
+#
+# Command:
+#   gcloud builds submit --config=cloudbuild-docker.yaml --project=cloudbuild-486309
+#
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/cloudbuild-486309/codevault-builder:latest'
+      - '-f'
+      - 'Dockerfile.cloud-builder'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - 'gcr.io/cloudbuild-486309/codevault-builder:latest'
+
+images:
+  - 'gcr.io/cloudbuild-486309/codevault-builder:latest'
+
+timeout: 600s

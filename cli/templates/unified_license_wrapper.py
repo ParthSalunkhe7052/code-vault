@@ -44,6 +44,7 @@ _CV_LICENSE_KEY = "{license_key}"
 _CV_SERVER_URL = "{server_url}"
 _CV_LEASE_ENABLED = {lease_enabled}
 _CV_PUBLIC_KEY = """{public_key}"""
+_CV_BINARY_HASH = "{binary_hash}"
 _CV_HEARTBEAT_INTERVAL = {heartbeat_interval}
 _CV_APP_NAME = "{app_name}"
 _CV_SHOW_BRANDING = {show_branding}
@@ -440,6 +441,25 @@ def _cv_get_binary_hash():
         return sha256.hexdigest()
     except Exception:
         return None
+
+def _cv_verify_binary_integrity():
+    """Verify binary hasn't been tampered with."""
+    if not _CV_BINARY_HASH or _CV_BINARY_HASH == "skip":
+        return True
+    
+    try:
+        actual_hash = _cv_get_binary_hash()
+        if actual_hash and actual_hash != _CV_BINARY_HASH:
+            _cv_show_error(
+                "Binary Tampered",
+                "The executable has been modified or corrupted.",
+                "This may indicate tampering. Please re-download the application."
+            )
+            return False
+        return True
+    except Exception as e:
+        print(f"[CodeVault] Warning: Could not verify binary integrity: {e}")
+        return True
 
 # =============================================================================
 # FILE PATHS - License and lease file paths
@@ -902,6 +922,7 @@ def get_license_wrapper(
     server_url: str,
     lease_enabled: bool = True,
     public_key: str = "",
+    binary_hash: str = "skip",
     heartbeat_interval: int = 300,
     app_name: str = "Protected Application",
     show_branding: bool = True,
@@ -914,6 +935,7 @@ def get_license_wrapper(
         server_url: Server URL for license validation
         lease_enabled: Whether to enable offline lease (default: True)
         public_key: Ed25519 public key PEM for signature verification
+        binary_hash: SHA-256 hash of binary for integrity checking (default: "skip")
         heartbeat_interval: Heartbeat interval in seconds (default: 300)
         app_name: Application name for UI (default: "Protected Application")
         show_branding: Show CodeVault branding (default: True for free tier)
@@ -925,6 +947,7 @@ def get_license_wrapper(
     code = code.replace("{server_url}", server_url)
     code = code.replace("{lease_enabled}", "True" if lease_enabled else "False")
     code = code.replace("{public_key}", public_key if public_key else "")
+    code = code.replace("{binary_hash}", binary_hash if binary_hash else "skip")
     code = code.replace("{heartbeat_interval}", str(heartbeat_interval))
     code = code.replace("{app_name}", app_name)
     code = code.replace("{show_branding}", "True" if show_branding else "False")

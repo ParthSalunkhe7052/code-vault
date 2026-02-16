@@ -423,9 +423,11 @@ jobs:
           # Find output exe (could be in build_output if using Runner)
           cd project/source
           
-          # Check for build_output first
+          # Check for build_output first (cloud_runner.py uses platform-specific output dirs)
           if [ -d "build_output" ]; then
              find build_output -maxdepth 1 -type f -executable -exec cp {} . \;
+          elif [ -d "build_output_linux" ]; then
+             find build_output_linux -maxdepth 1 -type f -executable -exec cp {} . \;
           fi
           
           exe_name="${{ steps.prepare.outputs.output_name }}"

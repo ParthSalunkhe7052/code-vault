@@ -45,6 +45,7 @@ from routes.cloud_build_websocket import (
 )
 from routes.cloud_build_utils import (
     validate_safe_path,
+    generate_gcs_signed_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,12 @@ class CloudBuildWebhookPayload(BaseModel):
     download_url: Optional[str] = Field(None, max_length=1000)
     linux_download_key: Optional[str] = Field(None, max_length=500)
     windows_download_key: Optional[str] = Field(None, max_length=500)
+    linux_status: Optional[str] = Field(
+        None, pattern=r"^(pending|queued|running|completed|failed|cancelled|skipped)$"
+    )
+    windows_status: Optional[str] = Field(
+        None, pattern=r"^(pending|queued|running|completed|failed|cancelled|skipped)$"
+    )
     filename: Optional[str] = Field(None, max_length=255)
     error: Optional[str] = Field(None, max_length=2000)
     progress: Optional[int] = Field(None, ge=0, le=100)
@@ -273,54 +280,6 @@ def get_remote_build_id(build_row) -> Optional[str]:
     return build_row.get("gcp_build_id") or build_row.get("github_run_id")
 
 
-def generate_gcs_signed_url(download_key: str) -> Optional[str]:
-    """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions)"""
-    try:
-        # Check if download_key is from GCS (Cloud Build) or R2 (GitHub Actions)
-        # GCS keys: builds/{build_id}/platform/filename
-        # Both use same format, but storage location differs
-
-        # Try GCS first (for Cloud Build artifacts)
-        try:
-            from google.cloud import storage as gcs_storage
-            from datetime import timedelta
-
-            # Initialize GCS client
-            gcs_client = gcs_storage.Client()
-            from config import GCS_BUILDS_BUCKET
-
-            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
-            blob = bucket.blob(download_key)
-
-            # Check if blob exists in GCS
-            if blob.exists():
-                # Generate signed URL (valid for 1 hour)
-                signed_url = blob.generate_signed_url(
-                    version="v4", expiration=timedelta(hours=1), method="GET"
-                )
-                logger.info(f"[CloudBuild] Generated GCS signed URL for {download_key}")
-                return signed_url
-        except Exception as gcs_error:
-            logger.debug(f"[CloudBuild] Not in GCS or error: {gcs_error}")
-
-        # Fallback to R2 (for GitHub Actions artifacts)
-        if storage_service.is_cloud_enabled() and storage_service.client:
-            r2_url = storage_service.client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": storage_service.bucket, "Key": download_key},
-                ExpiresIn=3600,
-            )
-            logger.info(f"[CloudBuild] Generated R2 signed URL for {download_key}")
-            return r2_url
-
-        logger.warning(f"[CloudBuild] Could not generate signed URL for {download_key}")
-        return None
-
-    except Exception as e:
-        logger.error(f"[CloudBuild] Error generating signed URL: {e}")
-        return None
-
-
 async def verify_webhook_signature(request: Request) -> bool:
     signature = request.headers.get("X-Signature")
     if not signature:
@@ -347,7 +306,7 @@ async def verify_webhook_signature(request: Request) -> bool:
 
 async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
     """
-    Upload source to R2. Creates fresh zip for each build.
+        Upload source to R2. Creates fresh zip for each build.
     Cache invalidation ensures new files are always used.
     """
     import shutil
@@ -398,8 +357,34 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                 logger.error(
                     f"[Upload] Files in .github/scripts: {list((project_root / '.github' / 'scripts').glob('*')) if (project_root / '.github' / 'scripts').exists() else 'directory does not exist'}"
                 )
+
+            # Also copy nuitka_patch.py for Wine builds
+            patch_source = project_root / ".github" / "scripts" / "nuitka_patch.py"
+            if patch_source.exists():
+                patch_dest = source_dir / ".github" / "scripts" / "nuitka_patch.py"
+                shutil.copy2(patch_source, patch_dest)
+                logger.info(f"[Upload] Successfully copied nuitka_patch.py to source")
+            else:
+                logger.warning(f"[Upload] nuitka_patch.py not found at {patch_source}")
+
+            # Also copy cloud_runner_nodejs.py for Node.js builds
+            nodejs_runner_source = (
+                project_root / ".github" / "scripts" / "cloud_runner_nodejs.py"
+            )
+            if nodejs_runner_source.exists():
+                nodejs_runner_dest = (
+                    source_dir / ".github" / "scripts" / "cloud_runner_nodejs.py"
+                )
+                shutil.copy2(nodejs_runner_source, nodejs_runner_dest)
+                logger.info(
+                    f"[Upload] Successfully copied cloud_runner_nodejs.py to source"
+                )
+            else:
+                logger.warning(
+                    f"[Upload] cloud_runner_nodejs.py not found at {nodejs_runner_source}"
+                )
         except Exception as e:
-            logger.error(f"[Upload] Failed to copy cloud_runner.py: {e}")
+            logger.error(f"[Upload] Failed to copy build scripts: {e}")
             import traceback
 
             logger.error(f"[Upload] Traceback: {traceback.format_exc()}")
@@ -457,14 +442,15 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
 
     conn = None
     try:
-        # Use Cloud Build API on Windows to avoid cmd.exe interpreting & characters in URLs
+        # Always use Cloud Build API client (supports Workload Identity on Heroku)
         import sys
-        if sys.platform == "win32":
-            from cloud_build_integration import CloudBuildClient
-            logger.info("[CloudBuild] Using Cloud Build API client (Windows detected)")
-        else:
-            from cloud_build_cli_wrapper import CloudBuildClient
-            logger.info("[CloudBuild] Using gcloud CLI wrapper")
+
+        scripts_path = Path(__file__).parent.parent.parent / "scripts"
+        if str(scripts_path) not in sys.path:
+            sys.path.insert(0, str(scripts_path))
+        from cloud_build_integration import CloudBuildClient
+
+        logger.info("[CloudBuild] Using Cloud Build API client")
 
         # Upload source to R2 (still needed for Cloud Build to download)
         source_url = await upload_source_to_r2(build_id, source_dir)
@@ -515,7 +501,8 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "target_platforms": target_platforms_str,
             "source_url": source_url,
             "config": config,
-            "callback_url": f"{public_api_url}/api/v1/cloud-build/webhook",
+            # Use direct Heroku URL for webhook (custom domain may have DNS issues)
+            "callback_url": "https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook",
             "callback_secret": BUILD_CALLBACK_SECRET or "",
             "plan_tier": config.get("plan_tier", "free"),
             "compatibility_mode": config.get("compatibility_mode", False),
@@ -556,12 +543,50 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
         return True
 
     except Exception as e:
-        logger.error(f"Failed to trigger Cloud Build: {e}")
+        import traceback
+
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        # Filter out long HTML responses from error messages
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+
+        # Also clean up the traceback - remove HTML content
+        clean_traceback = error_traceback
+        if "<!doctype html>" in error_traceback or "<html" in error_traceback.lower():
+            # Extract just the relevant Python traceback
+            lines = error_traceback.split("\n")
+            clean_lines = []
+            for line in lines:
+                if "<!" in line or "<html" in line.lower() or len(line) > 200:
+                    break
+                clean_lines.append(line)
+            clean_traceback = "\n".join(clean_lines)
+            if not clean_traceback:
+                clean_traceback = clean_error
+
+        logger.error(f"Failed to trigger Cloud Build: {clean_error}")
         if conn is None:
             conn = await get_db()
+        # Store both error message and traceback for admin debugging
         await conn.execute(
-            "UPDATE cloud_builds SET status = 'failed', error_message = $1 WHERE id = $2",
-            str(e),
+            """UPDATE cloud_builds 
+               SET status = 'failed', 
+                   error_message = $1,
+                   admin_error_details = $2
+               WHERE id = $3""",
+            clean_error,
+            clean_traceback,
             build_id,
         )
         return False
@@ -664,28 +689,73 @@ async def start_cloud_build(
             project_settings = json.loads(project_settings) if project_settings else {}
 
         # 3. Source Validation
-        # Security: Validate project_id and construct safe source directory path
+        source_dir = None
+
+        # First, try to find source directory from zip upload
         safe_project_dir = validate_safe_path(UPLOAD_DIR, request.project_id)
-        source_dir = safe_project_dir / "source"
+        zip_source_dir = safe_project_dir / "source"
+        zip_source_dir = zip_source_dir.resolve()
 
-        # Validate the constructed path is within UPLOAD_DIR
-        source_dir = source_dir.resolve()
-        if not str(source_dir).startswith(str(UPLOAD_DIR.resolve())):
-            raise HTTPException(400, "Invalid source directory path")
+        if str(zip_source_dir).startswith(str(UPLOAD_DIR.resolve())):
+            if zip_source_dir.exists() and list(zip_source_dir.iterdir()):
+                source_dir = zip_source_dir
 
-        if not source_dir.exists():
-            # Fallback path logic
-            projects_base = UPLOAD_DIR / "projects"
-            projects_base.mkdir(parents=True, exist_ok=True)
-            safe_alt = validate_safe_path(projects_base, request.project_id)
-            if (safe_alt / "source").exists():
-                source_dir = safe_alt / "source"
-                # Re-validate after path change
-                source_dir = source_dir.resolve()
-                if not str(source_dir).startswith(str(projects_base.resolve())):
+        # If no zip source, check project_files table for single file uploads
+        if not source_dir:
+            project_files = await conn.fetch(
+                """SELECT id, filename, original_filename, file_path, is_cloud 
+                   FROM project_files WHERE project_id = $1""",
+                request.project_id,
+            )
+
+            if project_files:
+                import shutil
+
+                # Create permanent source directory for this project
+                persistent_source_dir = safe_project_dir / "source"
+                persistent_source_dir.mkdir(parents=True, exist_ok=True)
+                persistent_source_dir = persistent_source_dir.resolve()
+
+                # Validate path
+                if not str(persistent_source_dir).startswith(str(UPLOAD_DIR.resolve())):
                     raise HTTPException(400, "Invalid source directory path")
-            else:
-                raise HTTPException(400, "No source files found.")
+
+                for pf in project_files:
+                    try:
+                        file_content = await storage_service.download_file(
+                            pf["file_path"], not pf["is_cloud"]
+                        )
+                        if file_content:
+                            safe_filename = pf["original_filename"] or pf["filename"]
+                            safe_filename = "".join(
+                                c for c in safe_filename if c.isalnum() or c in "._-"
+                            )
+                            if not safe_filename:
+                                safe_filename = f"file_{pf['id']}"
+                            dest_path = persistent_source_dir / safe_filename
+                            dest_path.write_bytes(file_content)
+                            logger.info(
+                                f"[CloudBuild] Downloaded project file to source: {safe_filename}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[CloudBuild] Could not download file: {pf['file_path']}"
+                            )
+                    except Exception as dl_err:
+                        logger.warning(
+                            f"[CloudBuild] Error downloading file {pf['filename']}: {dl_err}"
+                        )
+
+                if list(persistent_source_dir.iterdir()):
+                    source_dir = persistent_source_dir
+                    logger.info(
+                        f"[CloudBuild] Created source dir from project_files: {source_dir}"
+                    )
+
+        if not source_dir:
+            raise HTTPException(
+                400, "No source files found. Upload a ZIP or individual files first."
+            )
 
         if not list(source_dir.iterdir()):
             raise HTTPException(400, "Source directory is empty.")
@@ -703,9 +773,40 @@ async def start_cloud_build(
             val = project_settings.get(key)
             return val if val else default
 
-        entry_file = get_setting(
-            "entry_file", "main.py" if language == "python" else "index.js"
-        )
+        # Determine entry file - check settings first, then auto-detect from source
+        entry_file = get_setting("entry_file", None)
+
+        if not entry_file:
+            source_files = list(source_dir.iterdir())
+            py_files = [f.name for f in source_files if f.suffix == ".py"]
+            js_files = [f.name for f in source_files if f.suffix in (".js", ".ts")]
+
+            if language == "python":
+                if len(py_files) == 1:
+                    entry_file = py_files[0]
+                elif "main.py" in py_files:
+                    entry_file = "main.py"
+                elif "app.py" in py_files:
+                    entry_file = "app.py"
+                elif py_files:
+                    entry_file = py_files[0]
+                else:
+                    entry_file = "main.py"
+            elif language == "nodejs":
+                if len(js_files) == 1:
+                    entry_file = js_files[0]
+                elif "index.js" in js_files:
+                    entry_file = "index.js"
+                elif "main.js" in js_files:
+                    entry_file = "main.js"
+                elif js_files:
+                    entry_file = js_files[0]
+                else:
+                    entry_file = "index.js"
+            else:
+                entry_file = "main.py"
+
+        logger.info(f"[CloudBuild] Using entry file: {entry_file}")
 
         # Fix: Ensure output_name is never empty
         project_name = (
@@ -792,9 +893,34 @@ async def start_cloud_build(
         )
         queue_status = queue_result.get("status")
         if queue_status not in {"queued", "running"}:
-            raise HTTPException(
-                500, queue_result.get("message", "Failed to enqueue cloud build")
-            )
+            error_message = queue_result.get("message", "Failed to enqueue cloud build")
+            # Get detailed error from database if available
+            try:
+                conn = await get_db()
+                build_error = await conn.fetchrow(
+                    "SELECT error_message, admin_error_details FROM cloud_builds WHERE id = $1",
+                    build_id,
+                )
+                if build_error and build_error.get("admin_error_details"):
+                    # Re-raise with detailed error for admin users
+                    if user.get("role") == "admin":
+                        raise HTTPException(
+                            status_code=500,
+                            detail={
+                                "message": "Cloud build failed",
+                                "error": build_error.get(
+                                    "error_message", error_message
+                                ),
+                                "traceback": build_error.get("admin_error_details"),
+                                "build_id": build_id,
+                            },
+                        )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[CloudBuild] Error fetching build details: {e}")
+
+            raise HTTPException(500, error_message)
         queue_accepted = True
 
         return CloudBuildResponse(
@@ -803,7 +929,39 @@ async def start_cloud_build(
             message=queue_result.get("message", "Cloud build queued."),
         )
 
-    except Exception:
+    except Exception as e:
+        import traceback
+
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        # Filter out long HTML responses from error messages
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+        elif len(error_msg) > 500:
+            # Extract just the key error message
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                # Just take first 200 chars
+                clean_error = error_msg[:200] + "..."
+
+        # Log detailed error for debugging
+        logger.error(
+            f"[CloudBuild] Build start failed for user {user['id']}: {clean_error}"
+        )
+
         if deducted_credits > 0 and not queue_accepted:
             try:
                 await conn.execute(
@@ -816,16 +974,31 @@ async def start_cloud_build(
                         """
                         UPDATE cloud_builds
                         SET status = 'failed',
-                            error_message = COALESCE(error_message, 'Build failed before enqueue/trigger. Credit refunded.')
+                            error_message = COALESCE(error_message, $2),
+                            admin_error_details = $3
                         WHERE id = $1
                         """,
                         build_id,
+                        f"Build failed before enqueue/trigger. Credit refunded. Error: {error_msg}",
+                        error_traceback if user.get("role") == "admin" else None,
                     )
                 logger.info(
                     f"[CloudBuild] Refunded {deducted_credits} credit(s) for user {user['id']} after enqueue failure"
                 )
             except Exception as refund_error:
                 logger.error(f"[CloudBuild] Failed to refund credits: {refund_error}")
+
+        # Re-raise with admin details if user is admin
+        if user.get("role") == "admin":
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "Cloud build failed",
+                    "error": error_msg,
+                    "traceback": error_traceback,
+                    "build_id": build_id,
+                },
+            )
         raise
     finally:
         await release_db(conn)
@@ -862,6 +1035,8 @@ async def build_webhook(request: Request):
     download_key = payload.download_key
     filename = payload.filename
     error = payload.error
+    linux_status = payload.linux_status
+    windows_status = payload.windows_status
 
     # Generate event ID for idempotency
     event_id = generate_webhook_event_id(build_id, platform, status)
@@ -926,9 +1101,72 @@ async def build_webhook(request: Request):
                     platform,
                 )
 
+            # Update individual artifacts with download keys from overall callback
+            # This handles the case where webhook sends both linux_download_key and windows_download_key
+            if not platform:
+                if linux_download_key:
+                    linux_filename = linux_download_key.split("/")[-1]
+                    linux_artifact_status = linux_status or "completed"
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, download_key = $2, download_filename = $3, 
+                            completed_at = NOW()
+                        WHERE build_id = $4 AND platform = 'linux' AND status IN ('pending', 'running', 'completed')
+                        """,
+                        linux_artifact_status,
+                        linux_download_key,
+                        linux_filename,
+                        build_id,
+                    )
+                    logger.info(
+                        f"[CloudBuild] Updated Linux artifact with key: {linux_download_key}, status: {linux_artifact_status}"
+                    )
+                elif linux_status:
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, error_message = $2, completed_at = NOW()
+                        WHERE build_id = $3 AND platform = 'linux' AND status IN ('pending', 'running')
+                        """,
+                        linux_status,
+                        error if linux_status == "failed" else None,
+                        build_id,
+                    )
+
+                if windows_download_key:
+                    windows_filename = windows_download_key.split("/")[-1]
+                    windows_artifact_status = windows_status or "completed"
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, download_key = $2, download_filename = $3, 
+                            completed_at = NOW()
+                        WHERE build_id = $4 AND platform = 'windows' AND status IN ('pending', 'running', 'completed')
+                        """,
+                        windows_artifact_status,
+                        windows_download_key,
+                        windows_filename,
+                        build_id,
+                    )
+                    logger.info(
+                        f"[CloudBuild] Updated Windows artifact with key: {windows_download_key}, status: {windows_artifact_status}"
+                    )
+                elif windows_status:
+                    await conn.execute(
+                        """
+                        UPDATE cloud_build_artifacts
+                        SET status = $1, error_message = $2, completed_at = NOW()
+                        WHERE build_id = $3 AND platform = 'windows' AND status IN ('pending', 'running')
+                        """,
+                        windows_status,
+                        error if windows_status == "failed" else None,
+                        build_id,
+                    )
+
             # Overall callbacks may omit per-platform statuses (for unsupported targets),
             # so mark remaining in-flight artifacts terminal based on overall result.
-            if not platform and status in ["completed", "failed", "cancelled"]:
+            if not platform and status in ["failed", "cancelled"]:
                 fallback_status = "cancelled" if status == "cancelled" else "failed"
                 fallback_error = None
                 if fallback_status == "failed":
@@ -1264,10 +1502,11 @@ async def get_build_status(
         ):
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
@@ -1300,14 +1539,68 @@ async def get_build_status(
                         # CRITICAL FIX: Also update artifacts if the build is terminal
                         # This ensures the frontend doesn't get stuck waiting for artifacts
                         if db_status in ["failed", "cancelled", "completed"]:
-                            await conn.execute(
-                                """UPDATE cloud_build_artifacts
-                                   SET status = $1::text, 
-                                       error_message = COALESCE(error_message, 'Build finished with status: ' || $1::text)
-                                   WHERE build_id = $2::text AND status IN ('pending', 'running')""",
-                                db_status,
-                                build_id,
-                            )
+                            if db_status == "completed":
+                                # Get output_name for filename recovery
+                                output_name = build.get("output_name") or "app"
+
+                                # Get artifacts that need updating
+                                pending_artifacts = await conn.fetch(
+                                    "SELECT * FROM cloud_build_artifacts WHERE build_id = $1 AND status IN ('pending', 'running')",
+                                    build_id,
+                                )
+
+                                for art in pending_artifacts:
+                                    # Mark as completed
+                                    await conn.execute(
+                                        """UPDATE cloud_build_artifacts
+                                           SET status = 'completed', completed_at = NOW()
+                                           WHERE id = $1""",
+                                        art["id"],
+                                    )
+
+                                    # Try to recover download key
+                                    possible_filenames = [
+                                        f"{output_name}-{art['platform']}.zip",
+                                        f"{output_name}-{art['platform']}.tar.gz"
+                                        if art["platform"] == "linux"
+                                        else None,
+                                        f"{art['platform']}_build.zip",
+                                    ]
+                                    possible_filenames = [
+                                        f for f in possible_filenames if f
+                                    ]
+
+                                    for filename_guess in possible_filenames:
+                                        guessed_key = f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                                        try:
+                                            test_url = generate_gcs_signed_url(
+                                                guessed_key
+                                            )
+                                            if test_url:
+                                                await conn.execute(
+                                                    """UPDATE cloud_build_artifacts 
+                                                       SET download_key = $1, download_filename = $2 
+                                                       WHERE id = $3""",
+                                                    guessed_key,
+                                                    filename_guess,
+                                                    art["id"],
+                                                )
+                                                logger.info(
+                                                    f"[CloudBuild] Sync recovered key: {guessed_key}"
+                                                )
+                                                break
+                                        except Exception:
+                                            continue
+                            else:
+                                # Failed or cancelled
+                                await conn.execute(
+                                    """UPDATE cloud_build_artifacts
+                                       SET status = $1::text, 
+                                           error_message = COALESCE(error_message, 'Build finished with status: ' || $1::text)
+                                       WHERE build_id = $2::text AND status IN ('pending', 'running')""",
+                                    db_status,
+                                    build_id,
+                                )
 
                         # Refresh build data
                         build = await conn.fetchrow(
@@ -1326,47 +1619,84 @@ async def get_build_status(
             "SELECT * FROM cloud_build_artifacts WHERE build_id = $1", build_id
         )
 
+        language = build.get("language") or "python"
+
         artifact_list = []
         for art in artifacts:
             download_url = None
             download_key = art["download_key"]
 
-            # Recovery: If completed but no key (failed webhook), guess the key
-            # New GCS pattern: builds/{build_id}/{platform}/{filename}
-            if art["status"] == "completed" and not download_key:
-                # Try multiple filename patterns
-                possible_filenames = [
-                    f"{art['platform']}_build.zip",
-                    f"{build_id}_{art['platform']}.zip",
-                    f"source.{art['platform']}.zip",
-                ]
+            if (
+                art["status"] in ["completed", "pending", "running"]
+                and not download_key
+            ):
+                if build["status"] == "completed" or art["status"] == "completed":
+                    output_name = build.get("output_name") or "app"
 
-                for filename_guess in possible_filenames:
-                    guessed_key = (
-                        f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                    if art["status"] in ["pending", "running"]:
+                        await conn.execute(
+                            "UPDATE cloud_build_artifacts SET status = 'completed' WHERE id = $1",
+                            art["id"],
+                        )
+                        logger.info(
+                            f"[CloudBuild] Fixed artifact status from {art['status']} to completed"
+                        )
+                        art = await conn.fetchrow(
+                            "SELECT * FROM cloud_build_artifacts WHERE id = $1",
+                            art["id"],
+                        )
+
+                    # Use new priority-based filename detection
+                    from routes.cloud_build_utils import (
+                        get_artifact_filename_priority,
+                        find_artifact_in_gcs,
+                        check_gcs_blob_exists,
                     )
 
-                    # Try to generate signed URL to verify blob exists
-                    try:
-                        test_url = generate_gcs_signed_url(guessed_key)
-                        if test_url:
-                            download_key = guessed_key
-                            logger.info(
-                                f"[CloudBuild] Recovered missing download key: {download_key}"
-                            )
+                    possible_filenames = get_artifact_filename_priority(
+                        art["platform"], language, output_name
+                    )
 
-                            # Update DB to save the guess so we don't guess every time
+                    for filename_guess in possible_filenames:
+                        guessed_key = (
+                            f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                        )
+
+                        try:
+                            # Check if file exists before generating URL
+                            if check_gcs_blob_exists(guessed_key):
+                                download_key = guessed_key
+                                logger.info(
+                                    f"[CloudBuild] Recovered missing download key: {download_key}"
+                                )
+
+                                await conn.execute(
+                                    "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2, status = 'completed' WHERE id = $3",
+                                    download_key,
+                                    filename_guess,
+                                    art["id"],
+                                )
+                                break
+                        except Exception as recovery_error:
+                            logger.debug(
+                                f"[CloudBuild] Recovery attempt failed for {guessed_key}: {recovery_error}"
+                            )
+                            continue
+
+                    # If still not found, use GCS listing
+                    if not download_key:
+                        found = find_artifact_in_gcs(build_id, art["platform"])
+                        if found:
+                            download_key, filename = found
+                            logger.info(
+                                f"[CloudBuild] Found artifact via GCS listing: {download_key}"
+                            )
                             await conn.execute(
-                                "UPDATE cloud_build_artifacts SET download_key = $1 WHERE id = $2",
+                                "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2, status = 'completed' WHERE id = $3",
                                 download_key,
+                                filename,
                                 art["id"],
                             )
-                            break
-                    except Exception as recovery_error:
-                        logger.debug(
-                            f"[CloudBuild] Recovery attempt failed for {guessed_key}: {recovery_error}"
-                        )
-                        continue
 
             if art["status"] == "completed" and download_key:
                 download_url = generate_gcs_signed_url(download_key)
@@ -1506,100 +1836,351 @@ async def sync_build_status(
                 "synced": False,
             }
 
-        try:
-            import sys
-            if sys.platform == "win32":
-                from cloud_build_integration import CloudBuildClient
-            else:
-                from cloud_build_cli_wrapper import CloudBuildClient
+        from cloud_build_integration import CloudBuildClient
 
-            cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
-            gcp_status = cloud_build.get_build_status(remote_build_id)
+        cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
+        gcp_status = cloud_build.get_build_status(remote_build_id)
 
-            real_gcp_status = gcp_status.get("status", "")
+        real_gcp_status = gcp_status.get("status", "")
 
-            # Map GCP status
-            status_map = {
-                "QUEUED": "queued",
-                "WORKING": "running",
-                "SUCCESS": "completed",
-                "FAILURE": "failed",
-                "CANCELLED": "cancelled",
-                "EXPIRED": "failed",
-            }
+        status_map = {
+            "QUEUED": "queued",
+            "WORKING": "running",
+            "SUCCESS": "completed",
+            "FAILURE": "failed",
+            "CANCELLED": "cancelled",
+            "EXPIRED": "failed",
+        }
 
-            db_status = status_map.get(real_gcp_status, build["status"])
+        db_status = status_map.get(real_gcp_status, build["status"])
 
-            # Only update if status changed
-            if db_status != build["status"]:
-                await conn.execute(
-                    """UPDATE cloud_builds 
-                       SET status = $1, 
-                           completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
-                           error_message = COALESCE(error_message, $2)
-                       WHERE id = $3""",
-                    db_status,
-                    gcp_status.get(
-                        "status_details", f"Build {db_status} in Cloud Build"
-                    ),
+        if db_status != build["status"]:
+            await conn.execute(
+                """UPDATE cloud_builds 
+                   SET status = $1, 
+                       completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
+                       error_message = COALESCE(error_message, $2)
+                   WHERE id = $3""",
+                db_status,
+                gcp_status.get("status_details", f"Build {db_status} in Cloud Build"),
+                build_id,
+            )
+
+            if db_status == "completed":
+                artifacts = await conn.fetch(
+                    "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
                     build_id,
                 )
 
-                # A6: Recover artifact download keys for completed builds
-                if db_status == "completed":
-                    artifacts = await conn.fetch(
-                        "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
-                        build_id,
-                    )
-                    for art in artifacts:
-                        if art["status"] == "completed" and not art["download_key"]:
-                            # Try to recover the download key using the same logic as status endpoint
-                            possible_filenames = [
-                                f"{art['platform']}_build.zip",
-                                f"{build_id}_{art['platform']}.zip",
-                                f"source.{art['platform']}.zip",
-                            ]
+                output_name = build.get("output_name") or "app"
 
-                            for filename_guess in possible_filenames:
-                                guessed_key = f"builds/{build_id}/{art['platform']}/{filename_guess}"
-                                try:
-                                    test_url = generate_gcs_signed_url(guessed_key)
-                                    if test_url:
-                                        await conn.execute(
-                                            "UPDATE cloud_build_artifacts SET download_key = $1 WHERE id = $2",
-                                            guessed_key,
-                                            art["id"],
-                                        )
-                                        logger.info(
-                                            f"[CloudBuild] Sync recovered download key for {art['platform']}: {guessed_key}"
-                                        )
-                                        break
-                                except Exception:
-                                    continue
+                for art in artifacts:
+                    if art["status"] in ["pending", "running"]:
+                        await conn.execute(
+                            """UPDATE cloud_build_artifacts 
+                               SET status = 'completed', completed_at = NOW() 
+                               WHERE id = $1""",
+                            art["id"],
+                        )
+                        logger.info(
+                            f"[CloudBuild] Sync marked artifact {art['platform']} as completed"
+                        )
 
-                logger.info(
-                    f"[CloudBuild] Manual sync: Build {build_id} status changed from {build['status']} to {db_status}"
+                    if not art["download_key"]:
+                        # Use the new priority-based filename detection
+                        from routes.cloud_build_utils import (
+                            get_artifact_filename_priority,
+                            find_artifact_in_gcs,
+                            check_gcs_blob_exists,
+                        )
+
+                        language = build.get("language") or "python"
+                        possible_filenames = get_artifact_filename_priority(
+                            art["platform"], language, output_name
+                        )
+
+                        for filename_guess in possible_filenames:
+                            guessed_key = (
+                                f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                            )
+                            try:
+                                if check_gcs_blob_exists(guessed_key):
+                                    await conn.execute(
+                                        "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                        guessed_key,
+                                        filename_guess,
+                                        art["id"],
+                                    )
+                                    logger.info(
+                                        f"[CloudBuild] Sync recovered download key for {art['platform']}: {guessed_key}"
+                                    )
+                                    break
+                            except Exception:
+                                continue
+
+                        if not art.get("download_key"):
+                            found = find_artifact_in_gcs(build_id, art["platform"])
+                            if found:
+                                download_key, filename = found
+                                await conn.execute(
+                                    "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                    download_key,
+                                    filename,
+                                    art["id"],
+                                )
+                                logger.info(
+                                    f"[CloudBuild] Sync found artifact via GCS listing: {download_key}"
+                                )
+
+            logger.info(
+                f"[CloudBuild] Manual sync: Build {build_id} status changed from {build['status']} to {db_status}"
+            )
+
+            return {
+                "message": "Status synced from Cloud Build",
+                "previous_status": build["status"],
+                "current_status": db_status,
+                "cloud_status": real_gcp_status,
+                "synced": True,
+            }
+        else:
+            return {
+                "message": "Status is already up to date",
+                "status": db_status,
+                "cloud_status": real_gcp_status,
+                "synced": True,
+            }
+
+    except Exception as e:
+        logger.error(f"[CloudBuild] Manual sync failed: {e}")
+        raise HTTPException(500, f"Failed to sync with Cloud Build: {str(e)}")
+
+    finally:
+        await release_db(conn)
+
+
+@router.get("/{build_id}/gcp-sync")
+async def gcp_direct_sync(
+    build_id: str,
+    user: dict = Depends(get_current_user),
+    _: None = Depends(requires_feature("cloud_compilation")),
+):
+    """
+    Direct sync with GCP Cloud Build API.
+    Bypasses webhook issues by querying GCP directly.
+    Returns full build status with artifact recovery.
+    """
+    conn = await get_db()
+    try:
+        build = await conn.fetchrow(
+            "SELECT * FROM cloud_builds WHERE id = $1 AND user_id = $2",
+            build_id,
+            user["id"],
+        )
+        if not build:
+            raise HTTPException(404, "Build not found")
+
+        remote_build_id = get_remote_build_id(build)
+        gcp_status_obtained = False
+        real_gcp_status = None
+
+        # Try to get status from GCP if we have the build ID
+        if remote_build_id:
+            try:
+                from cloud_build_integration import CloudBuildClient
+
+                cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
+                gcp_status = cloud_build.get_build_status(remote_build_id)
+                real_gcp_status = gcp_status.get("status", "")
+                gcp_status_obtained = True
+
+                status_map = {
+                    "QUEUED": "queued",
+                    "WORKING": "running",
+                    "SUCCESS": "completed",
+                    "FAILURE": "failed",
+                    "CANCELLED": "cancelled",
+                    "EXPIRED": "failed",
+                }
+                db_status = status_map.get(real_gcp_status, build["status"])
+            except Exception as e:
+                logger.warning(
+                    f"[CloudBuild] Could not get GCP status for {remote_build_id}: {e}"
+                )
+                db_status = build["status"]
+        else:
+            # No GCP build ID stored - try to recover via GCS listing
+            db_status = build["status"]
+
+        # If build is still pending/running and we don't have GCP status, check GCS for artifacts
+        # This handles the case where webhook failed and we never got the GCP build ID
+        if build["status"] in ["pending", "queued", "running"]:
+            if not remote_build_id or not gcp_status_obtained:
+                # Try to find artifacts directly in GCS
+                output_name = build.get("output_name") or "app"
+                target_platforms = json.loads(
+                    build.get("target_platforms") or '["windows"]'
                 )
 
-                return {
-                    "message": "Status synced from Cloud Build",
-                    "previous_status": build["status"],
-                    "current_status": db_status,
-                    "cloud_status": real_gcp_status,
-                    "synced": True,
-                }
-            else:
-                return {
-                    "message": "Status is already up to date",
-                    "status": db_status,
-                    "cloud_status": real_gcp_status,
-                    "synced": True,
-                }
+                artifacts_found = False
+                for platform in target_platforms:
+                    try:
+                        from google.cloud import storage as gcs_storage
+                        from config import GCS_BUILDS_BUCKET
 
-        except Exception as e:
-            logger.error(f"[CloudBuild] Manual sync failed: {e}")
-            raise HTTPException(500, f"Failed to sync with Cloud Build: {str(e)}")
+                        gcs_client = gcs_storage.Client()
+                        bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+                        prefix = f"builds/{build_id}/{platform}/"
 
+                        blobs = list(bucket.list_blobs(prefix=prefix, max_results=10))
+                        for blob in blobs:
+                            if blob.name.endswith((".zip", ".exe", ".tar.gz")):
+                                artifacts_found = True
+                                break
+                        if artifacts_found:
+                            break
+                    except Exception as list_err:
+                        logger.warning(f"[CloudBuild] GCS listing failed: {list_err}")
+
+                if artifacts_found:
+                    db_status = "completed"
+                    real_gcp_status = "SUCCESS"
+                    logger.info(
+                        f"[CloudBuild] Found artifacts in GCS, marking as completed: {build_id}"
+                    )
+
+        # Update status if changed
+        if db_status != build["status"]:
+            await conn.execute(
+                """UPDATE cloud_builds 
+                   SET status = $1, 
+                       completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
+                       error_message = COALESCE(error_message, $2)
+                   WHERE id = $3""",
+                db_status,
+                f"Build {db_status} in Cloud Build",
+                build_id,
+            )
+
+        # Handle completed builds - recover artifacts
+        if db_status == "completed":
+            output_name = build.get("output_name") or "app"
+            artifacts = await conn.fetch(
+                "SELECT * FROM cloud_build_artifacts WHERE build_id = $1",
+                build_id,
+            )
+
+            for art in artifacts:
+                if art["status"] in ["pending", "running"]:
+                    await conn.execute(
+                        "UPDATE cloud_build_artifacts SET status = 'completed' WHERE id = $1",
+                        art["id"],
+                    )
+
+                if not art["download_key"]:
+                    # Try multiple filename patterns (prioritize onefile EXE for Windows)
+                    possible_filenames = []
+
+                    if art["platform"] == "windows":
+                        # Onefile mode: single self-contained EXE
+                        possible_filenames.append(f"{output_name}.exe")
+                        # Fallback: zip file with DLLs (standalone mode)
+                        possible_filenames.append(f"{output_name}-windows.zip")
+
+                    if art["platform"] == "linux":
+                        # Onefile mode: single binary
+                        possible_filenames.append(f"{output_name}")
+                        # Fallback: tar.gz
+                        possible_filenames.append(f"{output_name}-linux.tar.gz")
+                        possible_filenames.append(f"{output_name}.tar.gz")
+
+                    for filename_guess in possible_filenames:
+                        guessed_key = (
+                            f"builds/{build_id}/{art['platform']}/{filename_guess}"
+                        )
+                        try:
+                            test_url = generate_gcs_signed_url(guessed_key)
+                            if test_url:
+                                await conn.execute(
+                                    "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                    guessed_key,
+                                    filename_guess,
+                                    art["id"],
+                                )
+                                logger.info(
+                                    f"[CloudBuild] GCP sync recovered: {guessed_key}"
+                                )
+                                break
+                        except Exception:
+                            continue
+
+                    # If still no download key, try GCS listing
+                    if not art.get("download_key"):
+                        try:
+                            from google.cloud import storage as gcs_storage
+                            from config import GCS_BUILDS_BUCKET
+
+                            gcs_client = gcs_storage.Client()
+                            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+                            prefix = f"builds/{build_id}/{art['platform']}/"
+                            blobs = list(
+                                bucket.list_blobs(prefix=prefix, max_results=10)
+                            )
+                            for blob in blobs:
+                                if blob.name.endswith((".zip", ".exe", ".tar.gz")):
+                                    await conn.execute(
+                                        "UPDATE cloud_build_artifacts SET download_key = $1, download_filename = $2 WHERE id = $3",
+                                        blob.name,
+                                        blob.name.split("/")[-1],
+                                        art["id"],
+                                    )
+                                    logger.info(
+                                        f"[CloudBuild] GCP sync found via listing: {blob.name}"
+                                    )
+                                    break
+                        except Exception as list_err:
+                            logger.warning(
+                                f"[CloudBuild] GCS listing failed: {list_err}"
+                            )
+
+        # Refresh data after updates
+        build = await conn.fetchrow(
+            "SELECT * FROM cloud_builds WHERE id = $1", build_id
+        )
+        artifacts = await conn.fetch(
+            "SELECT * FROM cloud_build_artifacts WHERE build_id = $1", build_id
+        )
+
+        artifact_list = []
+        for art in artifacts:
+            download_url = None
+            if art["status"] == "completed" and art["download_key"]:
+                download_url = generate_gcs_signed_url(art["download_key"])
+            artifact_list.append(
+                {
+                    "platform": art["platform"],
+                    "status": art["status"],
+                    "download_url": download_url,
+                    "filename": art["download_filename"]
+                    or f"{art['platform']}_build.zip",
+                    "error": art["error_message"],
+                }
+            )
+
+        return {
+            "id": build["id"],
+            "status": build["status"],
+            "gcp_status": real_gcp_status or "unknown",
+            "artifacts": artifact_list,
+            "synced": True,
+            "message": f"Synced from GCP: {real_gcp_status or 'via artifact detection'}",
+        }
+
+    except Exception as e:
+        import traceback
+
+        logger.error(f"[CloudBuild] GCP sync failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, f"Failed to sync with GCP: {str(e)}")
     finally:
         await release_db(conn)
 
@@ -1634,10 +2215,11 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
@@ -1700,10 +2282,11 @@ async def cancel_cloud_build(
         if remote_build_id:
             try:
                 import sys
+
                 if sys.platform == "win32":
                     from cloud_build_integration import CloudBuildClient
                 else:
-                    from cloud_build_cli_wrapper import CloudBuildClient
+                    from cloud_build_integration import CloudBuildClient
 
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 cloud_build.cancel_build(remote_build_id)
@@ -2111,6 +2694,58 @@ async def process_build_queue():
                                 if (safe_alt / "source").exists():
                                     source_dir = safe_alt / "source"
 
+                                # If still no source, try to download from project_files
+                                if not source_dir.exists() or not list(
+                                    source_dir.iterdir()
+                                ):
+                                    project_files = await conn.fetch(
+                                        """SELECT id, filename, original_filename, file_path, is_cloud 
+                                           FROM project_files WHERE project_id = $1""",
+                                        project_id,
+                                    )
+                                    if project_files:
+                                        import shutil
+
+                                        persistent_source = safe_project_dir / "source"
+                                        persistent_source.mkdir(
+                                            parents=True, exist_ok=True
+                                        )
+
+                                        for pf in project_files:
+                                            try:
+                                                file_content = (
+                                                    await storage_service.download_file(
+                                                        pf["file_path"],
+                                                        not pf["is_cloud"],
+                                                    )
+                                                )
+                                                if file_content:
+                                                    safe_fn = (
+                                                        pf["original_filename"]
+                                                        or pf["filename"]
+                                                    )
+                                                    safe_fn = "".join(
+                                                        c
+                                                        for c in safe_fn
+                                                        if c.isalnum() or c in "._-"
+                                                    )
+                                                    if not safe_fn:
+                                                        safe_fn = f"file_{pf['id']}"
+                                                    (
+                                                        persistent_source / safe_fn
+                                                    ).write_bytes(file_content)
+                                            except Exception as dl_err:
+                                                logger.warning(
+                                                    f"Error downloading file {pf['filename']}: {dl_err}"
+                                                )
+
+                                        if list(persistent_source.iterdir()):
+                                            source_dir = persistent_source
+                                        else:
+                                            shutil.rmtree(
+                                                persistent_source, ignore_errors=True
+                                            )
+
                             if source_dir.exists() and list(source_dir.iterdir()):
                                 # Trigger the build
                                 logger.info(
@@ -2168,6 +2803,9 @@ async def get_queue_position(build_id: str) -> Optional[int]:
 
 async def trigger_build_directly(build_id: str, config: dict, project_id: str):
     """Fallback: trigger build directly without queue."""
+    import traceback
+
+    conn = None
     try:
         # Security: Validate project_id and construct safe source directory path
         safe_project_dir = validate_safe_path(UPLOAD_DIR, project_id)
@@ -2188,12 +2826,106 @@ async def trigger_build_directly(build_id: str, config: dict, project_id: str):
                 if not str(source_dir).startswith(str(projects_base.resolve())):
                     raise HTTPException(400, "Invalid source directory path")
 
+        # If still no source, try to download from project_files
+        if not source_dir.exists() or not list(source_dir.iterdir()):
+            conn = await get_db()
+            try:
+                project_files = await conn.fetch(
+                    """SELECT id, filename, original_filename, file_path, is_cloud 
+                       FROM project_files WHERE project_id = $1""",
+                    project_id,
+                )
+                if project_files:
+                    import shutil
+
+                    persistent_source = safe_project_dir / "source"
+                    persistent_source.mkdir(parents=True, exist_ok=True)
+
+                    for pf in project_files:
+                        try:
+                            file_content = await storage_service.download_file(
+                                pf["file_path"], not pf["is_cloud"]
+                            )
+                            if file_content:
+                                safe_fn = pf["original_filename"] or pf["filename"]
+                                safe_fn = "".join(
+                                    c for c in safe_fn if c.isalnum() or c in "._-"
+                                )
+                                if not safe_fn:
+                                    safe_fn = f"file_{pf['id']}"
+                                (persistent_source / safe_fn).write_bytes(file_content)
+                        except Exception as dl_err:
+                            logger.warning(
+                                f"Error downloading file {pf['filename']}: {dl_err}"
+                            )
+
+                    if list(persistent_source.iterdir()):
+                        source_dir = persistent_source
+                    else:
+                        shutil.rmtree(persistent_source, ignore_errors=True)
+            finally:
+                if conn:
+                    await release_db(conn)
+                    conn = None
+
         started = await trigger_cloud_build(build_id, config, source_dir)
         if not started:
-            return {"status": "error", "message": "Failed to start cloud build"}
+            return {
+                "status": "error",
+                "message": "Failed to start cloud build - check logs",
+            }
         return {"status": "running", "message": "Build started immediately"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+
+        # Clean up error message - filter out long HTML responses
+        clean_error = error_msg
+        if "<!doctype html>" in error_msg or "<html" in error_msg.lower():
+            if "Unable to retrieve" in error_msg:
+                clean_error = "Unable to retrieve Identity Pool subject token - check Workload Identity configuration in GCP"
+            elif "DefaultCredentialsError" in error_msg:
+                clean_error = "GCP credentials not found - check Workload Identity or service account configuration"
+            else:
+                clean_error = (
+                    "GCP authentication failed - check Workload Identity configuration"
+                )
+
+        # Clean traceback
+        clean_traceback = error_traceback
+        if "<!doctype html>" in error_traceback or "<html" in error_traceback.lower():
+            lines = error_traceback.split("\n")
+            clean_lines = []
+            for line in lines:
+                if "<!" in line or "<html" in line.lower() or len(line) > 200:
+                    break
+                clean_lines.append(line)
+            clean_traceback = "\n".join(clean_lines)
+            if not clean_traceback:
+                clean_traceback = clean_error
+
+        logger.error(f"[CloudBuild] trigger_build_directly failed: {clean_error}")
+
+        # Store detailed error in database
+        try:
+            conn = await get_db()
+            await conn.execute(
+                """UPDATE cloud_builds 
+                   SET status = 'failed', 
+                       error_message = $1,
+                       admin_error_details = $2
+                   WHERE id = $3""",
+                clean_error,
+                clean_traceback,
+                build_id,
+            )
+        except Exception as db_err:
+            logger.error(f"[CloudBuild] Failed to store error in DB: {db_err}")
+
+        return {
+            "status": "error",
+            "message": f"Failed to start cloud build: {error_msg}",
+        }
 
 
 @router.get("/{build_id}/queue-position")

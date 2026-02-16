@@ -50,6 +50,8 @@ _CV_PUBLIC_KEY = """{public_key}"""
 _CV_BINARY_HASH = "{binary_hash}"
 _CV_HEARTBEAT_INTERVAL = {heartbeat_interval}
 _CV_APP_NAME = "{app_name}"
+_CV_LEASE_ENABLED = {lease_enabled}
+_CV_SHOW_BRANDING = {show_branding}
 
 # Lease configuration
 _CV_LEASE_DURATION = 24 * 60 * 60  # 24 hours
@@ -363,6 +365,8 @@ def _cv_create_lease(license_key, hwid, server_time, duration=_CV_LEASE_DURATION
 
 def _cv_save_lease(lease_data):
     """Save encrypted lease to file using atomic write."""
+    if not _CV_LEASE_ENABLED:
+        return False
     try:
         lease_path = _cv_get_lease_path()
         encrypted = _cv_encrypt_lease(lease_data)
@@ -389,6 +393,8 @@ def _cv_save_lease(lease_data):
 
 def _cv_load_lease():
     """Load and decrypt lease from file."""
+    if not _CV_LEASE_ENABLED:
+        return None
     try:
         lease_path = _cv_get_lease_path()
         if _cv_os.path.exists(lease_path):
@@ -712,10 +718,16 @@ class CloudRunner:
             logger.error(error_msg)
 
             # Write to error file for the workflow to pick up
+            # Write to both output_dir AND source_dir for compatibility
             err_file = self.output_dir / "error_message.txt"
+            err_file_src = self.source_dir / "error_message.txt"
+
             # Ensure output dir exists
             self.output_dir.mkdir(parents=True, exist_ok=True)
             with open(err_file, "w") as f:
+                f.write(error_msg)
+            # Also write to source dir for cloud build compatibility
+            with open(err_file_src, "w") as f:
                 f.write(error_msg)
 
             sys.exit(1)
@@ -849,11 +861,11 @@ class CloudRunner:
         public_key = self.config.get("signing_public_key") or self.config.get(
             "public_key", ""
         )
-        binary_hash = self.config.get("binary_hash", "skip")  # Skip if not computed yet
-        heartbeat_interval = self.config.get(
-            "heartbeat_interval", 300
-        )  # 5 minutes default
+        binary_hash = self.config.get("binary_hash", "skip")
+        heartbeat_interval = self.config.get("heartbeat_interval", 300)
         app_name = self.config.get("app_name", "Protected Application")
+        lease_enabled = self.config.get("lease_enabled", True)
+        show_branding = self.config.get("show_branding", True)
 
         if license_key == "demo":
             wrapper = PYTHON_DEMO_WRAPPER
@@ -865,6 +877,8 @@ class CloudRunner:
                 .replace("{binary_hash}", binary_hash)
                 .replace("{heartbeat_interval}", str(heartbeat_interval))
                 .replace("{app_name}", app_name)
+                .replace("{lease_enabled}", "True" if lease_enabled else "False")
+                .replace("{show_branding}", "True" if show_branding else "False")
             )
 
         entry_path.write_text(wrapper + "\n\n" + original_code, encoding="utf-8")
@@ -897,55 +911,55 @@ class CloudRunner:
             sys.executable,
             "-m",
             "nuitka",
-            "--standalone",
-            # "--onefile", # Moved to logic below
-            # "--remove-output", # Removed: causes race conditions with scons-report.txt
+            "--onefile",  # Single self-contained EXE with all DLLs embedded
+            "--standalone",  # Required base for onefile
             "--assume-yes-for-downloads",
             "--lto=no",  # Disable Link-Time Optimization (much faster builds)
-            "--disable-ccache",  # Disable ccache to reduce external process calls
-            # "--show-progress", # Disabled to reduce CI log spam
         ]
 
         # Add macOS specific flags
         if sys.platform == "darwin":
             cmd.append("--macos-create-app-bundle")
 
-        # Fast Build Logic (Skip compression)
-        fast_build = self.config.get("fast_build", False)
-        if fast_build or sys.platform == "win32":
-            if sys.platform == "win32":
-                logger.warning(
-                    "Windows detected: Disabling --onefile for stability in Wine"
-                )
-                # FIX: Use pefile instead of depends.exe to avoid Wine crashes (missing MFC42.dll)
-                # Newer Nuitka uses --dependency-tool=pefile, older uses experimental flag
-                # We add both for compatibility, Nuitka ignores unknown experimental flags usually
-                cmd.append("--experimental=use_pefile_recursion")
-            else:
-                logger.info("🚀 Fast Build Enabled: Skipping --onefile compression")
-            # In fast build or Windows/Wine, we output to a directory
-            # The packaging step in CI will zip this directory
+        # Windows/Wine specific handling
+        if sys.platform == "win32":
+            logger.info("Windows/Wine: Using --onefile for single EXE output")
+            # Use pefile for dependency detection (works better in Wine)
+            cmd.append("--experimental=use_pefile_recursion")
         else:
-            cmd.append("--onefile")
+            logger.info("Using --onefile mode (single self-contained binary)")
 
         cmd.extend(
             [f"--output-filename={output_exe}", f"--output-dir={self.output_dir}"]
         )
 
-        # Parallel jobs
-        # Detect if running in Cloud Build (8+ CPUs) vs GitHub Actions (2 CPUs)
+        # Parallel jobs - OPTIMIZED for E2_HIGHCPU_8 (8 vCPUs)
         available_cpus = multiprocessing.cpu_count()
+        env_jobs = os.environ.get("NUITKA_JOBS", "")
 
         if sys.platform == "win32":
-            # Windows/Wine is unstable with multiple jobs
+            # Windows/Wine is unstable with multiple jobs - keep at 1
             job_count = 1
-            logger.warning(
-                "Windows detected: Forcing job count to 1 for stability in Wine"
-            )
+            logger.warning("Windows/Wine: Using 1 job for stability")
         else:
-            # Linux: Force job count to 1 to avoid Scons race conditions with @@link_input.txt
-            job_count = 1
-            logger.warning("Forcing job count to 1 to avoid Scons link race conditions")
+            # Linux: Use environment variable or calculate optimal jobs
+            if env_jobs:
+                job_count = int(env_jobs)
+                logger.info(f"Using NUITKA_JOBS from environment: {job_count}")
+            elif available_cpus >= 8:
+                # On 8+ core machines, use 6 jobs (leave 2 for system)
+                job_count = 6
+                logger.info(f"Using {job_count} parallel jobs (8-core optimization)")
+            elif available_cpus >= 4:
+                # On 4+ core machines, use 3 jobs
+                job_count = 3
+                logger.info(f"Using {job_count} parallel jobs (4-core optimization)")
+            elif available_cpus >= 2:
+                job_count = 2
+                logger.info(f"Using {job_count} parallel jobs")
+            else:
+                job_count = 1
+                logger.warning("Single CPU detected, using 1 job")
 
         cmd.append(f"--jobs={job_count}")
         logger.info(
@@ -1115,6 +1129,9 @@ def main():
         if sys.platform == "win32" or os.environ.get("WINEPREFIX"):
             # Cloud Build expects 'build_output_windows_wine'
             platform_suffix = "windows_wine"
+        elif sys.platform == "linux":
+            # Standardize Linux output directory name
+            platform_suffix = "linux"
 
         output_dir = source_dir / f"build_output_{platform_suffix}"
         output_dir.mkdir(exist_ok=True)

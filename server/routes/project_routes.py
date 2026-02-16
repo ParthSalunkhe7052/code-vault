@@ -464,14 +464,21 @@ async def upload_project_zip(
         project_dir.mkdir(parents=True, exist_ok=True)
 
         zip_path = safe_join(project_dir, "project.zip")
-        content = await file.read()
 
-        is_valid, error_msg = validate_file_size(len(content), is_zip=True)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=error_msg)
+        # Stream upload for large files - process in chunks to avoid memory issues
+        CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+        total_size = 0
 
         with open(zip_path, "wb") as f:
-            f.write(content)
+            while chunk := await file.read(CHUNK_SIZE):
+                total_size += len(chunk)
+                # Validate size as we go
+                is_valid, error_msg = validate_file_size(total_size, is_zip=True)
+                if not is_valid:
+                    f.close()
+                    zip_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=400, detail=error_msg)
+                f.write(chunk)
 
         source_dir = safe_join(project_dir, "source")
         if source_dir.exists():

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sys
 import yaml
 from typing import Dict, Any, Optional
 from google.cloud.devtools import cloudbuild_v1
@@ -19,74 +20,28 @@ logger = logging.getLogger(__name__)
 
 def get_gcp_credentials() -> Optional[Any]:
     """
-    Get GCP credentials using Workload Identity (for Heroku) or service account.
-    Priority:
-    1. Workload Identity (Heroku)
-    2. Service account file
-    3. Application Default Credentials
+    Get GCP credentials - Priority:
+    1. Service account JSON (GCP_SERVICE_ACCOUNT_JSON env var)
+    2. Service account file (GOOGLE_APPLICATION_CREDENTIALS)
+    3. Workload Identity (if configured and other options fail)
+    4. Application Default Credentials
     """
-    import httpx
-
-    # Check for Workload Identity configuration (Heroku)
-    workload_pool = os.getenv("GCP_WORKLOAD_IDENTITY_POOL")
-    service_account_email = os.getenv("GCP_SERVICE_ACCOUNT")
-
-    logger.info(
-        f"[CloudBuild] Checking GCP credentials - workload_pool: {workload_pool}, service_account: {service_account_email}"
-    )
-
-    if workload_pool and service_account_email:
+    # FIRST: Check for service account JSON in environment variable (best for Heroku)
+    service_account_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+    if service_account_json:
         try:
-            # Get Heroku OIDC token from metadata endpoint
-            heroku_app_id = None
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get("https://heroku.com/dyno/metadata")
-                    logger.info(
-                        f"[CloudBuild] Heroku metadata response status: {response.status_code}"
-                    )
-                    if response.status_code == 200:
-                        heroku_app_id = response.json().get("app_id", "")
-                        logger.info(f"[CloudBuild] Heroku app ID: {heroku_app_id}")
-            except Exception as e:
-                logger.warning(f"[CloudBuild] Could not get Heroku metadata: {e}")
-
-            # Build the correct audience string using the full pool path
-            audience = f"//iam.googleapis.com/{workload_pool}"
-            logger.info(
-                f"[CloudBuild] Creating Workload Identity credentials with audience: {audience}"
+            credentials = service_account.Credentials.from_service_account_info(
+                json.loads(service_account_json),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
-
-            # Try with explicit credential source - let google-auth handle the token exchange
-            from google.auth import identity_pool
-
-            credentials = identity_pool.Credentials.from_info(
-                {
-                    "type": "external_account",
-                    "audience": audience,
-                    "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
-                    "token_url": "https://sts.googleapis.com/v1/token",
-                    "credential_source": {
-                        "url": "https://heroku.com/dyno/metadata",
-                        "format": {
-                            "type": "json",
-                            "subject_token_field_name": "id_token",
-                        },
-                    },
-                }
-            ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
-
             logger.info(
-                "[CloudBuild] Created Workload Identity credentials successfully"
+                "[CloudBuild] Using service account JSON from environment variable (GCP_SERVICE_ACCOUNT_JSON)"
             )
             return credentials
         except Exception as e:
-            logger.error(f"[CloudBuild] Workload Identity failed: {e}")
-            import traceback
+            logger.error(f"[CloudBuild] Failed to parse GCP_SERVICE_ACCOUNT_JSON: {e}")
 
-            logger.error(f"[CloudBuild] Traceback: {traceback.format_exc()}")
-
-    # Check for service account file
+    # SECOND: Check for service account file
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if credentials_path and os.path.exists(credentials_path):
         credentials = service_account.Credentials.from_service_account_file(
@@ -96,10 +51,47 @@ def get_gcp_credentials() -> Optional[Any]:
         logger.info("[CloudBuild] Using service account file credentials")
         return credentials
 
-    # Fall back to Application Default Credentials
-    logger.warning(
-        "[CloudBuild] No credentials found, using Application Default Credentials"
-    )
+    # THIRD: Check for Workload Identity configuration (Heroku) - LAST RESORT
+    workload_pool = os.getenv("GCP_WORKLOAD_IDENTITY_POOL")
+    service_account_email = os.getenv("GCP_SERVICE_ACCOUNT")
+
+    if workload_pool and service_account_email:
+        try:
+            from google.auth import identity_pool
+
+            audience = f"//iam.googleapis.com/{workload_pool}"
+
+            external_credentials = identity_pool.Credentials.from_info(
+                {
+                    "type": "external_account",
+                    "audience": audience,
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+                    "token_url": "https://sts.googleapis.com/v1/token",
+                    "credential_source": {
+                        "url": "https://heroku.com/dyno/metadata",
+                        "format": {
+                            "type": "json",
+                            "subject_token_field_name": "id_token",
+                        },
+                    },
+                    "service_account_impersonation_url": f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{service_account_email}:generateAccessToken",
+                }
+            )
+            return external_credentials
+        except Exception as e:
+            logger.error(f"[CloudBuild] Workload Identity failed: {e}")
+
+    # FOURTH: Try Application Default Credentials (ADC)
+    try:
+        import google.auth
+
+        credentials, project = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credentials
+    except Exception as e:
+        logger.error(f"[CloudBuild] Application Default Credentials failed: {e}")
+
     return None
 
 
@@ -108,15 +100,6 @@ TIER_TIMEOUTS = {
     "free": 1800,  # 30 minutes
     "pro": 3600,  # 60 minutes
     "business": 7200,  # 120 minutes
-}
-
-# Tier-based machine type configuration
-# Note: These are string representations for reference/testing
-# The actual values use cloudbuild_v1.BuildOptions.MachineType enum
-TIER_MACHINES = {
-    "business": "N1_HIGHCPU_8",  # Faster, more expensive (~7-8 min builds)
-    "pro": "E2_HIGHCPU_8",  # Balanced (~8-9 min builds)
-    "free": "E2_MEDIUM",  # Budget (free tier) (~12-15 min builds)
 }
 
 
@@ -128,33 +111,8 @@ class CloudBuildClient:
         project_id: str = "cloudbuild-486309",
         credentials_path: Optional[str] = None,
     ):
-        """
-        Initialize Cloud Build client
-
-        Args:
-            project_id: Google Cloud project ID
-            credentials_path: Path to service account JSON key file
-                            If None, will use Workload Identity (Heroku) or ADC
-        """
         self.project_id = project_id
 
-        # DEBUG: Print environment variables
-        import sys
-
-        print(
-            f"[CloudBuild DEBUG] GCP_WORKLOAD_IDENTITY_POOL={os.getenv('GCP_WORKLOAD_IDENTITY_POOL')}",
-            file=sys.stderr,
-        )
-        print(
-            f"[CloudBuild DEBUG] GCP_SERVICE_ACCOUNT={os.getenv('GCP_SERVICE_ACCOUNT')}",
-            file=sys.stderr,
-        )
-        print(
-            f"[CloudBuild DEBUG] GOOGLE_APPLICATION_CREDENTIALS={os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}",
-            file=sys.stderr,
-        )
-
-        # Try to get credentials using Workload Identity or service account
         credentials = None
         if credentials_path:
             credentials = service_account.Credentials.from_service_account_file(
@@ -165,46 +123,14 @@ class CloudBuildClient:
             credentials = get_gcp_credentials()
 
         if credentials:
-            print(
-                f"[CloudBuild DEBUG] Using provided credentials, type: {type(credentials)}",
-                file=sys.stderr,
-            )
             self.client = cloudbuild_v1.CloudBuildClient(credentials=credentials)
+            self.credentials = credentials
         else:
-            print(
-                f"[CloudBuild DEBUG] No credentials provided, using default",
-                file=sys.stderr,
-            )
-            # Fall back to default credentials
             self.client = cloudbuild_v1.CloudBuildClient()
+            self.credentials = None
 
     def trigger_build(self, build_config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Trigger a Cloud Build job
-
-        Args:
-            build_config: Dictionary containing build configuration:
-                - build_id: Unique build identifier
-                - project_id: User's project ID
-                - language: 'python' or 'nodejs'
-                - target_platforms: Comma-separated list (e.g., 'windows,linux,macos')
-                - source_url: Presigned URL to download source code
-                - config: Build configuration dict (entry_file, output_name, etc.)
-                - callback_url: Webhook URL for completion notification
-                - plan_tier: User's plan tier (free/pro/enterprise)
-                - compatibility_mode: Boolean for compatibility mode
-                - fast_build: Boolean for fast build mode
-
-        Returns:
-            Dictionary with build information:
-                - build_id: Cloud Build ID
-                - status: Build status
-                - logs_url: URL to view build logs
-                - created_at: Timestamp
-
-        Raises:
-            exceptions.GoogleAPIError: If the API call fails
-        """
+        """Trigger a Cloud Build job"""
         # Extract build parameters
         build_id = build_config.get("build_id", "unknown")
         project_id = build_config.get("project_id", "unknown")
@@ -213,89 +139,78 @@ class CloudBuildClient:
         source_url = build_config.get("source_url", "")
         config = build_config.get("config", {})
         callback_url = build_config.get("callback_url", "")
-        _plan_tier = build_config.get("plan_tier", "free")
-        _compatibility_mode = str(build_config.get("compatibility_mode", False)).lower()
-        _fast_build = str(build_config.get("fast_build", False)).lower()
-
-        # SECURITY FEATURES: Ed25519 signatures, binary hash verification, heartbeat
-        # These are synced with CLI wrapper features
-        signing_public_key = build_config.get("signing_public_key", "")
-        signing_private_key = build_config.get("signing_private_key", "")
-        heartbeat_interval = build_config.get("heartbeat_interval", 300)
-        binary_hash = build_config.get("binary_hash", "")
 
         # Create build object
         build = cloudbuild_v1.Build()
 
-        # Load cloudbuild.yaml from local file (not from GitHub repo)
-        cloudbuild_path = os.path.join(os.path.dirname(__file__), "cloudbuild.yaml")
-
+        # Load cloudbuild.yaml from project root (not scripts/ directory)
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        cloudbuild_path = os.path.join(project_root, "cloudbuild.yaml")
         if not os.path.exists(cloudbuild_path):
             raise FileNotFoundError(f"cloudbuild.yaml not found at {cloudbuild_path}")
 
         with open(cloudbuild_path, "r") as f:
             build_config_yaml = yaml.safe_load(f)
 
-        # Helper function to convert camelCase to snake_case
+        # Helper to convert keys
         def camel_to_snake(name):
             s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
             return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
-        # Convert dict keys from camelCase to snake_case recursively
         def convert_keys(obj):
             if isinstance(obj, dict):
                 return {camel_to_snake(k): convert_keys(v) for k, v in obj.items()}
             elif isinstance(obj, list):
                 return [convert_keys(item) for item in obj]
-            else:
-                return obj
+            return obj
 
-        # Set steps from cloudbuild.yaml
+        # Set steps and options
         if "steps" in build_config_yaml:
             converted_steps = convert_keys(build_config_yaml["steps"])
             build.steps = [cloudbuild_v1.BuildStep(**step) for step in converted_steps]
 
-        # Set options (convert camelCase to snake_case)
         if "options" in build_config_yaml:
             converted_options = convert_keys(build_config_yaml["options"])
             build.options = cloudbuild_v1.BuildOptions(**converted_options)
 
-        # Set timeout based on plan tier - use duration_pb2.Duration
+        # Set timeout and machine type based on tier
         tier = build_config.get("plan_tier", "free")
-        timeout_seconds = TIER_TIMEOUTS.get(tier, 3600)
-        build.timeout = duration_pb2.Duration(seconds=timeout_seconds)
+        build.timeout = duration_pb2.Duration(seconds=TIER_TIMEOUTS.get(tier, 3600))
 
-        # Set machine type based on plan tier
-        # Access MachineType via BuildOptions to avoid import errors
-        # Maps to TIER_MACHINES: business->N1_HIGHCPU_8, pro->E2_HIGHCPU_8, free->E2_MEDIUM
+        # OPTIMIZED: Choose machine type based on platform + tier
+        # Windows/Wine can't use parallel jobs effectively, so use smaller machines
+        # Linux builds benefit from 8 cores with 6 parallel Nuitka jobs
         MachineType = cloudbuild_v1.BuildOptions.MachineType
 
-        machine_types = {
-            "business": MachineType.N1_HIGHCPU_8,
-            "pro": MachineType.E2_HIGHCPU_8,
-            "free": MachineType.E2_MEDIUM,
-        }
-        machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
-        build.options.machine_type = machine_type
+        is_windows_only = platforms == "windows" or (
+            isinstance(platforms, str)
+            and "windows" in platforms
+            and "linux" not in platforms
+        )
 
-        # Set secrets
-        if "availableSecrets" in build_config_yaml:
-            secrets_data = convert_keys(build_config_yaml["availableSecrets"])
-            build.available_secrets = cloudbuild_v1.Secrets(**secrets_data)
+        if is_windows_only:
+            # Windows/Wine: Single-threaded Nuitka, no need for 8 cores
+            # E2_MEDIUM (1 vCPU, 4GB) is sufficient for single-threaded builds
+            # Cost savings: $0.003/min vs $0.0156/min (5x cheaper!)
+            build.options.machine_type = MachineType.E2_MEDIUM
+            logger.info(
+                f"[CloudBuild] Windows-only build: using E2_MEDIUM (single-threaded Nuitka)"
+            )
+        else:
+            # Linux builds: Benefit from 8 cores with 6 parallel jobs
+            machine_types = {
+                "business": MachineType.N1_HIGHCPU_8,
+                "pro": MachineType.E2_HIGHCPU_8,
+                "free": MachineType.E2_MEDIUM,
+            }
+            build.options.machine_type = machine_types.get(tier, MachineType.E2_MEDIUM)
 
-        # Upload config to GCS to avoid substitution size limits (8KB max)
-        # Cloud Build substitutions have an 8KB limit, so we store large configs in GCS
+        # Upload config to GCS
         from google.cloud import storage as gcs_storage
 
-        # SECURITY SYNC: Add Ed25519, binary hash, and heartbeat config (synced with CLI wrapper)
-        config["signing_public_key"] = signing_public_key
-        config["signing_private_key"] = signing_private_key
-        config["heartbeat_interval"] = heartbeat_interval
-        config["binary_hash_tracking"] = True
-        config["binary_hash"] = binary_hash
-        config["enable_ed25519_signatures"] = bool(signing_public_key)
-
-        gcs_client = gcs_storage.Client()
+        gcs_client = gcs_storage.Client(
+            credentials=self.credentials, project=self.project_id
+        )
         config_bucket = gcs_client.bucket("codevault-builds")
         config_blob = config_bucket.blob(f"builds/{build_id}/config.json")
         config_blob.upload_from_string(
@@ -303,8 +218,11 @@ class CloudBuildClient:
         )
         config_url = f"gs://codevault-builds/builds/{build_id}/config.json"
 
-        # Add substitution variables (parameters for cloudbuild.yaml)
-        # Use GCS URL for config to avoid 8KB substitution limit
+        # Set Substitutions (GCB expects these to start with _)
+        # IMPORTANT: Only include substitutions that are USED in cloudbuild.yaml steps
+        # Config data (entry_file, license_key, api_url, etc.) is passed via config.json
+        # which is downloaded from _CONFIG_URL - this avoids the 8KB limit and unused var errors
+        callback_secret = build_config.get("callback_secret", "")
         build.substitutions = {
             "_BUILD_ID": build_id,
             "_PROJECT_ID": project_id,
@@ -313,21 +231,17 @@ class CloudBuildClient:
             "_SOURCE_URL": source_url,
             "_CONFIG_URL": config_url,
             "_CALLBACK_URL": callback_url,
+            "_CALLBACK_SECRET": callback_secret,
             "_OUTPUT_NAME": config.get("output_name", "app"),
-            "_DEBUG_BUILD": str(build_config.get("debug_build", "false")).lower(),
-            "_NUITKA_CACHE_DIR": "/workspace/.nuitka-cache",
+            "_GCS_BUCKET": "codevault-builds",
         }
 
         try:
-            # Submit build
             operation = self.client.create_build(
                 project_id=self.project_id, build=build
             )
-
-            # Get build metadata - operation.metadata.build IS the Build object
             build_result = operation.metadata.build if operation.metadata else None
 
-            # Convert create_time to ISO format string
             created_at = None
             if (
                 build_result
@@ -336,196 +250,41 @@ class CloudBuildClient:
             ):
                 created_at = build_result.create_time.isoformat()
 
-            build_id_result = build_result.id if build_result else "unknown"
-
             return {
-                "build_id": build_id_result,
+                "build_id": build_result.id if build_result else "unknown",
                 "status": "QUEUED",
-                "logs_url": f"https://console.cloud.google.com/cloud-build/builds/{build_id_result}?project={self.project_id}",
+                "logs_url": f"https://console.cloud.google.com/cloud-build/builds/{build_result.id}?project={self.project_id}",
                 "created_at": created_at,
                 "project": self.project_id,
             }
-
         except exceptions.GoogleAPIError as e:
             raise Exception(f"Cloud Build API error: {str(e)}")
 
     def get_build_status(self, build_id: str) -> Dict[str, Any]:
-        """
-        Get the status of a Cloud Build job
-
-        Args:
-            build_id: Cloud Build ID
-
-        Returns:
-            Dictionary with build status information
-        """
+        """Get the status of a Cloud Build job"""
         try:
             build = self.client.get_build(project_id=self.project_id, id=build_id)
 
-            # Helper to safely convert timestamps
             def format_time(ts):
                 if not ts:
                     return None
-                if hasattr(ts, "isoformat"):
-                    return ts.isoformat()
-                if hasattr(ts, "ToJsonString"):
-                    return ts.ToJsonString()
-                return str(ts)
+                return ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
             return {
                 "build_id": build.id,
-                "status": build.status.name,  # QUEUED, WORKING, SUCCESS, FAILURE, etc.
+                "status": build.status.name,
                 "create_time": format_time(build.create_time),
                 "start_time": format_time(build.start_time),
                 "finish_time": format_time(build.finish_time),
                 "logs_url": build.log_url,
             }
-
         except exceptions.GoogleAPIError as e:
             raise Exception(f"Failed to get build status: {str(e)}")
 
     def cancel_build(self, build_id: str) -> bool:
-        """
-        Cancel a running Cloud Build job
-
-        Args:
-            build_id: Cloud Build ID
-
-        Returns:
-            True if successful
-        """
+        """Cancel a running Cloud Build job"""
         try:
             self.client.cancel_build(project_id=self.project_id, id=build_id)
             return True
-
         except exceptions.GoogleAPIError as e:
             raise Exception(f"Failed to cancel build: {str(e)}")
-
-
-# ============================================
-# Example Usage for Your Backend
-# ============================================
-
-
-def example_usage():
-    """
-    Example: How to use this in your backend
-    """
-
-    # Initialize client (one-time setup)
-    # Make sure to set GOOGLE_APPLICATION_CREDENTIALS environment variable
-    # or pass credentials_path directly
-    cloud_build = CloudBuildClient(
-        project_id="cloudbuild-486309",
-        credentials_path="/path/to/service-account-key.json",  # Or use env var
-    )
-
-    # Trigger a build (replace GitHub Actions call with this)
-    build_config = {
-        "build_id": "build-12345",
-        "project_id": "user-project-123",
-        "language": "python",
-        "target_platforms": "windows,linux",
-        "source_url": "https://your-r2-bucket.com/presigned-url/source.zip",
-        "config": {
-            "entry_file": "main.py",
-            "output_name": "my-app",
-            "license_key": "GENERIC_BUILD",
-            "api_url": "https://your-api.com/validate",
-        },
-        "callback_url": "https://your-api.com/webhook/build-complete",
-        "plan_tier": "free",
-        "compatibility_mode": False,
-        "fast_build": False,
-    }
-
-    try:
-        # Trigger the build
-        result = cloud_build.trigger_build(build_config)
-
-        print("Build started!")
-        print(f"  Build ID: {result['build_id']}")
-        print(f"  Status: {result['status']}")
-        print(f"  Logs: {result['logs_url']}")
-
-        # Store build ID in your database for tracking
-        # db.store_build_id(user_id, result['build_id'])
-
-        return result
-
-    except Exception as e:
-        print(f"Error triggering build: {e}")
-        return None
-
-
-def check_build_status_example():
-    """
-    Example: Check status of a running build
-    """
-    cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
-
-    try:
-        status = cloud_build.get_build_status("build-id-from-trigger")
-
-        print(f"Build Status: {status['status']}")
-        print(f"Started: {status['start_time']}")
-        print(f"Finished: {status['finish_time']}")
-
-        return status
-
-    except Exception as e:
-        print(f"Error checking build status: {e}")
-        return None
-
-
-# ============================================
-# Integration with Your Existing Backend
-# ============================================
-
-
-class BuildTrigger:
-    """
-    Drop-in replacement for your existing GitHub Actions trigger
-    """
-
-    def __init__(self, use_cloud_build: bool = True):
-        """
-        Initialize build trigger
-
-        Args:
-            use_cloud_build: If True, use Cloud Build. If False, use GitHub Actions
-        """
-        self.use_cloud_build = use_cloud_build
-
-        if use_cloud_build:
-            self.cloud_build = CloudBuildClient(project_id="cloudbuild-486309")
-
-    def trigger(self, build_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Trigger a build using either Cloud Build or GitHub Actions
-
-        This is a drop-in replacement for your existing trigger_build() function
-        """
-        if self.use_cloud_build:
-            # Use Google Cloud Build
-            return self.cloud_build.trigger_build(build_data)
-        else:
-            # Use GitHub Actions (your existing code)
-            return self._trigger_github_actions(build_data)
-
-    def _trigger_github_actions(self, build_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Your existing GitHub Actions trigger code
-        (Keep this for backward compatibility during migration)
-        NOTE: GitHub Actions has been deprecated, this method always raises an error.
-        """
-        raise NotImplementedError(
-            "GitHub Actions support has been removed. Please use Cloud Build."
-        )
-
-
-if __name__ == "__main__":
-    # Run example
-    print("Cloud Build Integration - Example Usage")
-    print("=" * 50)
-    example_usage()

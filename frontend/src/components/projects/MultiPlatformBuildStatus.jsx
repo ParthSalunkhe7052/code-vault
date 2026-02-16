@@ -38,42 +38,84 @@ const MultiPlatformBuildStatus = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [retrying, setRetrying] = useState(false);
+const [retrying, setRetrying] = useState(false);
   const pollIntervalRef = useRef(null);
+
+const fetchStatus = async (forceSync = false) => {
+    try {
+      const isCompleted = buildStatus?.status && ['completed', 'failed', 'cancelled'].includes(buildStatus.status);
+      
+      // CRITICAL FIX: Always try GCP sync for non-completed builds to handle webhook failures
+      // This ensures we recover artifacts even when the webhook HTTP 000 error occurs
+      if (!isCompleted || forceSync) {
+        try {
+          // Try GCP sync first - this bypasses webhook issues
+          const gcpData = await cloudBuild.gcpSync(buildId);
+          if (gcpData.status === 'completed' && gcpData.artifacts?.some((a) => a.download_url)) {
+            setBuildStatus(gcpData);
+            setArtifacts(gcpData.artifacts || []);
+            setLoading(false);
+            setError(null);
+            
+            const allDone = (gcpData.artifacts || []).every(
+              a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
+            );
+            if (allDone && onAllComplete) {
+              onAllComplete(gcpData.artifacts);
+            }
+            return allDone || gcpData.status === 'cancelled';
+          }
+          // If GCP sync didn't give us completed artifacts, fall through to regular status
+        } catch (gcpErr) {
+          console.warn('GCP sync failed, falling back to regular status:', gcpErr);
+        }
+      }
+      
+      // Regular status fetch as fallback
+      let data = await cloudBuild.getStatus(buildId, !isCompleted || forceSync);
+      
+      // If build completed but artifacts missing download URLs, try GCP direct sync
+      const needsGcpSync = data.status === 'completed' && 
+        data.artifacts?.some((a) => a.status === 'completed' && !a.download_url);
+      
+      if (needsGcpSync || (forceSync && data.status === 'completed')) {
+        try {
+          const gcpData = await cloudBuild.gcpSync(buildId);
+          if (gcpData.artifacts?.some((a) => a.download_url)) {
+            data = gcpData;
+          }
+        } catch (gcpErr) {
+          console.warn('GCP sync fallback failed:', gcpErr);
+        }
+      }
+      
+      setBuildStatus(data);
+      setArtifacts(data.artifacts || []);
+      setLoading(false);
+      setError(null);
+
+      const allDone = (data.artifacts || []).every(
+        a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
+      );
+      
+      if (allDone && onAllComplete) {
+        onAllComplete(data.artifacts);
+      }
+      
+      return allDone || data.status === 'cancelled';
+    } catch (err) {
+      console.error('Failed to fetch build status:', err);
+      setError('Failed to fetch build status');
+      setLoading(false);
+      return true;
+    }
+  };
 
   useEffect(() => {
     if (!buildId) return;
 
-    const fetchStatus = async () => {
-      try {
-        const data = await cloudBuild.getStatus(buildId);
-        setBuildStatus(data);
-        setArtifacts(data.artifacts || []);
-        setLoading(false);
-        setError(null);
-
-        // Check if all done
-        const allDone = (data.artifacts || []).every(
-          a => a.status === 'completed' || a.status === 'failed' || a.status === 'cancelled'
-        );
-        
-        if (allDone && onAllComplete) {
-          onAllComplete(data.artifacts);
-        }
-        
-        return allDone || data.status === 'cancelled';
-      } catch (err) {
-        console.error('Failed to fetch build status:', err);
-        setError('Failed to fetch build status');
-        setLoading(false);
-        return true; // Stop polling on error
-      }
-    };
-
-    // Initial fetch
     fetchStatus();
 
-    // Set up polling if autoRefresh is enabled
     if (autoRefresh) {
       const poll = async () => {
         const done = await fetchStatus();
@@ -94,7 +136,7 @@ const MultiPlatformBuildStatus = ({
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const data = await cloudBuild.getStatus(buildId);
+      const data = await cloudBuild.gcpSync(buildId);
       setBuildStatus(data);
       setArtifacts(data.artifacts || []);
       setError(null);
@@ -104,15 +146,28 @@ const MultiPlatformBuildStatus = ({
     setLoading(false);
   };
 
-  const handleCancel = async () => {
+const handleCancel = async () => {
     if (cancelling) return;
     setCancelling(true);
+    
+    // Stop polling immediately
+    if (pollIntervalRef.current) {
+      clearTimeout(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    
     try {
       await cloudBuild.cancel(buildId);
-      handleRefresh();
+      // Clear state and notify parent
+      setBuildStatus({ status: 'cancelled' });
+      setArtifacts([]);
       onCancel?.();
     } catch (err) {
       console.error('Failed to cancel build:', err);
+      // Even on error, clear the state
+      setBuildStatus({ status: 'cancelled' });
+      setArtifacts([]);
+      onCancel?.();
     }
     setCancelling(false);
   };
