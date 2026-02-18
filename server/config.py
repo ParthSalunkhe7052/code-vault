@@ -34,6 +34,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Supabase requires SSL - add sslmode=require if not present
+if DATABASE_URL and "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
+    # Check if URL already has query parameters
+    if "?" in DATABASE_URL:
+        DATABASE_URL += "&sslmode=require"
+    else:
+        DATABASE_URL += "?sslmode=require"
+
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 JWT_SECRET = os.getenv("JWT_SECRET", "jwt-secret-change-in-production")
