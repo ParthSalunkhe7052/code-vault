@@ -18,6 +18,7 @@ import secrets
 import asyncio
 import time
 import base64
+import ast
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -58,6 +59,33 @@ router = APIRouter(
 # Local upload directory - should match project_routes
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def validate_python_syntax(file_path: Path, context: str = "") -> tuple[bool, str]:
+    """Validate that a Python file has valid syntax.
+
+    Args:
+        file_path: Path to the Python file to validate
+        context: Context string for error messages (e.g., "cloud_runner_nodejs.py")
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        if not file_path.exists():
+            return False, f"{context}: File not found at {file_path}"
+
+        source = file_path.read_text(encoding="utf-8")
+        ast.parse(source)
+        return True, ""
+    except SyntaxError as e:
+        error_msg = f"{context}: Syntax error at line {e.lineno}: {e.msg}"
+        logger.error(f"[Validation] {error_msg}")
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"{context}: Validation error: {str(e)}"
+        logger.error(f"[Validation] {error_msg}")
+        return False, error_msg
 
 
 # =============================================================================
@@ -349,6 +377,18 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                     logger.info(
                         f"[Upload] Successfully copied cloud_runner.py to source ({script_dest.stat().st_size} bytes)"
                     )
+
+                    # Validate Python syntax before triggering Cloud Build
+                    is_valid, error_msg = validate_python_syntax(
+                        script_dest, "cloud_runner.py"
+                    )
+                    if not is_valid:
+                        logger.error(f"[Upload] Aborting build - {error_msg}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Build script validation failed: {error_msg}. Please contact support.",
+                        )
+                    logger.info("[Upload] cloud_runner.py syntax validation passed")
                 else:
                     logger.error(
                         f"[Upload] Copy appeared to succeed but file not found at: {script_dest}"
@@ -381,6 +421,18 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                 logger.info(
                     f"[Upload] Successfully copied cloud_runner_nodejs.py to source"
                 )
+
+                # Validate Python syntax before triggering Cloud Build
+                is_valid, error_msg = validate_python_syntax(
+                    nodejs_runner_dest, "cloud_runner_nodejs.py"
+                )
+                if not is_valid:
+                    logger.error(f"[Upload] Aborting build - {error_msg}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Build script validation failed: {error_msg}. Please contact support.",
+                    )
+                logger.info("[Upload] cloud_runner_nodejs.py syntax validation passed")
             else:
                 logger.warning(
                     f"[Upload] cloud_runner_nodejs.py not found at {nodejs_runner_source}"
