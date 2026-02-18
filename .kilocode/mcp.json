@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "supabase": {
+      "type": "streamable-http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=zxwdrzuxdkhqvtjsmjxd"
+    }
+  }
+}

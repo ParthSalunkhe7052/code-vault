@@ -99,12 +99,12 @@ const Pricing: React.FC = () => {
             delay={0}
             features={[
               { text: "1 Project", included: true },
-              { text: "50 Licenses", included: true },
+              { text: "50 Licenses Total", included: true },
               { text: "Local Builds Only", included: true },
+              { text: "5 Trial Builds/mo", included: true },
               { text: "Community Support", included: true },
               { text: "Cloud Builds", included: false },
               { text: "Node.js Support", included: false },
-              { text: "Analytics", included: false },
             ]}
           />
           <PricingCard 
@@ -121,7 +121,7 @@ const Pricing: React.FC = () => {
               { text: "25 Cloud Builds/mo", included: true },
               { text: "Node.js Support", included: true },
               { text: "Offline Leases", included: true },
-              { text: "Analytics & Webhooks", included: true },
+              { text: "No Branding / Splash", included: true },
               { text: "White Label Branding", included: false },
             ]}
           />
@@ -219,10 +219,9 @@ const Pricing: React.FC = () => {
                     A Cloud Build is a remote compilation job. We spin up a fresh VM, install your dependencies, run Nuitka, and return a signed binary. 
                     You get 25/mo on Pro. Local builds (on your own machine) are always unlimited and free.
                  </p>
-                 <p className="text-sm text-slate-500 leading-relaxed mt-2">
-                    <span className="text-amber-400">Note:</span> Cloud Builds currently support Windows and Linux. macOS builds are not available in the cloud - 
-                    use local builds on your macOS machine for macOS executables.
-                 </p>
+                  <p className="text-sm text-slate-500 leading-relaxed mt-2">
+                    <span className="text-amber-400">Note:</span> Cloud Builds support Windows and Linux. macOS users can build locally using the CLI for native macOS executables.
+                  </p>
               </div>
              <div className="p-6 rounded-2xl bg-[#0f1219] border border-white/5 hover:border-white/10 transition-colors">
                 <h4 className="font-semibold text-white mb-2">Can I sell my software?</h4>

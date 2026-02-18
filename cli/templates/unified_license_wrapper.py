@@ -48,6 +48,9 @@ _CV_BINARY_HASH = "{binary_hash}"
 _CV_HEARTBEAT_INTERVAL = {heartbeat_interval}
 _CV_APP_NAME = "{app_name}"
 _CV_SHOW_BRANDING = {show_branding}
+_CV_BRAND_NAME = "{brand_name}"
+_CV_BRAND_URL = "{brand_url}"
+_CV_BRAND_PRIMARY_COLOR = "{brand_primary_color}"
 
 # Lease configuration
 _CV_LEASE_DURATION = 24 * 60 * 60  # 24 hours in seconds
@@ -96,10 +99,14 @@ def _cv_show_startup_popup():
         main_frame = tk.Frame(root, bg="#1a1a2e", padx=30, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Branding (for free tier)
+        # Branding (for free tier or custom branding)
         if _CV_SHOW_BRANDING:
-            branding = tk.Label(main_frame, text="Protected by CodeVault",
-                               font=("Segoe UI", 9), fg="#888888", bg="#1a1a2e")
+            brand_text = f"Protected by {_CV_BRAND_NAME}"
+            branding = tk.Label(main_frame, text=brand_text,
+                font=("Segoe UI", 9),
+                fg="#888888",
+                bg="#1a1a2e"
+            )
             branding.pack(pady=(0, 5))
         
         # App name
@@ -926,6 +933,9 @@ def get_license_wrapper(
     heartbeat_interval: int = 300,
     app_name: str = "Protected Application",
     show_branding: bool = True,
+    brand_name: str = "CodeVault",
+    brand_url: str = "https://codevault.dev",
+    brand_primary_color: str = "#6366f1",
 ) -> str:
     """
     Get the unified license wrapper code.
@@ -939,6 +949,9 @@ def get_license_wrapper(
         heartbeat_interval: Heartbeat interval in seconds (default: 300)
         app_name: Application name for UI (default: "Protected Application")
         show_branding: Show CodeVault branding (default: True for free tier)
+        brand_name: Custom brand name (Business/Enterprise only)
+        brand_url: Custom brand URL (Business/Enterprise only)
+        brand_primary_color: Custom primary color hex (Business/Enterprise only)
 
     Returns:
         Complete wrapper code ready to be prepended to user code
@@ -951,6 +964,14 @@ def get_license_wrapper(
     code = code.replace("{heartbeat_interval}", str(heartbeat_interval))
     code = code.replace("{app_name}", app_name)
     code = code.replace("{show_branding}", "True" if show_branding else "False")
+    code = code.replace("{brand_name}", brand_name if brand_name else "CodeVault")
+    code = code.replace(
+        "{brand_url}", brand_url if brand_url else "https://codevault.dev"
+    )
+    code = code.replace(
+        "{brand_primary_color}",
+        brand_primary_color if brand_primary_color else "#6366f1",
+    )
 
     return code
 

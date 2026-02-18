@@ -44,7 +44,7 @@ const steps: FeatureStep[] = [
     id: 'compile',
     title: 'Nuitka Compilation',
     benefit: 'Your code is yours. Keep it that way.',
-    description: 'We translate your Python code into C, then compile it into a true native binary. No bytecode is shipped, making decompilation exponentially harder than PyInstaller.',
+    description: 'We translate your Python code into C, then compile it into a native binary. This significantly raises the bar for reverse engineering compared to PyInstaller\'s bytecode shipping.',
     icon: <Cpu className="w-5 h-5" />,
     renderVisual: () => (
       <div className="w-full max-w-md mx-auto aspect-square bg-[#0a0f1a] rounded-3xl border border-white/5 overflow-hidden flex flex-col shadow-2xl">
@@ -86,12 +86,12 @@ const steps: FeatureStep[] = [
     icon: <Lock className="w-5 h-5" />,
     renderVisual: () => (
       <div className="relative w-full h-full flex flex-col items-center justify-center p-12">
-         <div className="w-full max-w-xs space-y-3">
+          <div className="w-full max-w-xs space-y-3">
             {[
               { label: 'CPU_SIGNATURE', status: 'VERIFIED', color: 'emerald' },
               { label: 'DISK_SERIAL_ID', status: 'VERIFIED', color: 'emerald' },
               { label: 'BIOS_UUID_HASH', status: 'VERIFIED', color: 'emerald' },
-              { label: 'MAC_ADDRESS', status: 'MISMATCH', color: 'red' },
+              { label: 'MAC_ADDRESS', status: 'VERIFIED', color: 'emerald' },
             ].map((item, i) => (
               <motion.div 
                 key={i}

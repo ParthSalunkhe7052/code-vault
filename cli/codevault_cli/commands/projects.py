@@ -245,6 +245,12 @@ def build(
         "-v",
         help="Show verbose output",
     ),
+    preset: Optional[str] = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help="Use a saved build preset (run 'codevault preset list' to see options)",
+    ),
 ) -> None:
     """
     Build a project locally.
@@ -280,6 +286,36 @@ def build(
         raise typer.Exit(1)
 
     print_header("Build Project")
+
+    # Load preset if specified
+    preset_config = {}
+    if preset:
+        from codevault_cli.commands.presets import get_preset
+
+        preset_data = get_preset(preset)
+        if preset_data:
+            preset_config = preset_data.get("config", {})
+            console.print(f"[dim]Using preset: {preset}[/dim]")
+            # Apply preset config values
+            # Note: Command line args already have defaults, so we apply preset
+            # values when the preset has explicit settings
+            if preset_config.get("onefile"):
+                fast = True
+            if preset_config.get("enable_lease"):
+                lease = True
+            obfuscate_level = preset_config.get("obfuscate_level", "none")
+            if obfuscate_level != "none":
+                obfuscate = True
+            if preset_config.get("lto"):
+                # LTO is typically handled in compiler options
+                pass
+            console.print(
+                f"[dim]Preset settings: onefile={preset_config.get('onefile')}, lease={preset_config.get('enable_lease')}, obfuscate={obfuscate_level}[/dim]"
+            )
+        else:
+            console.print(
+                f"[yellow]Warning: Preset '{preset}' not found, using defaults[/yellow]"
+            )
 
     # Store selected project data for local path detection
     selected_project_data = None
@@ -423,8 +459,12 @@ def build(
             else:
                 # Remote project build
                 success, output_path, error_message = run_remote_build_simple(
-                    project_id, config, headers, api_url, 
-                    selected_project_data, project_name
+                    project_id,
+                    config,
+                    headers,
+                    api_url,
+                    selected_project_data,
+                    project_name,
                 )
         else:
             # Use old Rich dashboard (for compatibility)

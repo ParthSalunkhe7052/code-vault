@@ -65,7 +65,7 @@ const HowItWorks: React.FC = () => {
             stepNumber="03"
             icon={<FileCode className="w-8 h-8 text-emerald-400" />}
             title="Sign"
-            description="We cryptographically sign the binary to prevent tampering."
+            description="We cryptographically sign license responses to prevent tampering."
           />
 
           <Step 

@@ -1,0 +1,63 @@
+# Build artifacts
+cli/output/
+cli/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Cache directories
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.nyc_output/
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Environment files (never index)
+.env
+.env.*
+!.env.example
+
+# Secrets (never index)
+credentials.json
+secrets.json
+*.pem
+*.key
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Test artifacts
+.tox/
+.testmondata

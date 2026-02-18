@@ -10,6 +10,7 @@ webhook-signature headers).
 import uuid
 import json
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -713,18 +714,20 @@ async def handle_subscription_created(event_data: dict, conn):
         conn=conn,
     )
 
-    # Sync user tier
-    await sync_user_tier(user_id, tier, conn)
+    # Atomic transaction: sync tier and grant credits together
+    async with conn.transaction():
+        # Sync user tier
+        await sync_user_tier(user_id, tier, conn)
 
-    # Credit System: Grant build credits for new subscription
-    credits = TIER_LIMITS.get(tier, {}).get("cloud_builds_per_month", 0)
-    if credits > 0:
-        await conn.execute(
-            "UPDATE users SET build_credits = $1 WHERE id = $2",
-            credits,
-            user_id,
-        )
-        logger.info(f"[Credit System] Granted {credits} credits for user {user_id}")
+        # Credit System: Grant build credits for new subscription
+        credits = TIER_LIMITS.get(tier, {}).get("cloud_builds_per_month", 0)
+        if credits > 0:
+            await conn.execute(
+                "UPDATE users SET build_credits = $1 WHERE id = $2",
+                credits,
+                user_id,
+            )
+            logger.info(f"[Credit System] Granted {credits} credits for user {user_id}")
 
     logger.info(f"[Polar Webhook] Subscription created for user {user_id}: {tier}")
 

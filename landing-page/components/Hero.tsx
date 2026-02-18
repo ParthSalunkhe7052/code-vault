@@ -38,7 +38,7 @@ const Hero: React.FC = () => {
           >
             Ship <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500">
-              Uncrackable.
+              Protected.
             </span>
           </motion.h1>
 

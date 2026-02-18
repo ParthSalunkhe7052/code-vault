@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
 import { stats, auth, projects } from '../services/api';
-import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, LiveMap } from '../components/dashboard';
+import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList } from '../components/dashboard';
 import UsageStats from '../components/dashboard/UsageStats';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
 import ThemeToggle from '../components/ThemeToggle';
@@ -139,9 +139,6 @@ const Dashboard = () => {
                 projectCount={projectList.length} 
                 licenseCount={dashboardStats?.licenses?.total || 0} 
             />
-
-            {/* Mission Control Live Map */}
-            <LiveMap />
 
             {/* Alerts Section */}
             {dashboardStats?.expiring_soon?.length > 0 && (

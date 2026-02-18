@@ -25,7 +25,7 @@ from storage_service import (
     LOCAL_UPLOAD_DIR,
     validate_file_size,
 )
-from models import ProjectCreateRequest, ProjectConfigRequest
+from models import ProjectCreateRequest, ProjectConfigRequest, ProjectBrandingRequest
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from routes.cloud_build_utils import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
@@ -627,5 +627,95 @@ async def register_binary_hash(
         )
 
         return {"status": "registered", "binary_hash": binary_hash}
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# White Label Branding (Business/Enterprise Feature)
+# =============================================================================
+
+
+@router.get("/{project_id}/branding")
+async def get_project_branding(
+    project_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Get project branding settings."""
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            """SELECT id, brand_name, brand_url, brand_primary_color, brand_secondary_color, brand_logo_url
+               FROM projects WHERE id = $1 AND user_id = $2""",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Check if user has custom branding access
+        tier_info = await get_user_tier_limits(user["id"], conn)
+        can_custom_branding = tier_info.get("white_label_branding", False)
+
+        return {
+            "brand_name": project["brand_name"],
+            "brand_url": project["brand_url"],
+            "brand_primary_color": project["brand_primary_color"] or "#6366f1",
+            "brand_secondary_color": project["brand_secondary_color"] or "#4f46e5",
+            "brand_logo_url": project["brand_logo_url"],
+            "can_custom_branding": can_custom_branding,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.put("/{project_id}/branding")
+async def update_project_branding(
+    project_id: str,
+    data: ProjectBrandingRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Update project branding settings (Business/Enterprise only)."""
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Check if user has custom branding access
+        tier_info = await get_user_tier_limits(user["id"], conn)
+        if not tier_info.get("white_label_branding", False):
+            raise HTTPException(
+                status_code=403,
+                detail="White label branding is a Business/Enterprise feature. Upgrade to customize branding.",
+            )
+
+        await conn.execute(
+            """UPDATE projects SET 
+               brand_name = $1,
+               brand_url = $2,
+               brand_primary_color = $3,
+               brand_secondary_color = $4,
+               brand_logo_url = $5
+               WHERE id = $6""",
+            data.brand_name,
+            data.brand_url,
+            data.brand_primary_color,
+            data.brand_secondary_color,
+            data.brand_logo_url,
+            project_id,
+        )
+
+        return {
+            "status": "updated",
+            "brand_name": data.brand_name,
+            "brand_url": data.brand_url,
+            "brand_primary_color": data.brand_primary_color,
+            "brand_secondary_color": data.brand_secondary_color,
+        }
     finally:
         await release_db(conn)

@@ -119,6 +119,14 @@ class ProjectConfigRequest(BaseModel):
     heartbeat_interval: Optional[int] = 300  # Default: 5 minutes
 
 
+class ProjectBrandingRequest(BaseModel):
+    brand_name: Optional[str] = Field(None, max_length=100)
+    brand_url: Optional[str] = Field(None, max_length=500)
+    brand_primary_color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
+    brand_secondary_color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
+    brand_logo_url: Optional[str] = Field(None, max_length=1000)
+
+
 # =============================================================================
 # Compilation Models
 # =============================================================================

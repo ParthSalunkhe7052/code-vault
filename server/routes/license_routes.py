@@ -695,17 +695,34 @@ async def create_license(
             raise HTTPException(status_code=404, detail="Project not found")
 
         limits = await get_user_tier_limits(user["id"], conn)
-        max_licenses = limits.get("max_licenses_per_project", 5)
+        max_licenses_per_project = limits.get("max_licenses_per_project", 5)
+        max_licenses_total = limits.get("max_licenses_total", -1)
 
-        if max_licenses != -1:
+        # Check per-project limit
+        if max_licenses_per_project != -1:
             current_count = await conn.fetchval(
                 "SELECT COUNT(*) FROM licenses WHERE project_id = $1", data.project_id
             )
-            if current_count >= max_licenses:
+            if current_count >= max_licenses_per_project:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"License limit reached ({max_licenses}/project). Upgrade your plan for more.",
+                    detail=f"License limit reached ({max_licenses_per_project}/project). Upgrade your plan for more.",
                 )
+
+        # Check total license limit for new free tier users (not grandfathered)
+        if max_licenses_total != -1:
+            user_data = await conn.fetchrow(
+                "SELECT legacy_tier_model, total_licenses_used FROM users WHERE id = $1",
+                user["id"],
+            )
+            # Only apply total limit to new users (not grandfathered)
+            if user_data and not user_data.get("legacy_tier_model", False):
+                current_total = user_data.get("total_licenses_used", 0)
+                if current_total >= max_licenses_total:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Total license limit reached ({max_licenses_total} total). Upgrade your plan for more.",
+                    )
 
         license_id = secrets.token_hex(16)
         license_key = generate_license_key()
@@ -1539,6 +1556,204 @@ async def set_kill_switch(
                 "enabled": policy.enabled,
                 "reason": policy.reason,
             },
+        }
+    finally:
+        await release_db(conn)
+
+
+# =============================================================================
+# Trial Build Validation Endpoints
+# =============================================================================
+
+
+class TrialBuildRequest(BaseModel):
+    project_id: str
+    demo_duration_minutes: int = 60
+
+
+@router.post("/builds/trial/validate")
+async def validate_trial_build(
+    request: TrialBuildRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Validate if user can create a trial build.
+
+    Checks:
+    1. User tier allows trial builds
+    2. User hasn't exceeded monthly trial build limit (5 for free tier)
+
+    Returns trial_build_token if validation passes.
+    """
+    from config import TIER_LIMITS
+
+    conn = await get_db()
+    try:
+        # Get user's tier
+        user_data = await conn.fetchrow(
+            "SELECT id, plan FROM users WHERE id = $1", user["id"]
+        )
+
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        tier = user_data["plan"] or "free"
+        tier_limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+
+        # Check if trial builds are allowed
+        trial_builds_limit = tier_limits.get("trial_builds_per_month", 5)
+
+        # Pro+ tiers have unlimited trial builds
+        if trial_builds_limit == -1:
+            return {
+                "allowed": True,
+                "trial_builds_remaining": -1,
+                "message": "Unlimited trial builds available",
+                "tier": tier,
+            }
+
+        # Get trial builds used this month
+        from datetime import datetime
+
+        month_start = datetime.now().replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
+        trial_builds_used = await conn.fetchval(
+            """SELECT COUNT(*) FROM trial_builds 
+               WHERE user_id = $1 AND created_at >= $2""",
+            user["id"],
+            month_start,
+        )
+
+        trial_builds_remaining = trial_builds_limit - trial_builds_used
+
+        if trial_builds_remaining <= 0:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Trial build limit reached. You've used {trial_builds_used}/{trial_builds_limit} trial builds this month. Upgrade to Pro for unlimited trial builds.",
+            )
+
+        # Generate trial build token (valid for 1 hour)
+        import time
+        import hashlib
+
+        token_data = f"{user['id']}:{request.project_id}:{int(time.time())}:{secrets.token_hex(8)}"
+        trial_token = hashlib.sha256(token_data.encode()).hexdigest()
+
+        # Store token for later validation
+        await conn.execute(
+            """INSERT INTO trial_build_tokens (id, user_id, project_id, demo_duration_minutes, created_at, expires_at)
+               VALUES ($1, $2, $3, $4, NOW(), NOW() + INTERVAL '1 hour')""",
+            trial_token,
+            user["id"],
+            request.project_id,
+            request.demo_duration_minutes,
+        )
+
+        return {
+            "allowed": True,
+            "trial_builds_remaining": trial_builds_remaining - 1,
+            "trial_builds_used": trial_builds_used + 1,
+            "trial_builds_limit": trial_builds_limit,
+            "trial_token": trial_token,
+            "demo_duration_minutes": request.demo_duration_minutes,
+            "tier": tier,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.post("/builds/trial/record")
+async def record_trial_build(
+    trial_token: str,
+    user: dict = Depends(get_current_user),
+):
+    """Record that a trial build was actually created.
+
+    This is called by the CLI after successfully creating a trial build.
+    """
+    conn = await get_db()
+    try:
+        # Validate token
+        token_data = await conn.fetchrow(
+            """SELECT id, user_id, project_id, demo_duration_minutes, used, expires_at
+               FROM trial_build_tokens 
+               WHERE id = $1 AND user_id = $2""",
+            trial_token,
+            user["id"],
+        )
+
+        if not token_data:
+            raise HTTPException(status_code=404, detail="Trial token not found")
+
+        if token_data["used"]:
+            raise HTTPException(status_code=400, detail="Trial token already used")
+
+        from datetime import datetime
+
+        if token_data["expires_at"] < datetime.now():
+            raise HTTPException(status_code=400, detail="Trial token has expired")
+
+        # Mark token as used
+        await conn.execute(
+            "UPDATE trial_build_tokens SET used = TRUE, used_at = NOW() WHERE id = $1",
+            trial_token,
+        )
+
+        # Record trial build
+        trial_build_id = secrets.token_hex(16)
+        await conn.execute(
+            """INSERT INTO trial_builds (id, user_id, project_id, demo_duration_minutes, created_at)
+               VALUES ($1, $2, $3, $4, NOW())""",
+            trial_build_id,
+            user["id"],
+            token_data["project_id"],
+            token_data["demo_duration_minutes"],
+        )
+
+        return {
+            "status": "recorded",
+            "trial_build_id": trial_build_id,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.get("/builds/trial/status")
+async def get_trial_build_status(user: dict = Depends(get_current_user)):
+    """Get user's trial build status for the current month."""
+    from config import TIER_LIMITS
+    from datetime import datetime
+
+    conn = await get_db()
+    try:
+        user_data = await conn.fetchrow(
+            "SELECT id, plan FROM users WHERE id = $1", user["id"]
+        )
+
+        tier = user_data["plan"] or "free"
+        tier_limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+        trial_builds_limit = tier_limits.get("trial_builds_per_month", 5)
+
+        month_start = datetime.now().replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
+        trial_builds_used = await conn.fetchval(
+            """SELECT COUNT(*) FROM trial_builds 
+               WHERE user_id = $1 AND created_at >= $2""",
+            user["id"],
+            month_start,
+        )
+
+        return {
+            "tier": tier,
+            "trial_builds_limit": trial_builds_limit,
+            "trial_builds_used": trial_builds_used,
+            "trial_builds_remaining": max(0, trial_builds_limit - trial_builds_used)
+            if trial_builds_limit != -1
+            else -1,
+            "unlimited": trial_builds_limit == -1,
         }
     finally:
         await release_db(conn)

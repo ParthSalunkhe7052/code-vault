@@ -191,60 +191,6 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     }
 
 
-@router.get("/analytics/map-data")
-async def get_map_data(user: dict = Depends(get_current_user)):
-    """
-    Get geolocation data for the Mission Control Live Map.
-    Returns the latest validation location for each unique HWID
-    for the user's projects in the last 24 hours.
-    """
-    conn = await get_db()
-    try:
-        yesterday = utc_now() - timedelta(days=1)
-
-        rows = await conn.fetch(
-            """
-            WITH latest_validations AS (
-                SELECT DISTINCT ON (vl.hwid)
-                    vl.hwid, vl.city, vl.country, vl.latitude, vl.longitude, vl.created_at
-                FROM validation_logs vl
-                JOIN licenses l ON vl.license_id = l.id
-                JOIN projects p ON l.project_id = p.id
-                WHERE p.user_id = $1 
-                  AND vl.created_at > $2
-                  AND vl.latitude IS NOT NULL 
-                  AND vl.longitude IS NOT NULL
-                ORDER BY vl.hwid, vl.created_at DESC
-            )
-            SELECT 
-                latitude as lat, 
-                longitude as lng, 
-                city, 
-                country,
-                COUNT(*) as count
-            FROM latest_validations
-            GROUP BY latitude, longitude, city, country
-            ORDER BY count DESC
-            LIMIT 100
-        """,
-            user["id"],
-            yesterday,
-        )
-
-        return [
-            {
-                "lat": float(row["lat"]),
-                "lng": float(row["lng"]),
-                "city": row["city"] or "Unknown",
-                "country": row["country"] or "??",
-                "count": row["count"],
-            }
-            for row in rows
-        ]
-    finally:
-        await release_db(conn)
-
-
 @router.get("/analytics/licenses")
 async def get_license_analytics(
     user: dict = Depends(get_current_user),
@@ -410,3 +356,181 @@ async def get_license_analytics(
         "tier": tier,
         "advanced_available": is_pro_tier,
     }
+
+
+@router.get("/analytics/licenses/export")
+async def export_license_analytics(
+    user: dict = Depends(get_current_user),
+    project_id: Optional[str] = Query(None, description="Filter by project ID"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    format: str = Query("json", pattern="^(json|csv)$", description="Export format"),
+):
+    """Export license analytics as JSON or CSV.
+
+    Returns detailed validation history per license for the specified time period.
+    """
+    import json
+    from datetime import datetime
+
+    conn = await get_db()
+    try:
+        since = utc_now() - timedelta(days=days)
+        user_id = user["id"]
+
+        # Build query with optional project filter
+        where_clause = "p.user_id = $1 AND vl.created_at > $2"
+        params = [user_id, since]
+
+        if project_id:
+            where_clause += " AND p.id = $3"
+            params.append(project_id)
+
+        # Fetch detailed license analytics
+        rows = await conn.fetch(
+            f"""
+            SELECT 
+                l.id as license_id,
+                l.license_key,
+                l.client_name,
+                l.client_email,
+                l.status as license_status,
+                p.id as project_id,
+                p.name as project_name,
+                vl.result,
+                vl.hwid,
+                vl.machine_name,
+                vl.ip_address,
+                vl.country,
+                vl.city,
+                vl.created_at as validated_at
+            FROM validation_logs vl
+            JOIN licenses l ON vl.license_id = l.id
+            JOIN projects p ON l.project_id = p.id
+            WHERE {where_clause}
+            ORDER BY vl.created_at DESC
+            LIMIT 10000
+            """,
+            *params,
+        )
+
+        data = [
+            {
+                "license_id": row["license_id"],
+                "license_key": row["license_key"],
+                "client_name": row["client_name"],
+                "client_email": row["client_email"],
+                "license_status": row["license_status"],
+                "project_id": row["project_id"],
+                "project_name": row["project_name"],
+                "validation_result": row["result"],
+                "hwid": row["hwid"],
+                "machine_name": row["machine_name"],
+                "ip_address": row["ip_address"],
+                "country": row["country"],
+                "city": row["city"],
+                "validated_at": row["validated_at"].isoformat()
+                if row["validated_at"]
+                else None,
+            }
+            for row in rows
+        ]
+
+        if format == "csv":
+            import io
+            import csv
+
+            output = io.StringIO()
+            if data:
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+
+            from fastapi.responses import Response
+
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f"attachment; filename=license_analytics_{datetime.now().strftime('%Y%m%d')}.csv"
+                },
+            )
+
+        return {
+            "exported_at": datetime.now().isoformat(),
+            "days": days,
+            "total_records": len(data),
+            "records": data,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.get("/analytics/licenses/summary")
+async def get_license_usage_summary(
+    user: dict = Depends(get_current_user),
+):
+    """Get a quick summary of license usage across all projects."""
+    conn = await get_db()
+    try:
+        user_id = user["id"]
+
+        # Get per-project license counts
+        project_stats = await conn.fetch(
+            """
+            SELECT 
+                p.id as project_id,
+                p.name as project_name,
+                COUNT(l.id) as total_licenses,
+                SUM(CASE WHEN l.status = 'active' THEN 1 ELSE 0 END) as active_licenses,
+                SUM(CASE WHEN l.status = 'revoked' THEN 1 ELSE 0 END) as revoked_licenses,
+                SUM(CASE WHEN l.status = 'expired' THEN 1 ELSE 0 END) as expired_licenses,
+                (SELECT COUNT(*) FROM hardware_bindings hb 
+                 JOIN licenses l2 ON hb.license_id = l2.id 
+                 WHERE l2.project_id = p.id AND hb.is_active = TRUE) as active_bindings
+            FROM projects p
+            LEFT JOIN licenses l ON l.project_id = p.id
+            WHERE p.user_id = $1
+            GROUP BY p.id, p.name
+            ORDER BY total_licenses DESC
+            """,
+            user_id,
+        )
+
+        # Get user's total license usage
+        user_data = await conn.fetchrow(
+            """
+            SELECT 
+                total_licenses_used,
+                legacy_tier_model,
+                plan
+            FROM users WHERE id = $1
+            """,
+            user_id,
+        )
+
+        from config import TIER_LIMITS
+
+        tier = user_data["plan"] or "free"
+        tier_limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+        max_total = tier_limits.get("max_licenses_total", -1)
+
+        return {
+            "tier": tier,
+            "licenses_used": user_data["total_licenses_used"] or 0,
+            "licenses_limit": max_total,
+            "legacy_tier_model": user_data["legacy_tier_model"] or False,
+            "projects": [
+                {
+                    "project_id": row["project_id"],
+                    "project_name": row["project_name"],
+                    "total_licenses": row["total_licenses"] or 0,
+                    "active_licenses": row["active_licenses"] or 0,
+                    "revoked_licenses": row["revoked_licenses"] or 0,
+                    "expired_licenses": row["expired_licenses"] or 0,
+                    "active_bindings": row["active_bindings"] or 0,
+                }
+                for row in project_stats
+            ],
+        }
+    finally:
+        await release_db(conn)

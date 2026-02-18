@@ -234,9 +234,7 @@ export const webhooks = {
 
 export const stats = {
     getDashboard: (): Promise<DashboardStats> => api.get('/stats/dashboard').then(res => res.data),
-    // Mission Control Live Map
-    getMapData: (): Promise<MapDataPoint[]> => api.get('/analytics/map-data').then(res => res.data),
-    // License Analytics (Pro+ tier)
+    // License Analytics
     getLicenseAnalytics: (projectId?: string, days: number = 30): Promise<any> => 
         api.get('/analytics/licenses', { params: { project_id: projectId, days } }).then(res => res.data),
 };
@@ -313,6 +311,27 @@ export const publicStore = {
             cancel_url: cancelUrl
         }).then(res => res.data),
     getLicensePortal: (licenseKey: string): Promise<any> => publicApi.get(`/public/license/${licenseKey}`).then(res => res.data),
+};
+
+// Trial Build API
+export const trialBuilds = {
+    validate: (projectId: string, demoDurationMinutes: number = 60): Promise<{
+        allowed: boolean;
+        trial_builds_remaining: number;
+        trial_token?: string;
+        tier: string;
+    }> => api.post('/builds/trial/validate', { project_id: projectId, demo_duration_minutes: demoDurationMinutes }).then(res => res.data),
+    
+    record: (trialToken: string): Promise<{ status: string; trial_build_id: string }> => 
+        api.post(`/builds/trial/record?trial_token=${trialToken}`).then(res => res.data),
+    
+    getStatus: (): Promise<{
+        tier: string;
+        trial_builds_limit: number;
+        trial_builds_used: number;
+        trial_builds_remaining: number;
+        unlimited: boolean;
+    }> => api.get('/builds/trial/status').then(res => res.data),
 };
 
 export default api;
