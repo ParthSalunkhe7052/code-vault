@@ -5,7 +5,7 @@ import {
     Project, CreateProjectRequest, ProjectConfig,
     License, CreateLicenseRequest, HardwareBinding,
     Webhook, CreateWebhookRequest, UpdateWebhookRequest, WebhookDelivery, WebhookEvent,
-    BuildJob, DashboardStats, MapDataPoint,
+    BuildJob, DashboardStats,
     AdminStats, AdminUser, SubscriptionStatus,
 } from '../types/api';
 
