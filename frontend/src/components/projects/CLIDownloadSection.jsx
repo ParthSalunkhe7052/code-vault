@@ -41,7 +41,8 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
         }
     };
 
-    const cliCommand = `codevault-cli build ${project?.id || '<project-id>'}${selectedLicense ? ` --license ${selectedLicense}` : ''}`;
+    const cliCommand = `codevault project build ${project?.id || '<project-id>'}${selectedLicense ? ` --license ${selectedLicense}` : ''}`;
+    const cliCommandFast = `codevault project build ${project?.id || '<project-id>'} --fast${selectedLicense ? ` --license ${selectedLicense}` : ''}`;
 
     const handleCopyCommand = async () => {
         try {
@@ -104,7 +105,7 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                     </div>
                 </div>
 
-                <div className="relative">
+                <div className="relative mb-2">
                     <div className="bg-black/40 rounded-lg p-4 font-mono text-sm text-emerald-400 pr-12 break-all">
                         {cliCommand}
                     </div>
@@ -121,9 +122,31 @@ const CLIDownloadSection = ({ project, licenses = [] }) => {
                     </button>
                 </div>
 
-                <div className="mt-3 text-xs text-slate-500">
-                    Don&apos;t have the CLI?{' '}
-                    <code className="bg-white/10 px-1.5 py-0.5 rounded">pip install codevault-cli</code>
+                <div className="relative mb-3">
+                    <div className="bg-black/40 rounded-lg p-3 font-mono text-sm text-indigo-400 pr-12 break-all">
+                        {cliCommandFast}
+                    </div>
+                    <button
+                        onClick={async () => {
+                            await navigator.clipboard.writeText(cliCommandFast);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg transition-colors"
+                        title="Copy command"
+                    >
+                        <Copy size={18} className="text-slate-400" />
+                    </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 text-xs mb-3">
+                    <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded">Python: Free</span>
+                    <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded">Windows only</span>
+                    <span className="px-2 py-1 bg-amber-500/20 text-amber-400 rounded">--fast for 3-4x faster</span>
+                </div>
+
+                <div className="mt-2 text-xs text-slate-500">
+                    First install: <code className="bg-white/10 px-1.5 py-0.5 rounded">pip install codevault-cli</code>
                 </div>
             </div>
 

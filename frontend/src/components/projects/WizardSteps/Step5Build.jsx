@@ -81,8 +81,9 @@ const Step5Build = ({
 
     // CLI Commands
     const installStep1 = 'pip install codevault-cli';
-    const loginCmd = 'codevault login';
-    const buildCmd = `codevault build ${projectId}`;
+    const loginCmd = 'codevault auth login';
+    const buildCmd = `codevault project build ${projectId}`;
+    const buildCmdFast = `codevault project build ${projectId} --fast`;
 
     // Render CLI Setup Guide for Web Mode (non-Tauri)
     const renderWebModeGuide = () => (
@@ -182,9 +183,9 @@ const Step5Build = ({
                                 </button>
                             </div>
                         </div>
-                        <p className="text-xs text-slate-500 mt-2">
-                            This only needs to be done once.
-                        </p>
+                        <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
+                            <span>Windows only • Python builds free</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -198,7 +199,7 @@ const Step5Build = ({
                     <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-white mb-1">Login to Your Account</h3>
                         <p className="text-sm text-slate-400 mb-3">
-                            Use your CodeVault email and password to authenticate:
+                            Use your CodeVault credentials to authenticate:
                         </p>
                         <div className="relative">
                             <div className="bg-black/40 rounded-lg p-4 font-mono text-sm text-emerald-400 pr-12 break-all">
@@ -217,7 +218,7 @@ const Step5Build = ({
                             </button>
                         </div>
                         <p className="text-xs text-slate-500 mt-2">
-                            🔐 Your credentials are stored locally and never shared
+                            🔐 Your credentials are stored securely on your machine
                         </p>
                     </div>
                 </div>
@@ -232,10 +233,12 @@ const Step5Build = ({
                     <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-white mb-1">Build Your Project</h3>
                         <p className="text-sm text-slate-400 mb-3">
-                            Run this command to compile your {isNodeJS ? 'JavaScript' : 'Python'} project:
+                            Run one of these commands to compile your {isNodeJS ? 'JavaScript' : 'Python'} project:
                         </p>
-                        <div className="relative">
-                            <div className="bg-black/40 rounded-lg p-4 font-mono text-sm text-emerald-400 pr-12 break-all">
+                        
+                        {/* Standard Build */}
+                        <div className="relative mb-2">
+                            <div className="bg-black/40 rounded-lg p-3 font-mono text-sm text-emerald-400 pr-12 break-all">
                                 {buildCmd}
                             </div>
                             <button
@@ -250,8 +253,37 @@ const Step5Build = ({
                                 )}
                             </button>
                         </div>
-                        <p className="text-xs text-slate-500 mt-2">
-                            ⏱️ First build takes 5-10 minutes to download compilers
+                        
+                        {/* Fast Build */}
+                        <div className="relative mb-3">
+                            <div className="bg-black/40 rounded-lg p-3 font-mono text-sm text-indigo-400 pr-12 break-all">
+                                {buildCmdFast}
+                            </div>
+                            <button
+                                onClick={() => copyToClipboard(buildCmdFast, 'build-fast')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg transition-colors"
+                                title="Copy command"
+                            >
+                                {copiedStep === 'build-fast' ? (
+                                    <Check size={18} className="text-emerald-400" />
+                                ) : (
+                                    <Copy size={18} className="text-slate-400" />
+                                )}
+                            </button>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 text-xs mb-3">
+                            <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded">Python: Free</span>
+                            {isNodeJS ? (
+                                <span className="px-2 py-1 bg-amber-500/20 text-amber-400 rounded">Node.js: Pro+ Required</span>
+                            ) : (
+                                <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded">Node.js needs upgrade</span>
+                            )}
+                            <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded">Windows only</span>
+                        </div>
+                        
+                        <p className="text-xs text-slate-500">
+                            ⏱️ First build takes 5-10 minutes to download compilers. Use --fast for 3-4x faster builds.
                         </p>
                         
                         {/* View License Key Button */}

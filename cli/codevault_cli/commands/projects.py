@@ -287,6 +287,20 @@ def build(
 
     print_header("Build Project")
 
+    # Check user's tier/plan for Node.js enforcement
+    try:
+        resp = requests.get(f"{api_url}/auth/me", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            user_data = resp.json()
+            user_plan = user_data.get("plan", "free")
+            has_node_support = user_data.get("node_support", False)
+        else:
+            user_plan = "unknown"
+            has_node_support = False
+    except Exception:
+        user_plan = "unknown"
+        has_node_support = False
+
     # Load preset if specified
     preset_config = {}
     if preset:
@@ -408,6 +422,15 @@ def build(
         "platform": platform,
         "language": language,
     }
+
+    # Tier enforcement: Check if user can build Node.js
+    build_language = language or ("nodejs" if project_id.endswith(".js") else "python")
+    if build_language == "nodejs" and not has_node_support:
+        console.print()
+        print_error("Node.js builds require a Pro plan or higher.")
+        console.print(f"[yellow]Your current plan: {user_plan.title()}[/yellow]")
+        console.print("[dim]Visit https://codevault.dev/pricing to upgrade[/dim]")
+        raise typer.Exit(1)
 
     # Show configuration
     if open_build:
