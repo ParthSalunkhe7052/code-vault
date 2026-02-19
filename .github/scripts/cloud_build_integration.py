@@ -125,6 +125,7 @@ class CloudBuildClient:
         )
 
         # Create the build configuration with inline steps
+        # Note: Artifacts are uploaded manually via gsutil in build steps
         build = self.cloudbuild_v1.Build(
             name=build_name,
             steps=steps,
@@ -139,15 +140,6 @@ class CloudBuildClient:
                 f"project-{build_config.get('project_id', 'unknown')}",
                 f"language-{language}",
             ],
-            # Define artifact volumes for sharing between steps
-            artifacts=self.cloudbuild_v1.Artifacts(
-                objects=[
-                    self.cloudbuild_v1.ArtifactObjects(
-                        location=f"gs://{gcs_bucket}/builds/{build_id}/",
-                        paths=["**/*"],
-                    )
-                ]
-            ),
         )
 
         # Submit the build using CreateBuildRequest
