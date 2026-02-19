@@ -263,13 +263,15 @@ CREATE TABLE IF NOT EXISTS cloud_builds (
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
     expires_at TIMESTAMP,
-    deleted_at TIMESTAMP
+    deleted_at TIMESTAMP,
+    plan_tier VARCHAR(20) DEFAULT 'pro'
 );
 
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_user ON cloud_builds(user_id);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_project ON cloud_builds(project_id);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_status ON cloud_builds(status);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_created ON cloud_builds(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cloud_builds_plan_tier ON cloud_builds(plan_tier);
 
 -- =============================================================================
 -- CLOUD BUILD ARTIFACTS TABLE (from migration 007)
