@@ -9,6 +9,7 @@ import secrets
 import asyncio
 import logging
 from typing import Optional, List
+from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -39,6 +40,20 @@ from email_service import notify_license_created
 from middleware.rate_limiter import license_validate_rate_limit
 
 router = APIRouter(prefix="/api/v1", tags=["Licenses"])
+
+
+def normalize_datetime_for_db(dt: Optional[datetime]) -> Optional[datetime]:
+    """Convert timezone-aware datetime to naive UTC datetime for database.
+
+    PostgreSQL timestamp columns expect naive datetimes. This function
+    converts timezone-aware datetimes to UTC and removes timezone info.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        # Convert to UTC and remove timezone info
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 # GeoIP functions (import from geoip module when created, for now inline)
@@ -727,6 +742,9 @@ async def create_license(
         license_id = secrets.token_hex(16)
         license_key = generate_license_key()
 
+        # Normalize datetime to naive UTC for database compatibility
+        expires_at_normalized = normalize_datetime_for_db(data.expires_at)
+
         await conn.execute(
             """
             INSERT INTO licenses (id, project_id, license_key, expires_at, max_machines, features, client_name, client_email, notes, license_type, license_mode, max_concurrent)
@@ -735,7 +753,7 @@ async def create_license(
             license_id,
             data.project_id,
             license_key,
-            data.expires_at,
+            expires_at_normalized,
             data.max_machines,
             json.dumps(data.features),
             data.client_name,
