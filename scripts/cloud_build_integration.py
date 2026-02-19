@@ -109,6 +109,8 @@ class CloudBuildClient:
         build_name = f"codevault-{build_id}"
 
         # Create substitutions for the build
+        # NOTE: These must match the substitutions defined in cloudbuild.yaml
+        # and actually used in the build steps
         substitutions = {
             "_BUILD_ID": build_id,
             "_PROJECT_ID": build_config.get("project_id", ""),
@@ -117,20 +119,8 @@ class CloudBuildClient:
             "_SOURCE_URL": build_config.get("source_url", ""),
             "_CALLBACK_URL": build_config.get("callback_url", ""),
             "_CALLBACK_SECRET": build_config.get("callback_secret", ""),
-            "_PLAN_TIER": build_config.get("plan_tier", "free"),
-            "_COMPATIBILITY_MODE": str(
-                build_config.get("compatibility_mode", False)
-            ).lower(),
-            "_FAST_BUILD": str(build_config.get("fast_build", False)).lower(),
-            "_SIGNING_PUBLIC_KEY": build_config.get("signing_public_key", ""),
-            "_SIGNING_PRIVATE_KEY": build_config.get("signing_private_key", ""),
-            "_HEARTBEAT_INTERVAL": str(build_config.get("heartbeat_interval", 300)),
-            "_BINARY_HASH_TRACKING": str(
-                build_config.get("binary_hash_tracking", True)
-            ).lower(),
-            "_ENABLE_ED25519_SIGNATURES": str(
-                build_config.get("enable_ed25519_signatures", False)
-            ).lower(),
+            "_OUTPUT_NAME": build_config.get("output_name", "app"),
+            "_GCS_BUCKET": os.getenv("GCS_BUILDS_BUCKET", "codevault-builds"),
         }
 
         # Create the build configuration

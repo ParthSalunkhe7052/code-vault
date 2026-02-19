@@ -15,14 +15,6 @@ substitutions:
   _OUTPUT_NAME: 'app'
   _BUILD_ID: 'unknown'
   _PROJECT_ID: ''
-  _HEARTBEAT_INTERVAL: '300'
-  _SIGNING_PRIVATE_KEY: ''
-  _SIGNING_PUBLIC_KEY: ''
-  _BINARY_HASH_TRACKING: 'true'
-  _COMPATIBILITY_MODE: 'false'
-  _PLAN_TIER: 'free'
-  _FAST_BUILD: 'false'
-  _ENABLE_ED25519_SIGNATURES: 'false'
 
 options:
   logging: CLOUD_LOGGING_ONLY
