@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS users (
     build_credits INTEGER DEFAULT 0,
     legacy_tier_model BOOLEAN DEFAULT FALSE,
     total_licenses_used INTEGER DEFAULT 0,
+    stripe_customer_id VARCHAR(100),
+    -- Default branding
+    default_brand_name VARCHAR(100),
+    default_brand_url VARCHAR(500),
+    default_brand_primary_color VARCHAR(7) DEFAULT '#6366f1',
+    default_brand_secondary_color VARCHAR(7) DEFAULT '#4f46e5',
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -41,12 +47,17 @@ CREATE TABLE IF NOT EXISTS projects (
     signing_secret VARCHAR(64),
     signing_private_key TEXT,
     signing_public_key TEXT,
+    signing_algorithm VARCHAR(10) DEFAULT 'ed25519',
     -- White-label branding
     brand_name VARCHAR(100),
     brand_url VARCHAR(500),
-    brand_primary_color VARCHAR(7),
-    brand_secondary_color VARCHAR(7),
+    brand_primary_color VARCHAR(7) DEFAULT '#6366f1',
+    brand_secondary_color VARCHAR(7) DEFAULT '#4f46e5',
     brand_logo_url VARCHAR(1000),
+    -- Heartbeat settings
+    heartbeat_interval_seconds INTEGER DEFAULT 300,
+    heartbeat_grace_period_seconds INTEGER DEFAULT 60,
+    hmac_deprecation_warning_shown BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -87,6 +98,9 @@ CREATE TABLE IF NOT EXISTS licenses (
     license_type VARCHAR(20) DEFAULT 'perpetual',
     license_mode VARCHAR(20) DEFAULT 'static',
     max_concurrent INTEGER DEFAULT 1,
+    subscription_id VARCHAR(100),
+    trial_started_at TIMESTAMP,
+    trial_duration_days INTEGER,
     converted_from_trial BOOLEAN DEFAULT FALSE,
     converted_at TIMESTAMP,
     last_validated_at TIMESTAMP,
@@ -112,7 +126,7 @@ CREATE TABLE IF NOT EXISTS hardware_bindings (
     heartbeat_count INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
     is_flagged BOOLEAN DEFAULT FALSE,
-    flagged_reason VARCHAR(255),
+    flagged_reason TEXT,
     flagged_at TIMESTAMP
 );
 
@@ -145,6 +159,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     status VARCHAR(20) DEFAULT 'active',
     sync_source VARCHAR(20) DEFAULT 'manual',
     stripe_subscription_id VARCHAR(100),
+    stripe_status VARCHAR(50),
     polar_subscription_id VARCHAR(100),
     current_period_start TIMESTAMP,
     current_period_end TIMESTAMP,
@@ -222,6 +237,8 @@ CREATE TABLE IF NOT EXISTS validation_logs (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_validation_logs_project ON validation_logs(project_id);
+
 CREATE INDEX IF NOT EXISTS idx_validation_logs_license ON validation_logs(license_id);
 CREATE INDEX IF NOT EXISTS idx_validation_logs_project ON validation_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_validation_logs_created ON validation_logs(created_at DESC);
@@ -259,6 +276,14 @@ CREATE TABLE IF NOT EXISTS cloud_builds (
     download_size BIGINT,
     error_message TEXT,
     github_run_id VARCHAR(50),
+    gcp_build_id TEXT,
+    build_type TEXT DEFAULT 'cloud_build',
+    build_duration INTEGER DEFAULT 0,
+    queue_wait_time INTEGER DEFAULT 0,
+    error_type TEXT,
+    admin_error_details TEXT,
+    logs TEXT[] DEFAULT '{}',
+    target_platforms JSONB DEFAULT '["windows"]',
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -272,6 +297,7 @@ CREATE INDEX IF NOT EXISTS idx_cloud_builds_project ON cloud_builds(project_id);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_status ON cloud_builds(status);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_created ON cloud_builds(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cloud_builds_plan_tier ON cloud_builds(plan_tier);
+CREATE INDEX IF NOT EXISTS idx_cloud_builds_gcp_id ON cloud_builds(gcp_build_id);
 
 -- =============================================================================
 -- CLOUD BUILD ARTIFACTS TABLE (from migration 007)
@@ -280,13 +306,21 @@ CREATE TABLE IF NOT EXISTS cloud_build_artifacts (
     id VARCHAR(32) PRIMARY KEY,
     build_id VARCHAR(32) NOT NULL REFERENCES cloud_builds(id) ON DELETE CASCADE,
     platform VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
     artifact_key VARCHAR(500),
     artifact_size BIGINT,
     checksum VARCHAR(64),
+    download_key VARCHAR(500),
+    download_filename VARCHAR(255),
+    error_message TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_cloud_build_artifacts_build ON cloud_build_artifacts(build_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_build_artifacts_status ON cloud_build_artifacts(status);
+CREATE INDEX IF NOT EXISTS idx_cloud_build_artifacts_platform ON cloud_build_artifacts(platform);
 
 -- =============================================================================
 -- BINARY HASHES TABLE (from migration 011)
