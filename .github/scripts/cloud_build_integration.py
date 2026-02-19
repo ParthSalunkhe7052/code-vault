@@ -8,7 +8,6 @@ import os
 import json
 import logging
 from typing import Dict, Optional, Any
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +27,10 @@ class CloudBuildClient:
 
         # Import here to avoid dependency issues if not using Cloud Build
         try:
-            from google.cloud import build_v1
+            from google.cloud.devtools import cloudbuild_v1
             from google.oauth2 import service_account
 
-            self.build_v1 = build_v1
+            self.cloudbuild_v1 = cloudbuild_v1
             self.service_account = service_account
         except ImportError as e:
             logger.error(f"Failed to import Google Cloud Build libraries: {e}")
@@ -52,7 +51,7 @@ class CloudBuildClient:
                         scopes=["https://www.googleapis.com/auth/cloud-platform"],
                     )
                 )
-                return self.build_v1.CloudBuildClient(credentials=credentials)
+                return self.cloudbuild_v1.CloudBuildClient(credentials=credentials)
             except Exception as e:
                 logger.warning(f"Failed to use GCP_SERVICE_ACCOUNT_JSON: {e}")
 
@@ -66,13 +65,13 @@ class CloudBuildClient:
                         scopes=["https://www.googleapis.com/auth/cloud-platform"],
                     )
                 )
-                return self.build_v1.CloudBuildClient(credentials=credentials)
+                return self.cloudbuild_v1.CloudBuildClient(credentials=credentials)
             except Exception as e:
                 logger.warning(f"Failed to use credentials file: {e}")
 
         # Fallback to default credentials (Workload Identity, etc.)
         try:
-            return self.build_v1.CloudBuildClient()
+            return self.cloudbuild_v1.CloudBuildClient()
         except Exception as e:
             logger.error(f"Failed to create Cloud Build client: {e}")
             raise
@@ -135,12 +134,12 @@ class CloudBuildClient:
         }
 
         # Create the build configuration
-        build = self.build_v1.Build(
+        build = self.cloudbuild_v1.Build(
             name=build_name,
             substitutions=substitutions,
             # Cloud Build configuration - uses cloudbuild.yaml in repo
-            source=self.build_v1.Source(
-                storage_source=self.build_v1.StorageSource(
+            source=self.cloudbuild_v1.Source(
+                storage_source=self.cloudbuild_v1.StorageSource(
                     bucket=os.getenv("GCS_BUILD_SCRIPTS_BUCKET", "codevault-builds"),
                     object_="cloudbuild.yaml",
                 )
@@ -153,9 +152,13 @@ class CloudBuildClient:
             ],
         )
 
-        # Submit the build
+        # Submit the build using CreateBuildRequest
         parent = f"projects/{self.project_id}/locations/global"
-        operation = self.client.create_build(parent=parent, build=build)
+        request = self.cloudbuild_v1.CreateBuildRequest(
+            parent=parent,
+            build=build,
+        )
+        operation = self.client.create_build(request=request)
 
         # Wait for the operation to complete (this is async, we don't wait)
         gcp_build = operation.metadata
@@ -185,7 +188,8 @@ class CloudBuildClient:
         name = f"projects/{self.project_id}/locations/global/builds/{gcp_build_id}"
 
         try:
-            build = self.client.get_build(name=name)
+            request = self.cloudbuild_v1.GetBuildRequest(name=name)
+            build = self.client.get_build(request=request)
 
             # Map GCP status to our format
             status_map = {
@@ -205,19 +209,23 @@ class CloudBuildClient:
 
             logs_url = f"https://console.cloud.google.com/cloud-build/builds/{gcp_build_id}?project={self.project_id}"
 
+            # Convert protobuf Timestamp to datetime then to ISO format string
+            def timestamp_to_iso(ts):
+                if ts is None:
+                    return None
+                from datetime import datetime
+
+                # Convert seconds and nanos to datetime
+                dt = datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9)
+                return dt.isoformat()
+
             return {
                 "status": status,
                 "logs_url": logs_url,
                 "gcp_status": build.status.name,
-                "create_time": build.create_time.isoformat()
-                if build.create_time
-                else None,
-                "start_time": build.start_time.isoformat()
-                if build.start_time
-                else None,
-                "finish_time": build.finish_time.isoformat()
-                if build.finish_time
-                else None,
+                "create_time": timestamp_to_iso(build.create_time),
+                "start_time": timestamp_to_iso(build.start_time),
+                "finish_time": timestamp_to_iso(build.finish_time),
             }
 
         except Exception as e:
@@ -238,7 +246,8 @@ class CloudBuildClient:
         name = f"projects/{self.project_id}/locations/global/builds/{gcp_build_id}"
 
         try:
-            self.client.cancel_build(name=name)
+            request = self.cloudbuild_v1.CancelBuildRequest(name=name)
+            self.client.cancel_build(request=request)
             logger.info(f"[CloudBuild] Cancelled build {gcp_build_id}")
             return True
         except Exception as e:
@@ -260,7 +269,7 @@ class CloudBuildClient:
         parent = f"projects/{self.project_id}/locations/global"
 
         try:
-            request = self.build_v1.ListBuildsRequest(
+            request = self.cloudbuild_v1.ListBuildsRequest(
                 parent=parent,
                 page_size=page_size,
             )
@@ -268,7 +277,7 @@ class CloudBuildClient:
             if filter_tag:
                 request.filter = f'tags="{filter_tag}"'
 
-            response = self.client.list_builds(request)
+            response = self.client.list_builds(request=request)
 
             builds = []
             for build in response.builds:

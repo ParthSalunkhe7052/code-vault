@@ -403,9 +403,32 @@ def build(
             raise typer.Exit(0)
     else:
         # Non-interactive mode
-        project_name = project_id[:20] + "..." if len(project_id) > 20 else project_id
+        project_name = (
+            project_id[:20] + "..." if len(project_id or "") > 20 else project_id
+        )
         if not license_key and not open_build:
             license_key = "GENERIC_BUILD"
+
+    # Get project language for tier enforcement (check before building)
+    build_language = language
+    if not build_language:
+        try:
+            proj_resp = requests.get(
+                f"{api_url}/projects/{project_id}", headers=headers, timeout=10
+            )
+            if proj_resp.status_code == 200:
+                proj_data = proj_resp.json()
+                build_language = proj_data.get("language", "python")
+        except Exception:
+            build_language = "python"
+
+    # Tier enforcement: Check if user can build Node.js
+    if build_language == "nodejs" and not has_node_support:
+        console.print()
+        print_error("Node.js builds require a Pro plan or higher.")
+        console.print(f"[yellow]Your current plan: {user_plan.title()}[/yellow]")
+        console.print("[dim]Visit https://codevault.dev/pricing to upgrade[/dim]")
+        raise typer.Exit(1)
 
     # Build configuration
     config = {
@@ -422,15 +445,6 @@ def build(
         "platform": platform,
         "language": language,
     }
-
-    # Tier enforcement: Check if user can build Node.js
-    build_language = language or ("nodejs" if project_id.endswith(".js") else "python")
-    if build_language == "nodejs" and not has_node_support:
-        console.print()
-        print_error("Node.js builds require a Pro plan or higher.")
-        console.print(f"[yellow]Your current plan: {user_plan.title()}[/yellow]")
-        console.print("[dim]Visit https://codevault.dev/pricing to upgrade[/dim]")
-        raise typer.Exit(1)
 
     # Show configuration
     if open_build:
