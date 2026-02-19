@@ -588,7 +588,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
                WHERE id = $1""",
             build_id,
             gcp_build_id,
-            json.dumps([f"Cloud Build triggered: {gcp_build_id}", f"Logs: {logs_url}"]),
+            [f"Cloud Build triggered: {gcp_build_id}", f"Logs: {logs_url}"],
         )
 
         logger.info(
@@ -671,62 +671,6 @@ async def start_cloud_build(
             raise HTTPException(
                 400,
                 "macOS cloud builds are temporarily unavailable. Select Windows and/or Linux.",
-            )
-
-        # Credit System Enforcement
-        # Business has unlimited builds (no credit deduction)
-        if tier["tier"] != "business":
-            from config import BUILD_COST_STANDARD
-
-            cost = BUILD_COST_STANDARD
-
-            user_credits = await conn.fetchval(
-                "SELECT build_credits FROM users WHERE id = $1", user["id"]
-            )
-
-            if user_credits is None:
-                user_credits = 0
-
-            if user_credits < cost:
-                raise HTTPException(
-                    403,
-                    f"Insufficient build credits ({user_credits}). "
-                    f"This build requires {cost} credits. "
-                    "Upgrade your plan or wait for your monthly refill.",
-                )
-
-            # Deduct credits atomically
-            updated_credits = await conn.fetchval(
-                """
-                UPDATE users
-                SET build_credits = build_credits - $1
-                WHERE id = $2 AND build_credits >= $1
-                RETURNING build_credits
-                """,
-                cost,
-                user["id"],
-            )
-            if updated_credits is None:
-                raise HTTPException(
-                    403,
-                    "Insufficient build credits. Please refresh and try again.",
-                )
-            deducted_credits = cost
-
-        # Global concurrency limit (protect Cloud Build quota)
-        active_builds = await conn.fetchval("""
-            SELECT COUNT(*) FROM cloud_builds 
-            WHERE status IN ('pending', 'queued', 'running')
-            AND created_at > NOW() - INTERVAL '2 hours'
-        """)
-
-        MAX_CONCURRENT_BUILDS = 15  # Cloud Build concurrent build limit
-
-        if active_builds >= MAX_CONCURRENT_BUILDS:
-            raise HTTPException(
-                503,
-                f"Build queue is full ({active_builds} active builds). "
-                "Please try again in a few minutes.",
             )
 
         # 2. Project Info
@@ -907,36 +851,84 @@ async def start_cloud_build(
             "enable_lease": project_settings.get("enable_lease", False),
         }
 
-        # Insert Main Build
-        await conn.execute(
-            """
-            INSERT INTO cloud_builds (
-                id, project_id, user_id, language, entry_file, output_name, config_json, status, target_platforms, plan_tier
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-            """,
-            build_id,
-            request.project_id,
-            user["id"],
-            language,
-            entry_file,
-            output_name,
-            json.dumps(config),
-            json.dumps(request.target_platforms),
-            tier["tier"],
-        )
+        # CVE-003 FIX: Wrap credit deduction + build records in transaction
+        # If queue fails later, the except block handles refund
+        # If anything fails here, transaction rolls back (automatic refund)
+        async with conn.transaction():
+            # Global concurrency limit (protect Cloud Build quota)
+            active_builds = await conn.fetchval("""
+                SELECT COUNT(*) FROM cloud_builds 
+                WHERE status IN ('pending', 'queued', 'running')
+                AND created_at > NOW() - INTERVAL '2 hours'
+            """)
 
-        # Insert Artifacts
-        for platform in request.target_platforms:
+            MAX_CONCURRENT_BUILDS = 15  # Cloud Build concurrent build limit
+
+            if active_builds >= MAX_CONCURRENT_BUILDS:
+                raise HTTPException(
+                    503,
+                    f"Build queue is full ({active_builds} active builds). "
+                    "Please try again in a few minutes.",
+                )
+
+            # Credit System Enforcement
+            # Business has unlimited builds (no credit deduction)
+            if tier["tier"] != "business":
+                from config import BUILD_COST_STANDARD
+
+                cost = BUILD_COST_STANDARD
+
+                # Deduct credits atomically with validation
+                updated_credits = await conn.fetchval(
+                    """
+                    UPDATE users
+                    SET build_credits = build_credits - $1
+                    WHERE id = $2 AND build_credits >= $1
+                    RETURNING build_credits
+                    """,
+                    cost,
+                    user["id"],
+                )
+                if updated_credits is None:
+                    raise HTTPException(
+                        403,
+                        "Insufficient build credits. Please upgrade or wait for monthly refill.",
+                    )
+                deducted_credits = cost
+
+            # Insert Main Build
             await conn.execute(
                 """
-                INSERT INTO cloud_build_artifacts (
-                    id, build_id, platform, status
-                ) VALUES ($1, $2, $3, 'pending')
+                INSERT INTO cloud_builds (
+                    id, project_id, user_id, language, entry_file, output_name, config_json, status, target_platforms, plan_tier
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
                 """,
-                f"art_{secrets.token_hex(8)}",
                 build_id,
-                platform,
+                request.project_id,
+                user["id"],
+                language,
+                entry_file,
+                output_name,
+                json.dumps(config),
+                json.dumps(request.target_platforms),
+                tier["tier"],
             )
+
+            # Insert Artifacts
+            for platform in request.target_platforms:
+                await conn.execute(
+                    """
+                    INSERT INTO cloud_build_artifacts (
+                        id, build_id, platform, status
+                    ) VALUES ($1, $2, $3, 'pending')
+                    """,
+                    f"art_{secrets.token_hex(8)}",
+                    build_id,
+                    platform,
+                )
+
+        # Transaction committed here - credits deducted, build records created
+        # Queue operation happens outside transaction (external Redis operation)
 
         # 5. Add to Queue (Priority based on Tier)
         priority = 10  # Default (Pro)
