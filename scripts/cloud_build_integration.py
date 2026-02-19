@@ -272,7 +272,8 @@ else
   echo "[Cloud Build] ccache not found"
 fi
 
-echo "[Cloud Build] Cache restore complete"""
+echo "[Cloud Build] Cache restore complete"
+"""
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
@@ -296,7 +297,8 @@ if [[ "{source_url}" == gs://* ]]; then
   gsutil cp "{source_url}" source.zip
 else
   curl -L -o source.zip "{source_url}"
-fi"""
+fi
+"""
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
@@ -319,7 +321,8 @@ elif [ -d "./extracted/source" ]; then
 else
   cp -r ./extracted/. ./project/source/ 2>/dev/null || true
 fi
-echo "[Cloud Build] Source prepared"""
+echo "[Cloud Build] Source prepared"
+"""
 
         return {
             "name": "ubuntu",
@@ -335,7 +338,8 @@ echo "[Cloud Build] Source prepared"""
   exit 0
 fi
 echo "[Cloud Build] Downloading config..."
-gsutil cp "{config_url}" /workspace/config.json"""
+gsutil cp "{config_url}" /workspace/config.json
+"""
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
@@ -413,7 +417,8 @@ echo "$linux_error" > /workspace/linux_error
 if [ -d "$HOME/.cache/Nuitka" ]; then
   mkdir -p /workspace/.nuitka-cache
   cp -r $HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
-fi"""
+fi
+"""
 
         steps.append(
             {
@@ -434,7 +439,8 @@ if [ -z "$linux_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Linux: $linux_artifact"
-gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"""
+gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"
+"""
 
         steps.append(
             {
@@ -506,7 +512,8 @@ fi
 
 echo "$windows_status" > /workspace/build_status_windows
 echo "$windows_artifacts" > /workspace/windows_artifacts
-echo "$windows_error" > /workspace/windows_error"""
+echo "$windows_error" > /workspace/windows_error
+"""
 
         steps.append(
             {
@@ -527,7 +534,8 @@ if [ -z "$windows_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Windows: $windows_artifact"
-gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"""
+gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+"""
 
         steps.append(
             {
@@ -644,7 +652,8 @@ else
   echo "skipped" > /workspace/build_status_linux
 fi
 
-echo "[Cloud Build] Node.js build step complete"""
+echo "[Cloud Build] Node.js build step complete"
+"""
 
         steps.append(
             {
@@ -665,7 +674,8 @@ if [ -z "$windows_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Node.js Windows: $windows_artifact"
-gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"""
+gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+"""
 
         steps.append(
             {
@@ -686,7 +696,8 @@ if [ -z "$linux_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Node.js Linux: $linux_artifact"
-gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"""
+gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"
+"""
 
         steps.append(
             {
@@ -722,7 +733,8 @@ if [ -d /workspace/.ccache ]; then
 fi
 
 echo "[Cloud Build] Skipping Nuitka cache save (disabled)"
-echo "[Cloud Build] Cache save complete"""
+echo "[Cloud Build] Cache save complete"
+"""
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
@@ -831,7 +843,8 @@ for i in $(seq 1 $max_retries); do
   fi
 done
 
-echo "[Cloud Build] Webhook completed"""
+echo "[Cloud Build] Webhook completed"
+"""
 
         return {
             "name": "gcr.io/cloud-builders/curl",
