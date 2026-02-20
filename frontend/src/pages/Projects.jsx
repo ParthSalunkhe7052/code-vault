@@ -112,6 +112,17 @@ const Projects = () => {
 
     const handleCreate = async (e) => {
         e.preventDefault();
+        
+        // Client-side validation
+        if (!newProject.name?.trim()) {
+            toast.error('Project name is required');
+            return;
+        }
+        if (!newProject.language) {
+            toast.error('Language is required');
+            return;
+        }
+
         try {
             await projectApi.create(newProject);
             setIsModalOpen(false);
@@ -120,7 +131,8 @@ const Projects = () => {
             fetchProjects();
         } catch (error) {
             console.error('Failed to create project:', error);
-            toast.error('Failed to create project');
+            const errorMessage = error.response?.data?.detail || 'Failed to create project';
+            toast.error(errorMessage);
         }
     };
 

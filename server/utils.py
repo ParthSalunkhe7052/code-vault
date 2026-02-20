@@ -460,6 +460,7 @@ def create_validation_response(
     secret: Optional[str] = None,
     private_key_pem: Optional[str] = None,
     license_key: Optional[str] = None,
+    jti: Optional[str] = None,
 ) -> LicenseValidationResponse:
     """Create a signed license validation response (Protocol v2).
 
@@ -477,8 +478,9 @@ def create_validation_response(
     timestamp = int(time.time())
     server_time = timestamp
 
-    # Protocol v2: Generate unique JWT ID for replay protection
-    jti = secrets.token_hex(16)
+    # Protocol v2: Use provided jti or generate new one for replay protection
+    if jti is None:
+        jti = secrets.token_hex(16)
     issued_at = timestamp
 
     response_data = {

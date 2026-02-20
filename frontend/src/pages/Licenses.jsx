@@ -126,6 +126,21 @@ const Licenses = () => {
 
     const handleCreate = async (e) => {
         e.preventDefault();
+        
+        // Client-side validation
+        if (!newLicense.project_id) {
+            toast.error('Please select a project');
+            return;
+        }
+        if (!newLicense.client_name?.trim()) {
+            toast.error('Client name is required');
+            return;
+        }
+        if (newLicense.max_machines < 1) {
+            toast.error('Max machines must be at least 1');
+            return;
+        }
+
         try {
             const licenseData = {
                 ...newLicense,

@@ -11,9 +11,19 @@ const Footer: React.FC = () => {
             <h4 className="font-bold text-white mb-4 flex items-center gap-2">
               CodeVault
             </h4>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-gray-400 mb-6">
               Protecting intellectual property for developers worldwide.
             </p>
+            <div className="flex flex-wrap gap-4 opacity-40 hover:opacity-100 transition-opacity">
+               <div className="flex flex-col gap-1">
+                  <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Built with</span>
+                  <div className="text-[10px] font-black text-white bg-white/5 px-2 py-1 rounded border border-white/10">NUITKA</div>
+               </div>
+               <div className="flex flex-col gap-1">
+                  <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Protocol</span>
+                  <div className="text-[10px] font-black text-white bg-white/5 px-2 py-1 rounded border border-white/10">HWID-V2</div>
+               </div>
+            </div>
           </div>
           
           <div>

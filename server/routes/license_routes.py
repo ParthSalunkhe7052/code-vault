@@ -161,6 +161,7 @@ async def validate_license(
         )
 
     conn = await get_db()
+    response_jti = None  # CVE-001: Will be set inside transaction for atomic JTI check
     try:
         # Use transaction with row-level locking to prevent race conditions
         async with conn.transaction():
@@ -464,7 +465,15 @@ async def validate_license(
                         data.hwid,
                     )
                 else:
-                    # Count active sessions
+                    # CVE-002 FIX: Use advisory lock to prevent concurrent session creation race
+                    # Convert license_id (32 hex chars) to integer for advisory lock key
+                    try:
+                        lock_key = int(license_id[:16], 16)
+                    except ValueError:
+                        lock_key = abs(hash(license_id)) % (2**63)
+                    await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_key)
+
+                    # Count active sessions (now atomic with advisory lock)
                     active_count = await conn.fetchval(
                         "SELECT COUNT(*) FROM license_sessions WHERE license_id = $1 AND is_active = TRUE AND expires_at > NOW()",
                         license_id,
@@ -502,19 +511,23 @@ async def validate_license(
             if session_token:
                 variables["_cv_session_token"] = session_token
 
-        # Protocol v2: Check for replay attack before generating response
-        # Generate a temporary jti to check - actual jti is created in create_validation_response
-        temp_jti = secrets.token_hex(16)
-        is_valid, replay_error = await check_and_store_jti(temp_jti, data.license_key)
-        if not is_valid:
-            return create_validation_response(
-                "invalid",
-                replay_error,
-                data.nonce,
-                secret=signing_secret,
-                private_key_pem=signing_private_key,
-                license_key=data.license_key,
+            # CVE-001 FIX: Protocol v2 JTI check INSIDE transaction
+            # Generate and check JTI before transaction commits to prevent TOCTOU race
+            response_jti = secrets.token_hex(16)
+            is_valid_jti, replay_error = await check_and_store_jti(
+                response_jti, data.license_key
             )
+            if not is_valid_jti:
+                log_data["result"] = "replay_blocked"
+                asyncio.create_task(_push_validation_log_to_redis(log_data))
+                return create_validation_response(
+                    "invalid",
+                    replay_error,
+                    data.nonce,
+                    secret=signing_secret,
+                    private_key_pem=signing_private_key,
+                    license_key=data.license_key,
+                )
 
         # Phase 4: Generate server-signed lease token for offline validation
         lease_token = None
@@ -546,6 +559,7 @@ async def validate_license(
             secret=signing_secret,
             private_key_pem=signing_private_key,
             license_key=data.license_key,
+            jti=response_jti,  # CVE-001: Use same JTI checked in transaction
         )
         # Attach lease token to response
         response.lease_token = lease_token

@@ -4,6 +4,7 @@ import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRi
 import { stats, auth, projects } from '../services/api';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList } from '../components/dashboard';
 import UsageStats from '../components/dashboard/UsageStats';
+import OnboardingHero from '../components/dashboard/OnboardingHero';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -74,6 +75,8 @@ const Dashboard = () => {
         ? Math.round((dashboardStats.validations.last_24h.successful / dashboardStats.validations.last_24h.total) * 100)
         : 100;
 
+    const hasNoProjects = projectList.length === 0;
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -94,51 +97,58 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <Link to="/projects">
+            {/* Onboarding Hero for new users */}
+            {hasNoProjects && <OnboardingHero />}
+
+            {/* Stats Grid - Hidden for new users to prioritize onboarding */}
+            {!hasNoProjects && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <Link to="/projects">
+                        <StatCard
+                            title="Projects"
+                            value={projectList.length}
+                            icon={Database}
+                            color="text-blue-400"
+                            subtitle="Click to manage"
+                        />
+                    </Link>
+
+                    <Link to="/licenses">
+                        <StatCard
+                            title="Total Licenses"
+                            value={dashboardStats?.licenses?.total || 0}
+                            icon={Key}
+                            color="text-violet-400"
+                            subtitle="Click to manage"
+                        />
+                    </Link>
+
+                    {/* Cloud Build Credits */}
                     <StatCard
-                        title="Projects"
-                        value={projectList.length}
-                        icon={Database}
-                        color="text-blue-400"
-                        subtitle="Click to manage"
+                        title="Build Credits"
+                        value={userProfile?.build_credits || 0}
+                        icon={CloudLightning}
+                        color="text-amber-400"
+                        subtitle={userProfile?.plan === 'free' ? 'Local builds only' : 'Monthly refill'}
                     />
-                </Link>
 
-                <Link to="/licenses">
                     <StatCard
-                        title="Total Licenses"
-                        value={dashboardStats?.licenses?.total || 0}
-                        icon={Key}
-                        color="text-violet-400"
-                        subtitle="Click to manage"
+                        title="Validations (24h)"
+                        value={dashboardStats?.validations?.last_24h?.total || 0}
+                        icon={Activity}
+                        color="text-emerald-400"
+                        subtitle={`${validationSuccessRate}% success rate`}
                     />
-                </Link>
+                </div>
+            )}
 
-                {/* Cloud Build Credits */}
-                <StatCard
-                    title="Build Credits"
-                    value={userProfile?.build_credits || 0}
-                    icon={CloudLightning}
-                    color="text-amber-400"
-                    subtitle={userProfile?.plan === 'free' ? 'Local builds only' : 'Monthly refill'}
+            {/* Usage Stats - Only show if there's activity */}
+            {!hasNoProjects && (
+                <UsageStats 
+                    projectCount={projectList.length} 
+                    licenseCount={dashboardStats?.licenses?.total || 0} 
                 />
-
-                <StatCard
-                    title="Validations (24h)"
-                    value={dashboardStats?.validations?.last_24h?.total || 0}
-                    icon={Activity}
-                    color="text-emerald-400"
-                    subtitle={`${validationSuccessRate}% success rate`}
-                />
-            </div>
-
-            {/* Usage Stats */}
-            <UsageStats 
-                projectCount={projectList.length} 
-                licenseCount={dashboardStats?.licenses?.total || 0} 
-            />
+            )}
 
             {/* Alerts Section */}
             {dashboardStats?.expiring_soon?.length > 0 && (

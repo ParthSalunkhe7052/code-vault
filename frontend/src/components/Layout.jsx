@@ -33,11 +33,11 @@ const Layout = () => {
     ];
 
     const primaryActiveClass = isDarkMatter
-        ? 'bg-[var(--cv-primary)]/10 text-[var(--cv-text)] border-[var(--cv-primary)]/20 shadow-[0_0_15px_-5px_var(--cv-primary-glow)]'
+        ? 'bg-cv-primary/10 text-cv-text border-cv-primary/20 shadow-cv-primary-active'
         : 'bg-primary/10 text-white border-primary/20 shadow-[0_0_15px_-5px_rgba(99,102,241,0.3)]';
 
     return (
-        <div className="flex h-screen w-full text-slate-200 overflow-hidden font-sans selection:bg-primary/30 selection:text-primary-light" style={{ backgroundColor: 'var(--cv-bg)' }}>
+        <div className="flex h-screen w-full text-slate-200 overflow-hidden font-sans selection:bg-primary/30 selection:text-primary-light bg-cv-bg">
             <a
                 href="#main-content"
                 className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-indigo-600 focus:text-white focus:font-semibold focus:text-sm focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"
@@ -47,23 +47,23 @@ const Layout = () => {
             <div className="fixed inset-0 bg-black pointer-events-none z-0" />
             <img src={backgroundMain} alt="Background" className={`fixed inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen z-0 ${isDarkMatter ? 'opacity-20' : 'opacity-40'}`} />
             <div className="fixed inset-0 bg-grid-pattern opacity-10 pointer-events-none z-0" />
-            <div className="fixed inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(to bottom, transparent, var(--cv-bg) 80%, var(--cv-bg))` }} />
+            <div className="fixed inset-0 pointer-events-none z-0 bg-cv-bottom-fade" />
 
-            <aside className="w-72 flex flex-col border-r backdrop-blur-xl relative z-20" style={{ borderColor: 'var(--cv-border)', backgroundColor: 'var(--cv-card)' }}>
-                <div className="p-6 border-b" style={{ borderColor: 'var(--cv-border)' }}>
+            <aside className="w-72 flex flex-col border-r backdrop-blur-xl relative z-20 border-cv-border bg-cv-card">
+                <div className="p-6 border-b border-cv-border">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg animate-pulse-slow" style={{ background: `linear-gradient(135deg, var(--cv-primary), var(--cv-primary-hover))`, boxShadow: '0 4px 14px -3px var(--cv-primary-glow)' }}>
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-cv-primary-glow animate-pulse-slow bg-cv-primary-gradient">
                             <Activity size={22} />
                         </div>
                         <div>
-                            <h1 className="font-bold text-lg tracking-wider uppercase" style={{ color: 'var(--cv-text)' }}>CodeVault</h1>
-                            <p className="text-[10px] font-mono tracking-widest" style={{ color: 'var(--cv-primary)' }}>SYSTEM V2.0</p>
+                            <h1 className="font-bold text-lg tracking-wider uppercase text-cv-text">CodeVault</h1>
+                            <p className="text-[10px] font-mono tracking-widest text-cv-primary">SYSTEM V2.0</p>
                         </div>
                     </div>
                 </div>
 
                 <nav aria-label="Main navigation" className="flex-1 p-4 space-y-2 overflow-y-auto">
-                    <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--cv-text-muted)' }}>
+                    <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-cv-text-muted">
                         Mission Control
                     </div>
                     {navItems.map((item) => (
@@ -72,22 +72,18 @@ const Layout = () => {
                             to={item.path}
                             end={item.path === '/'}
                             className={({ isActive }) =>
-                                `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
+                                `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border transition-all duration-150 ease-in-out ${isActive
                                     ? primaryActiveClass
-                                    : 'border-transparent hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
+                                    : 'border-transparent text-cv-text-muted hover:bg-cv-border-subtle hover:border-cv-border hover:text-cv-text'
                                 }`
                             }
-                            style={({ isActive }) => ({
-                                color: isActive ? 'var(--cv-text)' : 'var(--cv-text-muted)',
-                                transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)'
-                            })}
                         >
                             <div className="w-8 h-8 flex items-center justify-center">
                                  <item.icon size={20} />
                             </div>
                             <span className="font-medium tracking-wide">{item.label}</span>
                             {(location.pathname === item.path || (item.path === '/' && location.pathname === '/')) && (
-                                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full" style={{ backgroundColor: 'var(--cv-primary)', boxShadow: '0 0 6px var(--cv-primary-glow)' }} />
+                                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full bg-cv-primary shadow-cv-primary-glow-strong" />
                             )}
                         </NavLink>
                     ))}
@@ -101,8 +97,8 @@ const Layout = () => {
                                 to="/admin"
                                 className={({ isActive }) =>
                                     `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
-                                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[0_0_8px_-3px_rgba(245,158,11,0.3)]'
-                                        : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
+                                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-cv-amber-active'
+                                        : 'border-transparent text-slate-400 hover:bg-cv-border-subtle hover:border-cv-border'
                                     }`
                                 }
                             >
@@ -111,7 +107,7 @@ const Layout = () => {
                                 </div>
                                 <span className="font-medium tracking-wide">Admin Dashboard</span>
                                 {location.pathname === '/admin' && (
-                                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full shadow-[0_0_6px_rgba(245,158,11,0.6)]" />
+                                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full shadow-cv-amber-strong" />
                                 )}
                             </NavLink>
                         </>
@@ -124,8 +120,8 @@ const Layout = () => {
                         to="/build-settings"
                         className={({ isActive }) =>
                             `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
-                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[0_0_8px_-3px_rgba(168,85,247,0.3)]'
-                                : 'border-transparent text-slate-400 hover:bg-[var(--cv-border-subtle)] hover:border-[var(--cv-border)]'
+                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-cv-purple-active'
+                                : 'border-transparent text-slate-400 hover:bg-cv-border-subtle hover:border-cv-border'
                             }`
                         }
                     >
@@ -134,32 +130,32 @@ const Layout = () => {
                         </div>
                         <span className="font-medium tracking-wide">Build Settings</span>
                         {location.pathname === '/build-settings' && (
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-purple-500 rounded-l-full shadow-[0_0_6px_rgba(168,85,247,0.6)]" />
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-purple-500 rounded-l-full shadow-cv-purple-strong" />
                         )}
                     </NavLink>
 
-                    <div className="mt-8 px-4 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--cv-text-muted)' }}>
+                    <div className="mt-8 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-cv-text-muted">
                         System Status
                     </div>
-                    <div className="px-4 py-3 rounded-xl border mx-2" style={{ backgroundColor: 'var(--cv-bg-elevated)', borderColor: 'var(--cv-border)' }}>
+                    <div className="px-4 py-3 rounded-xl border mx-2 bg-cv-bg-elevated border-cv-border">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs" style={{ color: 'var(--cv-text-muted)' }}>Core Systems</span>
+                            <span className="text-xs text-cv-text-muted">Core Systems</span>
                             <span className="text-xs text-emerald-400 font-mono">ONLINE</span>
                         </div>
-                        <div className="w-full h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--cv-muted)' }}>
-                            <div className="h-full w-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
+                        <div className="w-full h-1 rounded-full overflow-hidden bg-cv-muted">
+                            <div className="h-full w-full bg-emerald-500 shadow-cv-emerald-pulse animate-pulse" />
                         </div>
                     </div>
                 </nav>
 
-                <div className="p-4 border-t" style={{ borderColor: 'var(--cv-border)', backgroundColor: 'var(--cv-bg-secondary)' }}>
+                <div className="p-4 border-t border-cv-border bg-cv-bg-secondary">
                     <div className="mb-4 flex items-center gap-3 px-2">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${planBg}`}>
                             <PlanIcon size={20} className={planColor} />
                         </div>
                         <div className="overflow-hidden">
-                            <p className="text-sm font-bold truncate" style={{ color: 'var(--cv-text)' }}>{user?.name || 'CodeVault User'}</p>
-                            <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--cv-text-muted)' }}>
+                            <p className="text-sm font-bold truncate text-cv-text">{user?.name || 'CodeVault User'}</p>
+                            <p className="text-[10px] uppercase tracking-wider font-semibold text-cv-text-muted">
                                 {userPlan} Plan
                             </p>
                         </div>
@@ -167,8 +163,7 @@ const Layout = () => {
 
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl border border-transparent text-slate-400 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 group"
-                        style={{ transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)' }}
+                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl border border-transparent text-slate-400 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 group transition-all duration-150 ease-in-out"
                     >
                         <LogOut size={18} className="group-hover:text-red-400 transition-colors duration-150" />
                         <span className="font-medium tracking-wide">Disconnect</span>
