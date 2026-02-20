@@ -20,23 +20,13 @@ const steps: FeatureStep[] = [
     icon: <Code2 className="w-5 h-5" />,
     renderVisual: () => (
       <div className="relative w-full h-full flex items-center justify-center p-8">
-        <motion.div 
-          animate={{ y: [0, -10, 0] }}
-          transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-          className="w-64 h-80 rounded-3xl bg-[#111827] border-2 border-dashed border-indigo-500/30 flex flex-col items-center justify-center shadow-2xl"
-        >
-           <div className="w-16 h-16 rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-6">
-              <Code2 className="text-indigo-400" size={32} />
-           </div>
-           <div className="text-xs font-mono text-slate-500 mb-2">main.py</div>
-           <div className="w-32 h-1 bg-white/5 rounded-full mb-2" />
-           <div className="w-24 h-1 bg-white/5 rounded-full mb-2" />
-           <div className="w-28 h-1 bg-white/5 rounded-full" />
-           
-           <div className="mt-8 px-4 py-2 rounded-full bg-indigo-500 text-[10px] font-bold text-white shadow-lg">
-              DRAG & DROP
-           </div>
-        </motion.div>
+        <motion.img 
+          src="/assets/features/feature-1.png"
+          alt="Drop your script"
+          animate={{ y: [0, -15, 0] }}
+          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut" }}
+          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
+        />
       </div>
     )
   },
@@ -47,34 +37,14 @@ const steps: FeatureStep[] = [
     description: 'We translate your Python code into C, then compile it into a native binary. This significantly raises the bar for reverse engineering compared to PyInstaller\'s bytecode shipping.',
     icon: <Cpu className="w-5 h-5" />,
     renderVisual: () => (
-      <div className="w-full max-w-md mx-auto aspect-square bg-[#0a0f1a] rounded-3xl border border-white/5 overflow-hidden flex flex-col shadow-2xl">
-         <div className="flex items-center px-4 py-3 bg-white/5 border-b border-white/5 gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500/20" />
-            <div className="w-2 h-2 rounded-full bg-yellow-500/20" />
-            <div className="w-2 h-2 rounded-full bg-green-500/20" />
-            <span className="ml-2 text-[10px] font-mono text-slate-500 uppercase tracking-widest">Nuitka Optimizer</span>
-         </div>
-         <div className="p-6 font-mono text-[10px] text-indigo-400/80 leading-relaxed overflow-hidden">
-            <motion.div animate={{ y: [0, -200] }} transition={{ repeat: Infinity, duration: 10, ease: "linear" }}>
-               {[...Array(20)].map((_, i) => (
-                 <div key={i} className="mb-1">
-                    <span className="text-slate-600">[{i}]</span> #include &lt;nuitka/prelude.h&gt;<br />
-                    void compiled_function(void) &#123;<br />
-                    &nbsp;&nbsp;CHECK_OBJECT(code_obj);<br />
-                    &nbsp;&nbsp;PyObject *result = CALL_FUNCTION(obj, args);<br />
-                    &#125;
-                 </div>
-               ))}
-            </motion.div>
-         </div>
-         <div className="mt-auto p-4 bg-emerald-500/10 border-t border-emerald-500/20 flex items-center justify-between">
-            <span className="text-[10px] font-bold text-emerald-400">OPTIMIZING C SOURCE</span>
-            <div className="flex gap-1">
-               <motion.div animate={{ opacity: [0, 1, 0] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1 h-3 bg-emerald-500" />
-               <motion.div animate={{ opacity: [0, 1, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1 h-3 bg-emerald-500" />
-               <motion.div animate={{ opacity: [0, 1, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1 h-3 bg-emerald-500" />
-            </div>
-         </div>
+      <div className="relative w-full h-full flex items-center justify-center p-8">
+        <motion.img 
+          src="/assets/features/feature-2.png"
+          alt="Nuitka Compilation"
+          animate={{ y: [0, -15, 0] }}
+          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 0.5 }}
+          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
+        />
       </div>
     )
   },
@@ -85,34 +55,14 @@ const steps: FeatureStep[] = [
     description: 'Inject HWID validation directly into your binary. Bind licenses to unique hardware signatures (CPU, Disk, Mobo). If they share the .exe, it bricks.',
     icon: <Lock className="w-5 h-5" />,
     renderVisual: () => (
-      <div className="relative w-full h-full flex flex-col items-center justify-center p-12">
-          <div className="w-full max-w-xs space-y-3">
-            {[
-              { label: 'CPU_SIGNATURE', status: 'VERIFIED', color: 'emerald' },
-              { label: 'DISK_SERIAL_ID', status: 'VERIFIED', color: 'emerald' },
-              { label: 'BIOS_UUID_HASH', status: 'VERIFIED', color: 'emerald' },
-              { label: 'MAC_ADDRESS', status: 'VERIFIED', color: 'emerald' },
-            ].map((item, i) => (
-              <motion.div 
-                key={i}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.1 }}
-                className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/5"
-              >
-                 <span className="text-[10px] font-mono text-slate-500">{item.label}</span>
-                 <div className={`flex items-center gap-2 text-[10px] font-bold text-${item.color}-400`}>
-                    <div className={`w-1 h-1 rounded-full bg-${item.color}-400 animate-pulse`} />
-                    {item.status}
-                 </div>
-              </motion.div>
-            ))}
-         </div>
-         <motion.div 
-           animate={{ rotate: 360 }}
-           transition={{ repeat: Infinity, duration: 20, ease: "linear" }}
-           className="absolute inset-0 border-[40px] border-indigo-500/5 rounded-full scale-110 pointer-events-none" 
-         />
+      <div className="relative w-full h-full flex items-center justify-center p-8">
+        <motion.img 
+          src="/assets/features/feature-3.png"
+          alt="Kill Piracy Dead"
+          animate={{ y: [0, -15, 0] }}
+          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 1 }}
+          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
+        />
       </div>
     )
   },
@@ -123,43 +73,14 @@ const steps: FeatureStep[] = [
     description: 'Issue cryptographically signed leases that allow applications to run offline for up to 24 hours. Manage everything from a single dashboard.',
     icon: <DollarSign className="w-5 h-5" />,
     renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center">
-         <motion.div 
-           whileHover={{ scale: 1.05 }}
-           className="w-72 p-6 rounded-3xl bg-gradient-to-br from-indigo-600 to-purple-700 border border-indigo-400 shadow-2xl shadow-indigo-500/20"
-         >
-            <div className="flex justify-between items-start mb-10">
-               <div className="p-2 rounded-xl bg-white/10">
-                  <ShieldCheck className="text-white" size={24} />
-               </div>
-               <div className="px-2 py-1 rounded-md bg-white/10 text-[8px] font-bold text-white uppercase tracking-widest">Enterprise Lease</div>
-            </div>
-            <div className="mb-8">
-               <div className="text-[10px] text-indigo-200 mb-1">LICENSE KEY</div>
-               <div className="text-sm font-mono text-white font-bold tracking-wider">CV-9921-XP02-L991</div>
-            </div>
-            <div className="flex justify-between items-end">
-               <div>
-                  <div className="text-[10px] text-indigo-200 mb-1">STATUS</div>
-                  <div className="text-xs text-white font-bold flex items-center gap-1">
-                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                     OFFLINE READY
-                  </div>
-               </div>
-               <div className="text-right">
-                  <div className="text-[10px] text-indigo-200 mb-1">EXPIRES</div>
-                  <div className="text-xs text-white font-bold">364 DAYS</div>
-               </div>
-            </div>
-         </motion.div>
-         
-         {/* Abstract background stats */}
-         <div className="absolute top-10 right-10 p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl -z-10 opacity-50 rotate-12">
-            <Activity className="text-indigo-400" size={20} />
-         </div>
-         <div className="absolute bottom-10 left-10 p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl -z-10 opacity-50 -rotate-12">
-            <Globe className="text-purple-400" size={20} />
-         </div>
+      <div className="relative w-full h-full flex items-center justify-center p-8">
+        <motion.img 
+          src="/assets/features/feature-4.png"
+          alt="Air-Gapped Revenue"
+          animate={{ y: [0, -15, 0] }}
+          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 1.5 }}
+          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
+        />
       </div>
     )
   },
