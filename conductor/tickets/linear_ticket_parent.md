@@ -1,7 +1,7 @@
 ---
 id: parent
 title: [Epic] Frontend Audit & Optimization
-status: Research Needed
+status: Done
 priority: High
 project: CodeVault
 created: 2026-02-19
