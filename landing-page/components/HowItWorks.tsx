@@ -23,7 +23,7 @@ const Step: React.FC<{
        {icon}
     </div>
 
-    <h3 className="text-xl font-bold text-white mb-3">{title}</h3>
+    <h3 className="text-xl font-bold text-slate-400 mb-3 group-hover:text-white transition-colors duration-300">{title}</h3>
     <p className="text-sm text-slate-400 leading-relaxed max-w-[240px] group-hover:text-slate-300 transition-colors">
       {description}
     </p>
@@ -35,9 +35,9 @@ const HowItWorks: React.FC = () => {
     <section id="how-it-works" className="py-32 bg-background relative overflow-hidden">
       <div className="max-w-7xl mx-auto px-6">
         
-        <div className="text-center mb-24">
-           <h2 className="text-4xl md:text-5xl font-bold mb-6 tracking-tight">The Pipeline</h2>
-           <p className="text-slate-400 text-lg">Build once. Sell forever.</p>
+        <div className="text-center mb-24 group/header">
+           <h2 className="text-4xl md:text-5xl font-bold mb-6 tracking-tight text-slate-400 hover:text-white transition-colors duration-300">The Pipeline</h2>
+           <p className="text-slate-400 text-lg group-hover/header:text-slate-300 transition-colors">Build once. Sell forever.</p>
         </div>
 
         <div className="relative grid grid-cols-1 md:grid-cols-4 gap-12 md:gap-4">

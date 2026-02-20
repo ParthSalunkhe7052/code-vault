@@ -37,7 +37,7 @@ const Hero: React.FC = () => {
             className="text-6xl md:text-8xl font-bold tracking-tighter mb-8 leading-[0.9] text-white"
           >
             Ship <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500">
+            <span className="text-transparent bg-clip-text bg-[linear-gradient(to_top_right,var(--tw-gradient-stops))] from-cyan-400 via-indigo-500 to-white">
               Protected.
             </span>
           </motion.h1>
