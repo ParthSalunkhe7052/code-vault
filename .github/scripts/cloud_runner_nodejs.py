@@ -102,6 +102,11 @@ const _cv_LICENSE_MODE = "{license_mode}";
 const _cv_DEMO_DURATION = {demo_duration};
 const _cv_LEASE_ENABLED = {lease_enabled};
 
+// Fallback URLs if primary server is unreachable
+const _cv_FALLBACK_URLS = [
+    "https://code-vault-b66848f67c75.herokuapp.com/api/v1/license/validate"
+];
+
 // ============ MODULES ============
 const _cv_crypto = require('crypto');
 const _cv_os = require('os');
@@ -372,9 +377,14 @@ function _cv_loadOrPromptLicense() {
 
 // ============ ONLINE VALIDATION ============
 function _cv_validateOnline(licenseKey, hwid) {
+    return _cv_validateWithUrl(licenseKey, hwid, _cv_SERVER_URL);
+}
+
+function _cv_validateWithUrl(licenseKey, hwid, serverUrl, fallbackIndex) {
+    if (typeof fallbackIndex === 'undefined') fallbackIndex = 0;
     return new Promise((resolve) => {
         try {
-            const urlObj = new URL(_cv_SERVER_URL);
+            const urlObj = new URL(serverUrl);
             const postData = JSON.stringify({
                 license_key: licenseKey,
                 hwid: hwid,
@@ -400,6 +410,12 @@ function _cv_validateOnline(licenseKey, hwid) {
                 res.on('end', () => {
                     try {
                         if (res.statusCode !== 200) {
+                            // Try fallback if available
+                            if (fallbackIndex < _cv_FALLBACK_URLS.length) {
+                                process.stderr.write('[CodeVault] Primary server returned ' + res.statusCode + ', trying fallback...\n');
+                                _cv_validateWithUrl(licenseKey, hwid, _cv_FALLBACK_URLS[fallbackIndex], fallbackIndex + 1).then(resolve);
+                                return;
+                            }
                             resolve({valid: false, error: 'HTTP ' + res.statusCode});
                             return;
                         }
@@ -428,15 +444,33 @@ function _cv_validateOnline(licenseKey, hwid) {
                 });
             });
             req.on('error', (err) => {
+                // Try fallback if available
+                if (fallbackIndex < _cv_FALLBACK_URLS.length) {
+                    process.stderr.write('[CodeVault] Primary server unreachable (' + err.message + '), trying fallback...\n');
+                    _cv_validateWithUrl(licenseKey, hwid, _cv_FALLBACK_URLS[fallbackIndex], fallbackIndex + 1).then(resolve);
+                    return;
+                }
                 resolve({valid: false, error: err.message, offline: true});
             });
             req.on('timeout', () => {
                 req.destroy();
+                // Try fallback if available
+                if (fallbackIndex < _cv_FALLBACK_URLS.length) {
+                    process.stderr.write('[CodeVault] Primary server timeout, trying fallback...\n');
+                    _cv_validateWithUrl(licenseKey, hwid, _cv_FALLBACK_URLS[fallbackIndex], fallbackIndex + 1).then(resolve);
+                    return;
+                }
                 resolve({valid: false, error: 'Timeout', offline: true});
             });
             req.write(postData);
             req.end();
         } catch (e) {
+            // Try fallback if available
+            if (fallbackIndex < _cv_FALLBACK_URLS.length) {
+                process.stderr.write('[CodeVault] Primary URL error, trying fallback...\n');
+                _cv_validateWithUrl(licenseKey, hwid, _cv_FALLBACK_URLS[fallbackIndex], fallbackIndex + 1).then(resolve);
+                return;
+            }
             resolve({valid: false, error: e.message});
         }
     });
