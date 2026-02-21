@@ -382,24 +382,24 @@ if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   exit 0
 fi
 
-decoded_config=$(cat /workspace/config.json)
+decoded_config=$$(cat /workspace/config.json)
 export NUITKA_JOBS=6
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
-mkdir -p $NUITKA_CACHE_DIR
+mkdir -p $$NUITKA_CACHE_DIR
 
 if [ -d /workspace/.nuitka-cache ]; then
-  mkdir -p $HOME/.cache/Nuitka
-  cp -r /workspace/.nuitka-cache/. $HOME/.cache/Nuitka/ 2>/dev/null || true
+  mkdir -p $$HOME/.cache/Nuitka
+  cp -r /workspace/.nuitka-cache/. $$HOME/.cache/Nuitka/ 2>/dev/null || true
 fi
 
-python3 "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_config" --source "./project/source" || true
+python3 "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "./project/source" || true
 
 cd "./project/source"
 
 if [ -d "build_output_linux" ]; then
-  found_binary=$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
-  if [ -n "$found_binary" ]; then
-    cp "$found_binary" ./
+  found_binary=$$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
+  if [ -n "$$found_binary" ]; then
+    cp "$$found_binary" ./
   fi
 fi
 
@@ -413,22 +413,22 @@ if [ -f "{output_name}" ]; then
   mv "{output_name}.tar.gz" /workspace/
   linux_artifacts="{output_name}.tar.gz"
   linux_status="completed"
-  echo "[Cloud Build] Linux artifact ready: $linux_artifacts"
+  echo "[Cloud Build] Linux artifact ready: $$linux_artifacts"
 else
   if [ -f "error_message.txt" ]; then
-    linux_error=$(cat error_message.txt)
+    linux_error=$$(cat error_message.txt)
   else
     linux_error="Linux build output '{output_name}' not found"
   fi
 fi
 
-echo "$linux_status" > /workspace/build_status_linux
-echo "$linux_artifacts" > /workspace/linux_artifacts
-echo "$linux_error" > /workspace/linux_error
+echo "$$linux_status" > /workspace/build_status_linux
+echo "$$linux_artifacts" > /workspace/linux_artifacts
+echo "$$linux_error" > /workspace/linux_error
 
-if [ -d "$HOME/.cache/Nuitka" ]; then
+if [ -d "$$HOME/.cache/Nuitka" ]; then
   mkdir -p /workspace/.nuitka-cache
-  cp -r $HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
+  cp -r $$HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
 fi
 """
 
@@ -441,17 +441,17 @@ fi
         )
 
         # Linux upload step
-        linux_upload_script = f"""linux_status=$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-if [[ "$linux_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Linux upload (status: $linux_status)"
+        linux_upload_script = f"""linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+if [[ "$$linux_status" != "completed" ]]; then
+  echo "[Cloud Build] Skipping Linux upload (status: $$linux_status)"
   exit 0
 fi
-linux_artifact=$(cat /workspace/linux_artifacts 2>/dev/null)
-if [ -z "$linux_artifact" ]; then
+linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+if [ -z "$$linux_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Linux: $linux_artifact"
-gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"
+echo "[Cloud Build] Uploading Linux: $$linux_artifact"
+gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact"
 """
 
         steps.append(
@@ -472,7 +472,7 @@ fi
 
 echo "[Cloud Build] ===== Building for Windows ====="
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
-mkdir -p $NUITKA_CACHE_DIR
+mkdir -p $$NUITKA_CACHE_DIR
 
 wine python -m pip install --upgrade --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography pefile
 
@@ -482,49 +482,49 @@ if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   exit 0
 fi
 
-nuitka_depends_py=$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
-if [ -n "$nuitka_depends_py" ]; then
+nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
+if [ -n "$$nuitka_depends_py" ]; then
   if [ -f "./project/source/.github/scripts/nuitka_patch.py" ]; then
-    wine python "./project/source/.github/scripts/nuitka_patch.py" "$nuitka_depends_py"
+    wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
   fi
 fi
 
-decoded_config=$(cat /workspace/config.json)
-wine python "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_config" --source "$(winepath -w $(realpath ./project/source))"
+decoded_config=$$(cat /workspace/config.json)
+wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))"
 
 found_exe=""
 if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
   found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
 else
-  found_exe=$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
+  found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
 fi
 
 windows_artifacts=""
 windows_status="failed"
 windows_error=""
 
-if [ -n "$found_exe" ] && [ -f "$found_exe" ]; then
-  exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
-  echo "[Cloud Build] EXE size: $exe_size"
-  cp "$found_exe" "/workspace/{output_name}.exe"
+if [ -n "$$found_exe" ] && [ -f "$$found_exe" ]; then
+  exe_size=$$(ls -lh "$$found_exe" | awk '{{print $$5}}')
+  echo "[Cloud Build] EXE size: $$exe_size"
+  cp "$$found_exe" "/workspace/{output_name}.exe"
   if [ -f "/workspace/{output_name}.exe" ]; then
     windows_artifacts="{output_name}.exe"
     windows_status="completed"
-    echo "[Cloud Build] Windows artifact ready: $windows_artifacts"
+    echo "[Cloud Build] Windows artifact ready: $$windows_artifacts"
   else
     windows_error="Failed to copy EXE to artifacts"
   fi
 else
   if [ -f "./project/source/error_message.txt" ]; then
-    windows_error=$(cat ./project/source/error_message.txt)
+    windows_error=$$(cat ./project/source/error_message.txt)
   else
     windows_error="Windows EXE not found in build output"
   fi
 fi
 
-echo "$windows_status" > /workspace/build_status_windows
-echo "$windows_artifacts" > /workspace/windows_artifacts
-echo "$windows_error" > /workspace/windows_error
+echo "$$windows_status" > /workspace/build_status_windows
+echo "$$windows_artifacts" > /workspace/windows_artifacts
+echo "$$windows_error" > /workspace/windows_error
 """
 
         steps.append(
@@ -536,17 +536,17 @@ echo "$windows_error" > /workspace/windows_error
         )
 
         # Windows upload step
-        windows_upload_script = f"""windows_status=$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-if [[ "$windows_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Windows upload (status: $windows_status)"
+        windows_upload_script = f"""windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+if [[ "$$windows_status" != "completed" ]]; then
+  echo "[Cloud Build] Skipping Windows upload (status: $$windows_status)"
   exit 0
 fi
-windows_artifact=$(cat /workspace/windows_artifacts 2>/dev/null)
-if [ -z "$windows_artifact" ]; then
+windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+if [ -z "$$windows_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Windows: $windows_artifact"
-gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+echo "[Cloud Build] Uploading Windows: $$windows_artifact"
+gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact"
 """
 
         steps.append(
@@ -599,11 +599,11 @@ echo "[Cloud Build] Running cloud_runner_nodejs.py..."
 echo "[Cloud Build] This will inject license protection and build for all target platforms."
 
 # Run the runner - if it fails, the build fails (no fallback!)
-python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)" 2>&1
-runner_exit_code=$?
+python3 .github/scripts/cloud_runner_nodejs.py --config "$$(cat /workspace/config.json)" --source "$$(pwd)" 2>&1
+runner_exit_code=$$?
 
-if [ $runner_exit_code -ne 0 ]; then
-  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py failed with exit code $runner_exit_code"
+if [ $$runner_exit_code -ne 0 ]; then
+  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py failed with exit code $$runner_exit_code"
   echo "[Cloud Build] Build cannot proceed without license wrapper."
   echo "failed" > /workspace/build_status_windows
   echo "failed" > /workspace/build_status_linux
@@ -618,18 +618,18 @@ echo "[Cloud Build] Artifacts directory contents:"
 ls -la /workspace/ 2>/dev/null || echo "Workspace empty"
 
 # Parse target platforms from config
-target_plats=$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
-echo "[Cloud Build] Target platforms: $target_plats"
+target_plats=$$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
+echo "[Cloud Build] Target platforms: $$target_plats"
 
 # Windows artifact - strict: only accept expected output file
-if [[ "$target_plats" == *"windows"* ]]; then
+if [[ "$$target_plats" == *"windows"* ]]; then
   if [ -f "build_output_windows/{output_name}.exe" ]; then
-    exe_size=$(stat -c%s "build_output_windows/{output_name}.exe" 2>/dev/null || echo "0")
-    echo "[Cloud Build] Found Windows exe: build_output_windows/{output_name}.exe ($exe_size bytes)"
-    if [ "$exe_size" -lt 10000 ]; then
+    exe_size=$$(stat -c%s "build_output_windows/{output_name}.exe" 2>/dev/null || echo "0")
+    echo "[Cloud Build] Found Windows exe: build_output_windows/{output_name}.exe ($$exe_size bytes)"
+    if [ "$$exe_size" -lt 10000 ]; then
       echo "[Cloud Build] WARNING: EXE seems too small, may be corrupted"
       echo "failed" > /workspace/build_status_windows
-      echo "Windows EXE file is too small ($exe_size bytes) - likely corrupted" > /workspace/windows_error
+      echo "Windows EXE file is too small ($$exe_size bytes) - likely corrupted" > /workspace/windows_error
     else
       cp "build_output_windows/{output_name}.exe" /workspace/
       echo "completed" > /workspace/build_status_windows
@@ -648,14 +648,14 @@ else
 fi
 
 # Linux artifact - strict: only accept expected output file
-if [[ "$target_plats" == *"linux"* ]]; then
+if [[ "$$target_plats" == *"linux"* ]]; then
   if [ -f "build_output_linux/{output_name}" ]; then
-    linux_size=$(stat -c%s "build_output_linux/{output_name}" 2>/dev/null || echo "0")
-    echo "[Cloud Build] Found Linux binary: build_output_linux/{output_name} ($linux_size bytes)"
-    if [ "$linux_size" -lt 10000 ]; then
+    linux_size=$$(stat -c%s "build_output_linux/{output_name}" 2>/dev/null || echo "0")
+    echo "[Cloud Build] Found Linux binary: build_output_linux/{output_name} ($$linux_size bytes)"
+    if [ "$$linux_size" -lt 10000 ]; then
       echo "[Cloud Build] WARNING: Binary seems too small, may be corrupted"
       echo "failed" > /workspace/build_status_linux
-      echo "Linux binary file is too small ($linux_size bytes) - likely corrupted" > /workspace/linux_error
+      echo "Linux binary file is too small ($$linux_size bytes) - likely corrupted" > /workspace/linux_error
     else
       cp "build_output_linux/{output_name}" /workspace/
       chmod +x "/workspace/{output_name}"
@@ -686,17 +686,17 @@ echo "[Cloud Build] Node.js build step complete"
         )
 
         # Windows upload
-        windows_upload_script = f"""windows_status=$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-if [[ "$windows_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Node.js Windows upload (status: $windows_status)"
+        windows_upload_script = f"""windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+if [[ "$$windows_status" != "completed" ]]; then
+  echo "[Cloud Build] Skipping Node.js Windows upload (status: $$windows_status)"
   exit 0
 fi
-windows_artifact=$(cat /workspace/windows_artifacts 2>/dev/null)
-if [ -z "$windows_artifact" ]; then
+windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
+if [ -z "$$windows_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Node.js Windows: $windows_artifact"
-gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+echo "[Cloud Build] Uploading Node.js Windows: $$windows_artifact"
+gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact"
 """
 
         steps.append(
@@ -708,17 +708,17 @@ gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/wi
         )
 
         # Linux upload
-        linux_upload_script = f"""linux_status=$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-if [[ "$linux_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Node.js Linux upload (status: $linux_status)"
+        linux_upload_script = f"""linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+if [[ "$$linux_status" != "completed" ]]; then
+  echo "[Cloud Build] Skipping Node.js Linux upload (status: $$linux_status)"
   exit 0
 fi
-linux_artifact=$(cat /workspace/linux_artifacts 2>/dev/null)
-if [ -z "$linux_artifact" ]; then
+linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
+if [ -z "$$linux_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Node.js Linux: $linux_artifact"
-gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"
+echo "[Cloud Build] Uploading Node.js Linux: $$linux_artifact"
+gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact"
 """
 
         steps.append(
@@ -737,20 +737,20 @@ gsutil cp "/workspace/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linu
 echo "[Cloud Build] Saving cache..."
 
 if [ -d /root/.cache/pip ]; then
-  pip_cache_size=$(du -s /root/.cache/pip 2>/dev/null | cut -f1)
-  if [ "$pip_cache_size" -gt 1000 ]; then
+  pip_cache_size=$$(du -s /root/.cache/pip 2>/dev/null | cut -f1)
+  if [ "$$pip_cache_size" -gt 1000 ]; then
     tar -czf /tmp/pip-cache.tar.gz -C /root/.cache/pip . 2>/dev/null
     gsutil cp /tmp/pip-cache.tar.gz "gs://{gcs_bucket}/cache/pip-cache-default.tar.gz"
-    echo "[Cloud Build] Saved pip cache ($pip_cache_size KB)"
+    echo "[Cloud Build] Saved pip cache ($$pip_cache_size KB)"
   fi
 fi
 
 if [ -d /workspace/.ccache ]; then
-  ccache_size=$(du -s /workspace/.ccache 2>/dev/null | cut -f1)
-  if [ "$ccache_size" -gt 1000 ]; then
+  ccache_size=$$(du -s /workspace/.ccache 2>/dev/null | cut -f1)
+  if [ "$$ccache_size" -gt 1000 ]; then
     tar -czf /tmp/ccache.tar.gz -C /workspace/.ccache . 2>/dev/null
     gsutil cp /tmp/ccache.tar.gz "gs://{gcs_bucket}/cache/ccache-default.tar.gz"
-    echo "[Cloud Build] Saved ccache ($ccache_size KB)"
+    echo "[Cloud Build] Saved ccache ($$ccache_size KB)"
   fi
 fi
 
@@ -776,91 +776,92 @@ echo "============================================"
 # Download config
 gsutil cp "gs://{gcs_bucket}/builds/{build_id}/config.json" /workspace/config.json 2>/dev/null || echo "Config not found"
 
-linux_status=$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-windows_status=$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-windows_artifact=$(cat /workspace/windows_artifacts 2>/dev/null || echo "")
-linux_artifact=$(cat /workspace/linux_artifacts 2>/dev/null || echo "")
+linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
+windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
+windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null || echo "")
+linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null || echo "")
 
-linux_error=$(cat /workspace/linux_error 2>/dev/null || echo "")
-windows_error=$(cat /workspace/windows_error 2>/dev/null || echo "")
+linux_error=$$(cat /workspace/linux_error 2>/dev/null || echo "")
+windows_error=$$(cat /workspace/windows_error 2>/dev/null || echo "")
 
-echo "[Cloud Build] Linux: $linux_status, Windows: $windows_status"
+echo "[Cloud Build] Linux: $$linux_status, Windows: $$windows_status"
 
 all_skipped=true
 any_completed=false
-if [[ "$linux_status" != "skipped" ]]; then all_skipped=false; fi
-if [[ "$windows_status" != "skipped" ]]; then all_skipped=false; fi
-if [[ "$linux_status" == "completed" || "$windows_status" == "completed" ]]; then any_completed=true; fi
+if [[ "$$linux_status" != "skipped" ]]; then all_skipped=false; fi
+if [[ "$$windows_status" != "skipped" ]]; then all_skipped=false; fi
+if [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then any_completed=true; fi
 
-if [[ "$any_completed" == "true" ]]; then
+if [[ "$$any_completed" == "true" ]]; then
   overall_status="completed"
-elif [[ "$all_skipped" == "true" ]]; then
+elif [[ "$$all_skipped" == "true" ]]; then
   overall_status="cancelled"
 else
   overall_status="failed"
 fi
 
-echo "[Cloud Build] Overall: $overall_status"
+echo "[Cloud Build] Overall: $$overall_status"
 
 linux_download_key=""
 windows_download_key=""
 filename=""
 
-if [[ "$linux_status" == "completed" && -n "$linux_artifact" ]]; then
-  linux_download_key="builds/{build_id}/linux/$linux_artifact"
-  filename="$linux_artifact"
+if [[ "$$linux_status" == "completed" && -n "$$linux_artifact" ]]; then
+  linux_download_key="builds/{build_id}/linux/$$linux_artifact"
+  filename="$$linux_artifact"
 fi
 
-if [[ "$windows_status" == "completed" && -n "$windows_artifact" ]]; then
-  windows_download_key="builds/{build_id}/windows/$windows_artifact"
-  if [[ -z "$filename" ]]; then
-    filename="$windows_artifact"
+if [[ "$$windows_status" == "completed" && -n "$$windows_artifact" ]]; then
+  windows_download_key="builds/{build_id}/windows/$$windows_artifact"
+  if [[ -z "$$filename" ]]; then
+    filename="$$windows_artifact"
   fi
 fi
 
 error_msg=""
-if [[ "$overall_status" == "failed" ]]; then
-  if [[ -n "$linux_error" ]]; then error_msg="Linux: $linux_error; "; fi
-  if [[ -n "$windows_error" ]]; then error_msg="${{error_msg}}Windows: $windows_error"; fi
-  if [[ -z "$error_msg" ]]; then error_msg="Build failed"; fi
+if [[ "$$overall_status" == "failed" ]]; then
+  if [[ -n "$$linux_error" ]]; then error_msg="Linux: $$linux_error; "; fi
+  if [[ -n "$$windows_error" ]]; then error_msg="$${{error_msg}}Windows: $$windows_error"; fi
+  if [[ -z "$$error_msg" ]]; then error_msg="Build failed"; fi
 fi
 
-error_msg_escaped=$(echo "$error_msg" | sed 's/"/\\"/g' | tr '\\n' ' ')
+error_msg_escaped=$$(echo "$$error_msg" | sed 's/"/\\"/g' | tr '\\n' ' ')
 
-payload='{{"build_id":"{build_id}","cloud_build_id":"'$BUILD_ID'","status":"'$overall_status'","linux_status":"'$linux_status'","windows_status":"'$windows_status'","linux_download_key":"'$linux_download_key'","windows_download_key":"'$windows_download_key'","filename":"'$filename'","error":"'$error_msg_escaped'","timestamp":'$(date +%s)'}}'
+# Note: BUILD_ID is a Cloud Build built-in substitution, not a shell variable
+payload='{{"build_id":"{build_id}","cloud_build_id":"'$BUILD_ID'","status":"'$$overall_status'","linux_status":"'$$linux_status'","windows_status":"'$$windows_status'","linux_download_key":"'$$linux_download_key'","windows_download_key":"'$$windows_download_key'","filename":"'$$filename'","error":"'$$error_msg_escaped'","timestamp":'$$(date +%s)'}}'
 
 if [ -n "{callback_secret}" ]; then
-  sig=$(echo -n "$payload" | openssl dgst -sha256 -hmac "{callback_secret}" | awk '{{print $2}}')
+  sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "{callback_secret}" | awk '{{print $$2}}')
 else
   sig=""
 fi
 
 echo "[Cloud Build] Sending webhook to: {callback_url}"
-echo "[Cloud Build] Payload: $payload"
+echo "[Cloud Build] Payload: $$payload"
 
 max_retries=2
 retry_delay=2
-for i in $(seq 1 $max_retries); do
-  echo "[Cloud Build] Attempt $i/$max_retries..."
+for i in $$(seq 1 $$max_retries); do
+  echo "[Cloud Build] Attempt $$i/$$max_retries..."
   
-  if [ -n "$sig" ]; then
-    response=$(curl -s -w "\\n%{{http_code}}" -X POST "{callback_url}" -H "Content-Type: application/json" -H "X-Signature: $sig" -d "$payload" --connect-timeout 5 --max-time 10 2>&1)
+  if [ -n "$$sig" ]; then
+    response=$$(curl -s -w "\\n%{{http_code}}" -X POST "{callback_url}" -H "Content-Type: application/json" -H "X-Signature: $$sig" -d "$$payload" --connect-timeout 5 --max-time 10 2>&1)
   else
-    response=$(curl -s -w "\\n%{{http_code}}" -X POST "{callback_url}" -H "Content-Type: application/json" -d "$payload" --connect-timeout 5 --max-time 10 2>&1)
+    response=$$(curl -s -w "\\n%{{http_code}}" -X POST "{callback_url}" -H "Content-Type: application/json" -d "$$payload" --connect-timeout 5 --max-time 10 2>&1)
   fi
   
-  http_code=$(echo "$response" | tail -1)
-  echo "[Cloud Build] Response: HTTP $http_code"
+  http_code=$$(echo "$$response" | tail -1)
+  echo "[Cloud Build] Response: HTTP $$http_code"
   
-  if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
-    echo "[Cloud Build] Success (HTTP $http_code)"
+  if [[ "$$http_code" == "200" || "$$http_code" == "201" ]]; then
+    echo "[Cloud Build] Success (HTTP $$http_code)"
     break
   else
-    echo "[Cloud Build] Failed (HTTP $http_code)"
-    if [[ $i -lt $max_retries ]]; then
-      echo "[Cloud Build] Retrying in ${{retry_delay}}s..."
-      sleep $retry_delay
-      retry_delay=$((retry_delay + 2))
+    echo "[Cloud Build] Failed (HTTP $$http_code)"
+    if [[ $$i -lt $$max_retries ]]; then
+      echo "[Cloud Build] Retrying in $${{retry_delay}}s..."
+      sleep $$retry_delay
+      retry_delay=$$((retry_delay + 2))
     fi
   fi
 done

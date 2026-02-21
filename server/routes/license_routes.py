@@ -208,9 +208,15 @@ async def validate_license(
             elif license_row["status"] == "revoked":
                 result_status = "revoked"
                 message = "License has been revoked"
-            elif license_row["expires_at"] and license_row["expires_at"] < utc_now():
-                result_status = "expired"
-                message = "License has expired"
+            elif license_row["expires_at"]:
+                # Handle both timezone-aware and naive datetimes from database
+                expires_at = license_row["expires_at"]
+                if expires_at.tzinfo is None:
+                    # Database returned naive datetime, assume UTC
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at < utc_now():
+                    result_status = "expired"
+                    message = "License has expired"
 
             # Prepare log data for Redis
             geo = get_geo_from_ip(client_ip)
