@@ -587,6 +587,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "source_url": source_url,
             "config_url": config_url,
             "config": config,
+            "output_name": config.get("output_name", "app"),
             # Use direct Heroku URL for webhook (custom domain may have DNS issues)
             "callback_url": "https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook",
             "callback_secret": BUILD_CALLBACK_SECRET or "",
