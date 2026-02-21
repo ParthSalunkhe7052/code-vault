@@ -632,7 +632,11 @@ class NodeJSBuilder:
         return None
 
     def validate_js_syntax(self, js_file: Path) -> Tuple[bool, str]:
-        """Validate JavaScript syntax using Node.js --check flag."""
+        """Validate JavaScript syntax using Node.js --check flag.
+
+        Returns:
+            Tuple of (is_valid, error_message_with_suggestions)
+        """
         try:
             result = subprocess.run(
                 ["node", "--check", str(js_file)],
@@ -644,6 +648,20 @@ class NodeJSBuilder:
                 return True, ""
 
             error_msg = result.stderr or result.stdout or "Unknown syntax error"
+
+            # Add helpful suggestions for common mistakes
+            suggestions = self._get_syntax_error_suggestions(error_msg, js_file)
+            if suggestions:
+                error_msg = (
+                    error_msg
+                    + "\n\n"
+                    + "=" * 50
+                    + "\n** CODEVAULT SUGGESTIONS:\n"
+                    + "=" * 50
+                    + "\n"
+                    + suggestions
+                )
+
             return False, error_msg.strip()
         except subprocess.TimeoutExpired:
             return False, "Syntax check timed out"
@@ -653,6 +671,89 @@ class NodeJSBuilder:
         except Exception as e:
             logger.warning(f"Syntax check failed: {e}")
             return True, ""
+
+    def _get_syntax_error_suggestions(self, error_msg: str, js_file: Path) -> str:
+        """Generate helpful suggestions for common JavaScript syntax errors."""
+        suggestions = []
+        error_lower = error_msg.lower()
+
+        # Read the file content for context
+        try:
+            content = js_file.read_text(encoding="utf-8")
+            lines = content.split("\n")
+        except:
+            lines = []
+
+        # Common mistake: Missing quotes in console.log
+        # Example: console.log([Sys] Hello);
+        if "missing )" in error_lower or "unexpected token" in error_lower:
+            for i, line in enumerate(lines):
+                # Check for pattern like console.log([Something])
+                if "console.log" in line and "[" in line and "]" in line:
+                    if not ("'" in line or '"' in line or "`" in line):
+                        suggestions.append(
+                            f"• Line {i + 1}: Missing quotes in console.log()\n"
+                            f"  Found: {line.strip()}\n"
+                            f"  Try: console.log('[Sys] Your message');"
+                        )
+                        break
+
+        # Common mistake: Missing string concatenation
+        # Example: console.log('Value: ' + variable ' more');
+        if "unexpected string" in error_lower or "unexpected identifier" in error_lower:
+            for i, line in enumerate(lines):
+                # Check for missing + operator between strings
+                if "+" in line and ("'" in line or '"' in line):
+                    import re
+
+                    # Pattern: string followed by variable/string without +
+                    if re.search(r"['\"][^'\"]*['\"]\s+[a-zA-Z_$]", line):
+                        suggestions.append(
+                            f"• Line {i + 1}: Missing '+' operator for string concatenation\n"
+                            f"  Found: {line.strip()}\n"
+                            f"  Try: console.log('Value: ' + variable + ' more');"
+                        )
+                        break
+
+        # Common mistake: Invalid or unexpected token (often encoding issues)
+        if "invalid or unexpected token" in error_lower:
+            suggestions.append(
+                "• Check for invisible characters or copy-paste issues\n"
+                "  Try retyping the problematic line manually"
+            )
+
+        # Common mistake: Unexpected end of input
+        if "unexpected end of input" in error_lower:
+            suggestions.append(
+                "• Missing closing brace } or parenthesis )\n"
+                "  Check that all { have matching } and all ( have matching )"
+            )
+
+        # Common mistake: Missing operator
+        if "missing ) after argument list" in error_lower:
+            for i, line in enumerate(lines):
+                if "(" in line:
+                    open_parens = line.count("(")
+                    close_parens = line.count(")")
+                    if open_parens > close_parens:
+                        suggestions.append(
+                            f"• Line {i + 1}: Unbalanced parentheses\n"
+                            f"  Found {open_parens} '(' but only {close_parens} ')'\n"
+                            f"  Line: {line.strip()}"
+                        )
+                        break
+
+        if not suggestions:
+            suggestions.append(
+                "• Check the line and column number in the error above\n"
+                "• Common fixes:\n"
+                "  - Add missing quotes around strings\n"
+                "  - Add missing + operators between strings and variables\n"
+                "  - Match all opening { with closing }\n"
+                "  - Match all opening ( with closing )"
+            )
+
+        return "\n\n".join(suggestions)
 
     def prepare_package_json(self) -> bool:
         """Prepare package.json for pkg, creating if needed."""
