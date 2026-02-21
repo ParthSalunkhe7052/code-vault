@@ -126,13 +126,15 @@ class CloudBuildClient:
 
         # Create the build configuration with inline steps
         # Note: Artifacts are uploaded manually via gsutil in build steps
+        # Note: dynamic_substitutions is NOT used because our scripts use shell variables,
+        # not Cloud Build substitution syntax. Enabling it causes validation errors for
+        # variables like NUITKA_CACHE_DIR which are not built-in substitutions.
         build = self.cloudbuild_v1.Build(
             name=build_name,
             steps=steps,
             timeout={"seconds": 3600},  # 1 hour timeout
             options={
                 "logging": "CLOUD_LOGGING_ONLY",
-                "dynamic_substitutions": True,
             },
             # Add labels for tracking
             tags=[

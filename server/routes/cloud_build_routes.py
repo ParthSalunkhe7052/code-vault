@@ -863,7 +863,15 @@ async def start_cloud_build(
         if request.license_id:
             license_key = await get_license_key(request.license_id, conn)
 
-        public_api_url = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+        # Cloud builds MUST use the production API URL for license validation
+        # Fallback chain: PUBLIC_API_URL env -> Heroku default URL
+        public_api_url = os.getenv("PUBLIC_API_URL", "")
+        if not public_api_url or "localhost" in public_api_url:
+            # Use Heroku production URL as fallback for cloud builds
+            public_api_url = "https://code-vault-b66848f67c75.herokuapp.com"
+            logger.info(
+                f"[CloudBuild] Using production API URL for cloud build: {public_api_url}"
+            )
 
         config = {
             "project_id": request.project_id,
