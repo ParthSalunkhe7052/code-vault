@@ -212,18 +212,26 @@ echo "[Cloud Build] Source prepared""",
 
 def _generate_download_config_step(config_url: str, target_platforms: str) -> Dict[str, Any]:
     """Generate config download step."""
+    # Skip config download if URL is empty
+    if not config_url:
+        script = """echo "[Cloud Build] No config URL provided, skipping config download"
+echo '{}' > /workspace/config.json"""
+    else:
+        script = f"""if [[ "{target_platforms}" == "" ]]; then
+  exit 0
+fi
+echo "[Cloud Build] Downloading config..."
+if [[ "{config_url}" == gs://* ]]; then
+  gsutil cp "{config_url}" /workspace/config.json
+else
+  curl -L -o /workspace/config.json "{config_url}"
+fi"""
+
     return {
         "name": "gcr.io/cloud-builders/gsutil",
         "id": "download-config",
         "entrypoint": "bash",
-        "args": [
-            "-c",
-            f"""if [[ "{target_platforms}" == "" ]]; then
-  exit 0
-fi
-echo "[Cloud Build] Downloading config..."
-gsutil cp "{config_url}" /workspace/config.json""",
-        ],
+        "args": ["-c", script],
         "waitFor": ["extract-source"],
     }
 

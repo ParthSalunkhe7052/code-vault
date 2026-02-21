@@ -334,11 +334,21 @@ echo "[Cloud Build] Source prepared"
         self, config_url: str, target_platforms: str
     ) -> Dict[str, Any]:
         """Create config download step."""
-        script = f"""if [[ "{target_platforms}" == "" ]]; then
+        # Skip config download if URL is empty
+        if not config_url:
+            script = """echo "[Cloud Build] No config URL provided, skipping config download"
+echo '{}' > /workspace/config.json
+"""
+        else:
+            script = f"""if [[ "{target_platforms}" == "" ]]; then
   exit 0
 fi
 echo "[Cloud Build] Downloading config..."
-gsutil cp "{config_url}" /workspace/config.json
+if [[ "{config_url}" == gs://* ]]; then
+  gsutil cp "{config_url}" /workspace/config.json
+else
+  curl -L -o /workspace/config.json "{config_url}"
+fi
 """
 
         return {

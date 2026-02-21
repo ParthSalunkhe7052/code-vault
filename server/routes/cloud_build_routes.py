@@ -486,6 +486,33 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
             zip_path.unlink()
 
 
+async def upload_config_to_r2(build_id: str, config: dict) -> str:
+    """Upload build config to R2 and return presigned URL."""
+    import json
+
+    config_json = json.dumps(config)
+    config_bytes = config_json.encode("utf-8")
+
+    key = f"builds/{build_id}/config.json"
+
+    if storage_service.is_cloud_enabled() and storage_service.client:
+        s3 = storage_service.client
+        bucket = storage_service.bucket
+
+        # Upload config JSON
+        s3.put_object(Bucket=bucket, Key=key, Body=config_bytes)
+
+        return s3.generate_presigned_url(
+            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
+        )
+    else:
+        if ENVIRONMENT == "production":
+            raise HTTPException(500, "Cloud Builds require R2 in production.")
+
+        public_url = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+        return f"{public_url}/uploads/{build_id}/config.json"
+
+
 async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> bool:
     """Trigger a Cloud Build job using gcloud CLI wrapper."""
     # Security: Validate source_dir is within allowed base directory
@@ -508,6 +535,10 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
 
         # Upload source to R2 (still needed for Cloud Build to download)
         source_url = await upload_source_to_r2(build_id, source_dir)
+
+        # Upload config to R2 for Cloud Build to download
+        config_url = await upload_config_to_r2(build_id, config)
+        logger.info(f"[CloudBuild] Config uploaded to R2: {config_url[:50]}...")
 
         public_api_url = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
 
@@ -554,6 +585,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "language": config["language"],
             "target_platforms": target_platforms_str,
             "source_url": source_url,
+            "config_url": config_url,
             "config": config,
             # Use direct Heroku URL for webhook (custom domain may have DNS issues)
             "callback_url": "https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook",
