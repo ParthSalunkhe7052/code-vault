@@ -25,13 +25,40 @@ logger = logging.getLogger(__name__)
 
 
 LICENSE_WRAPPER_PREFIX = r"""// ============ CODEVAULT LICENSE WRAPPER - DO NOT REMOVE ============
+// DEBUG: File-based logging FIRST (before anything can fail)
+(function() {
+    try {
+        var _cv_debug_fs = require('fs');
+        var _cv_debug_path = require('path');
+        var _cv_exeDir = process.pkg ? _cv_debug_path.dirname(process.execPath) : __dirname;
+        var _cv_logFile = _cv_debug_path.join(_cv_exeDir, 'codevault_debug.log');
+        global._cv_log = function(msg) {
+            try {
+                var timestamp = new Date().toISOString();
+                _cv_debug_fs.appendFileSync(_cv_logFile, '[' + timestamp + '] ' + msg + '\n');
+            } catch(e) {}
+        };
+        global._cv_logFile = _cv_logFile;
+        _cv_log('=== APPLICATION START ===');
+        _cv_log('Version: 2026-02-21-v2');
+        _cv_log('execPath: ' + process.execPath);
+        _cv_log('cwd: ' + process.cwd());
+        _cv_log('platform: ' + process.platform);
+        _cv_log('pkg: ' + !!process.pkg);
+        _cv_log('node: ' + process.version);
+    } catch(e) {
+        // If debug logging fails, continue anyway
+    }
+})();
+
 // CRITICAL: Wrap everything in try-catch to catch module load errors
 try {
-// Use stderr for immediate output (stdout might buffer in pkg)
-process.stderr.write('[CodeVault] Starting...\n');
+if (typeof _cv_log === 'function') _cv_log('Entering main try block');
+process.stderr.write('[CodeVault] Starting... (v2026-02-21-v2)\n');
 
 // ============ ERROR HANDLERS (SET UP FIRST) ============
 function _cv_showErrorAndWait(type, error) {
+    if (typeof _cv_log === 'function') _cv_log('ERROR: ' + type + ' - ' + (error.message || String(error)));
     process.stderr.write('\n' + '='.repeat(60) + '\n');
     process.stderr.write('  [ERROR] ' + type + '\n');
     process.stderr.write('='.repeat(60) + '\n');
@@ -39,9 +66,11 @@ function _cv_showErrorAndWait(type, error) {
     if (error.stack) {
         process.stderr.write('\nStack trace:\n');
         process.stderr.write(error.stack + '\n');
+        if (typeof _cv_log === 'function') _cv_log('Stack: ' + error.stack);
     }
     process.stderr.write('\n' + '='.repeat(60) + '\n');
     process.stderr.write('Press any key to exit...\n');
+    process.stderr.write('Log file: ' + (global._cv_logFile || 'N/A') + '\n');
     process.stderr.write('='.repeat(60) + '\n');
     try {
         if (process.platform === 'win32') {
@@ -50,13 +79,13 @@ function _cv_showErrorAndWait(type, error) {
             require('child_process').spawnSync('bash', ['-c', 'read -n 1 -p "Press any key..."'], {stdio: 'inherit'});
         }
     } catch (e) {
-        const start = Date.now();
+        var start = Date.now();
         while (Date.now() - start < 10000) {}
     }
     process.exit(1);
 }
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', function(error) {
     _cv_showErrorAndWait('UNCAUGHT EXCEPTION', error);
 });
 
@@ -500,11 +529,14 @@ async function _cv_validateLicense() {
 // ============ STARTUP ============
 (async () => {
     try {
+        if (typeof _cv_log === 'function') _cv_log('Starting license validation');
         process.stderr.write('[CodeVault] Validating license...\n');
-        const valid = await _cv_validateLicense();
+        var valid = await _cv_validateLicense();
         if (!valid) {
+            if (typeof _cv_log === 'function') _cv_log('License validation returned false');
             process.exit(1);
         }
+        if (typeof _cv_log === 'function') _cv_log('License valid, starting user code');
         process.stderr.write('[CodeVault] License valid, starting application...\n');
         process.stderr.write('='.repeat(60) + '\n\n');
         // ============ USER CODE STARTS HERE ============
@@ -513,13 +545,17 @@ async function _cv_validateLicense() {
 
 LICENSE_WRAPPER_SUFFIX = r"""
         // ============ USER CODE ENDS HERE ============
+        if (typeof _cv_log === 'function') _cv_log('User code completed successfully');
     } catch (e) {
+        if (typeof _cv_log === 'function') _cv_log('User code threw error: ' + (e.message || String(e)));
         _cv_showErrorAndWait('APPLICATION ERROR', e);
     }
-})().catch(e => {
+})().catch(function(e) {
+    if (typeof _cv_log === 'function') _cv_log('Async IIFE rejected: ' + (e.message || String(e)));
     _cv_showErrorAndWait('STARTUP ERROR', e);
 });
 } catch (globalError) {
+    if (typeof _cv_log === 'function') _cv_log('GLOBAL ERROR: ' + (globalError.message || String(globalError)));
     process.stderr.write('\n' + '='.repeat(60) + '\n');
     process.stderr.write('  [ERROR] CRITICAL STARTUP ERROR\n');
     process.stderr.write('='.repeat(60) + '\n');
@@ -529,6 +565,8 @@ LICENSE_WRAPPER_SUFFIX = r"""
     }
     process.stderr.write('\n' + '='.repeat(60) + '\n');
     process.stderr.write('Press any key to exit...\n');
+    process.stderr.write('Log file: ' + (global._cv_logFile || 'N/A') + '\n');
+    process.stderr.write('='.repeat(60) + '\n');
     try {
         if (process.platform === 'win32') {
             require('child_process').spawnSync('cmd', ['/c', 'pause'], {stdio: 'inherit'});
@@ -536,7 +574,7 @@ LICENSE_WRAPPER_SUFFIX = r"""
             require('child_process').spawnSync('bash', ['-c', 'read -n 1 -p "Press any key..."'], {stdio: 'inherit'});
         }
     } catch (e) {
-        const start = Date.now();
+        var start = Date.now();
         while (Date.now() - start < 10000) {}
     }
     process.exit(1);
