@@ -847,7 +847,8 @@ class NodeJSBuilder:
             # CRITICAL: Validate the WRAPPED code syntax too!
             # This catches issues where prefix + code + suffix creates invalid JS
             logger.info("Validating wrapped code syntax...")
-            temp_path = entry_path.with_suffix(".wrapped.tmp")
+            # Use .js extension so Node.js recognizes it for syntax checking
+            temp_path = self.source_dir / f".codevault_wrapped_{entry_path.stem}.js"
             try:
                 temp_path.write_text(protected_code, encoding="utf-8")
                 is_valid_wrapped, wrapped_error = self.validate_js_syntax(temp_path)
