@@ -22,7 +22,7 @@ const PricingCard: React.FC<{
     className={`relative p-8 rounded-3xl border mt-4 flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02] ${
       recommended 
         ? 'border-indigo-500/50 bg-indigo-500/[0.03] shadow-2xl shadow-indigo-500/10 z-10 scale-105' 
-        : 'border-white/10 bg-[#0f1219] hover:bg-[#13161f] z-0'
+        : 'border-white/10 bg-surface hover:bg-surface/80 z-0'
     }`}
   >
     {recommended && (
@@ -147,7 +147,7 @@ const Pricing: React.FC = () => {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="relative p-8 rounded-3xl border mt-4 flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02] border-white/10 bg-[#0f1219] hover:bg-[#13161f] z-0"
+            className="relative p-8 rounded-3xl border mt-4 flex flex-col h-full transform transition-all duration-300 hover:scale-[1.02] border-white/10 bg-surface hover:bg-surface/80 z-0"
           >
             <div className="mb-8">
               <h3 className="text-lg font-medium mb-2 text-slate-400">Enterprise</h3>
@@ -194,7 +194,7 @@ const Pricing: React.FC = () => {
           {/* Enterprise Contact Form Modal */}
           {showEnterpriseForm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-              <div className="relative w-full max-w-lg bg-[#0f1219] border border-white/10 rounded-2xl p-8">
+              <div className="relative w-full max-w-lg bg-surface border border-white/10 rounded-2xl p-8">
                 <button
                   onClick={() => setShowEnterpriseForm(false)}
                   className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
@@ -213,7 +213,7 @@ const Pricing: React.FC = () => {
         <div className="mt-32 max-w-3xl mx-auto">
           <h3 className="text-2xl font-bold text-center mb-12">Common Questions</h3>
           <div className="space-y-1">
-              <div className="p-6 rounded-2xl bg-[#0f1219] border border-white/5 hover:border-white/10 transition-colors">
+              <div className="p-6 rounded-2xl bg-surface border border-white/5 hover:border-white/10 transition-colors">
                  <h4 className="font-semibold text-white mb-2">What is a "Cloud Build"?</h4>
                  <p className="text-sm text-slate-400 leading-relaxed">
                     A Cloud Build is a remote compilation job. We spin up a fresh VM, install your dependencies, run Nuitka, and return a signed binary. 

@@ -10,13 +10,13 @@ const Step: React.FC<{
   <div className="relative flex flex-col items-center text-center z-10 group">
     
     {/* Icon Container */}
-    <div className="w-20 h-20 rounded-3xl bg-[#0f1219] border border-white/10 flex items-center justify-center text-slate-300 mb-8 shadow-2xl relative transition-transform duration-500 group-hover:scale-110 group-hover:border-white/20">
+    <div className="w-20 h-20 rounded-3xl bg-surface border border-white/10 flex items-center justify-center text-slate-300 mb-8 shadow-2xl relative transition-transform duration-500 group-hover:scale-110 group-hover:border-white/20">
        
        {/* Inner Glow */}
        <div className="absolute inset-0 rounded-3xl bg-blue-500/5 blur-xl group-hover:bg-blue-500/10 transition-colors" />
        
        {/* Step Badge */}
-       <div className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-[#0a0f1a] border border-white/10 flex items-center justify-center text-xs font-mono text-slate-500 shadow-lg">
+       <div className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-background border border-white/10 flex items-center justify-center text-xs font-mono text-slate-500 shadow-lg">
          {stepNumber}
        </div>
 

@@ -1,201 +1,139 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Code2, Cpu, Lock, DollarSign, CheckCircle2, ShieldCheck, Activity, Globe } from 'lucide-react';
+import React, { useRef } from 'react';
+import { motion, useScroll, useTransform, useSpring } from 'framer-motion';
+import { Code2, Cpu, Lock, DollarSign } from 'lucide-react';
 
-interface FeatureStep {
-  id: string;
-  title: string;
-  benefit: string;
-  description: string;
-  icon: React.ReactNode;
-  renderVisual: () => React.ReactNode;
-}
-
-const steps: FeatureStep[] = [
+const STAGES = [
   {
-    id: 'develop',
+    id: 'stage-1',
     title: 'Drop your Script',
-    benefit: 'Zero proprietary syntax.',
-    description: 'Develop your Python or Node.js application as you normally would. No weird SDKs or mandatory imports. We handle the complexity, you handle the logic.',
-    icon: <Code2 className="w-5 h-5" />,
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center p-8">
-        <motion.img 
-          src="/assets/features/feature-1.png"
-          alt="Drop your script"
-          animate={{ y: [0, -15, 0] }}
-          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut" }}
-          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
-        />
-      </div>
-    )
+    description: 'Zero proprietary syntax. Develop as you normally would.',
+    color: '#6366f1', // Indigo
+    icon: Code2
   },
   {
-    id: 'compile',
-    title: 'Nuitka Compilation',
-    benefit: 'Your code is yours. Keep it that way.',
-    description: 'We translate your Python code into C, then compile it into a native binary. This significantly raises the bar for reverse engineering compared to PyInstaller\'s bytecode shipping.',
-    icon: <Cpu className="w-5 h-5" />,
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center p-8">
-        <motion.img 
-          src="/assets/features/feature-2.png"
-          alt="Nuitka Compilation"
-          animate={{ y: [0, -15, 0] }}
-          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 0.5 }}
-          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
-        />
-      </div>
-    )
+    id: 'stage-2',
+    title: 'Nuitka Forge',
+    description: 'Code-to-C translation for native hardware performance.',
+    color: '#a855f7', // Purple
+    icon: Cpu
   },
   {
-    id: 'protect',
-    title: 'Kill Piracy Dead',
-    benefit: 'Lock it to the motherboard.',
-    description: 'Inject HWID validation directly into your binary. Bind licenses to unique hardware signatures (CPU, Disk, Mobo). If they share the .exe, it bricks.',
-    icon: <Lock className="w-5 h-5" />,
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center p-8">
-        <motion.img 
-          src="/assets/features/feature-3.png"
-          alt="Kill Piracy Dead"
-          animate={{ y: [0, -15, 0] }}
-          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 1 }}
-          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
-        />
-      </div>
-    )
+    id: 'stage-3',
+    title: 'Hardware Lock',
+    description: 'Binding your binary to unique motherboard signatures.',
+    color: '#06b6d4', // Cyan
+    icon: Lock
   },
   {
-    id: 'profit',
-    title: 'Air-Gapped Revenue',
-    benefit: 'Sell to enterprise, offline.',
-    description: 'Issue cryptographically signed leases that allow applications to run offline for up to 24 hours. Manage everything from a single dashboard.',
-    icon: <DollarSign className="w-5 h-5" />,
-    renderVisual: () => (
-      <div className="relative w-full h-full flex items-center justify-center p-8">
-        <motion.img 
-          src="/assets/features/feature-4.png"
-          alt="Air-Gapped Revenue"
-          animate={{ y: [0, -15, 0] }}
-          transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 1.5 }}
-          className="w-full max-w-lg drop-shadow-[0_0_50px_rgba(99,102,241,0.2)]"
-        />
-      </div>
-    )
-  },
+    id: 'stage-4',
+    title: 'The Vault',
+    description: 'Air-gapped revenue. Secure, offline distribution.',
+    color: '#10b981', // Emerald
+    icon: DollarSign
+  }
 ];
 
-const Features: React.FC = () => {
-  const [activeStep, setActiveStep] = useState(0);
+const Node = ({ index, scrollProgress, color, icon: Icon }: { index: number, scrollProgress: any, color: string, icon: any }) => {
+  const start = index * 0.25;
+  const end = (index + 1) * 0.25;
+  
+  const opacity = useTransform(scrollProgress, [start - 0.1, start, end - 0.05, end], [0.2, 1, 1, 0.2]);
+  const scale = useTransform(scrollProgress, [start - 0.1, start, end - 0.05, end], [0.8, 1.1, 1, 0.8]);
+  const glow = useTransform(scrollProgress, [start - 0.1, start, end - 0.05, end], [0, 20, 15, 0]);
+  const iconOpacity = useTransform(scrollProgress, [start - 0.05, start, end - 0.05, end], [0.3, 1, 1, 0.3]);
 
   return (
-    <section id="features" className="py-32 bg-background relative overflow-hidden">
-      {/* Background Ambience */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full pointer-events-none">
-        <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/5 rounded-full blur-[150px]" />
-      </div>
+    <motion.div
+      style={{ 
+        opacity, 
+        scale,
+        boxShadow: `0 0 ${glow}px ${color}44`
+      }}
+      className="relative w-32 h-32 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl flex items-center justify-center overflow-hidden"
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
+      <motion.div style={{ opacity: iconOpacity, color }}>
+        <Icon size={40} strokeWidth={1.5} />
+      </motion.div>
+      <motion.div 
+        animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+        transition={{ repeat: Infinity, duration: 2 }}
+        className="absolute inset-0 rounded-3xl border border-white/20 pointer-events-none"
+      />
+    </motion.div>
+  );
+};
 
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="mb-24 flex flex-col md:flex-row md:items-end justify-between gap-8">
-          <div className="max-w-2xl">
-            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter text-white mb-8">
-              The <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">Protocol.</span>
-            </h2>
-            <p className="text-xl text-slate-400 leading-relaxed font-medium">
-              A high-performance pipeline designed to protect your intellectual property and maximize distribution control.
-            </p>
-          </div>
-          <div className="hidden md:block pb-2">
-             <div className="flex gap-1">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="w-12 h-1 bg-white/5 rounded-full overflow-hidden">
-                     <motion.div 
-                       animate={{ x: ['-100%', '100%'] }} 
-                       transition={{ repeat: Infinity, duration: 2, delay: i * 0.4 }} 
-                       className="w-full h-full bg-indigo-500/20" 
-                     />
-                  </div>
-                ))}
-             </div>
-          </div>
-        </div>
+const Path = ({ index, scrollProgress }: { index: number, scrollProgress: any }) => {
+  const start = index * 0.25 + 0.125;
+  const end = (index + 1) * 0.25 + 0.125;
+  const pathLength = useTransform(scrollProgress, [start, end], [0, 1]);
+  const opacity = useTransform(scrollProgress, [start, end], [0.2, 1]);
 
-        <div className="grid lg:grid-cols-12 gap-20 items-start">
+  if (index === STAGES.length - 1) return null;
+
+  return (
+    <div className="absolute left-1/2 -translate-x-1/2 w-1 h-32 top-full overflow-hidden">
+      <div className="w-full h-full bg-white/5 rounded-full" />
+      <motion.div 
+        style={{ scaleY: pathLength, opacity, originY: 0 }}
+        className="absolute inset-0 bg-gradient-to-b from-indigo-500 to-emerald-500 rounded-full"
+      />
+    </div>
+  );
+};
+
+const Features: React.FC = () => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start 0.8", "end 0.2"]
+  });
+
+  const smoothProgress = useSpring(scrollYProgress, { stiffness: 50, damping: 20 });
+
+  return (
+    <section ref={containerRef} className="relative h-[400vh] bg-transparent overflow-visible">
+      <div className="sticky top-0 h-screen w-full flex items-center justify-center overflow-hidden">
+        <div className="max-w-7xl w-full px-6 grid grid-cols-1 md:grid-cols-12 gap-12 items-center relative h-full">
           
-          {/* Left: Step Selection */}
-          <div className="lg:col-span-5 space-y-2">
-            {steps.map((step, index) => (
-              <button
-                key={step.id}
-                onMouseEnter={() => setActiveStep(index)}
-                onClick={() => setActiveStep(index)}
-                className={`w-full text-left p-8 rounded-3xl transition-all duration-500 group relative ${
-                  activeStep === index
-                    ? 'bg-white/[0.03] shadow-2xl'
-                    : 'hover:bg-white/[0.01]'
-                }`}
-              >
-                {/* Active Indicator Line */}
-                {activeStep === index && (
-                  <motion.div 
-                    layoutId="active-line"
-                    className="absolute left-0 top-8 bottom-8 w-1 bg-indigo-500 rounded-full shadow-[0_0_15px_rgba(99,102,241,0.5)]" 
-                  />
-                )}
+          {/* Left Side: Fixed text block that changes opacity based on scroll */}
+          <div className="md:col-span-6 relative h-[400px] flex items-center">
+            {STAGES.map((stage, i) => {
+              const start = i * 0.25;
+              const end = (i + 1) * 0.25;
+              const opacity = useTransform(smoothProgress, [start - 0.05, start, end - 0.05, end], [0, 1, 1, 0]);
+              const translateY = useTransform(smoothProgress, [start - 0.05, start, end - 0.05, end], [20, 0, 0, -20]);
 
-                <div className="flex items-start gap-6">
-                  <div className={`mt-1.5 p-2 rounded-xl transition-all duration-500 ${
-                    activeStep === index ? 'bg-indigo-500 text-white scale-110 shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-slate-600 group-hover:text-slate-400'
-                  }`}>
-                    {step.icon}
+              return (
+                <motion.div 
+                  key={stage.id}
+                  style={{ opacity, y: translateY }}
+                  className="absolute inset-0 flex flex-col justify-center"
+                >
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-1 h-8 rounded-full bg-indigo-500" />
+                    <span className="text-xs font-black tracking-widest text-indigo-400 uppercase">Phase {i + 1}</span>
                   </div>
-                  <div>
-                    <h3 className={`text-2xl font-bold mb-2 transition-colors duration-500 ${
-                      activeStep === index ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'
-                    }`}>
-                      {step.title}
-                    </h3>
-                    <p className={`text-xs font-black tracking-[0.2em] uppercase mb-4 transition-colors duration-500 ${
-                      activeStep === index ? 'text-indigo-400' : 'text-slate-700'
-                    }`}>
-                      {step.benefit}
-                    </p>
-                    <AnimatePresence>
-                      {activeStep === index && (
-                        <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="text-slate-400 text-sm leading-relaxed"
-                        >
-                          {step.description}
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-              </button>
-            ))}
+                  <h2 className="text-5xl md:text-7xl font-bold text-white tracking-tighter leading-tight mb-6">
+                    {stage.title}
+                  </h2>
+                  <p className="text-xl text-slate-400 font-medium leading-relaxed max-w-lg">
+                    {stage.description}
+                  </p>
+                </motion.div>
+              );
+            })}
           </div>
 
-          {/* Right: Visual Display (Removed restrictive pill border) */}
-          <div className="lg:col-span-7 relative flex justify-center items-center min-h-[600px]">
-            {/* Spotlight Effect */}
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-transparent rounded-[4rem] blur-3xl" />
-            
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeStep}
-                initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
-                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                className="relative z-10 w-full h-full flex justify-center items-center"
-              >
-                {steps[activeStep].renderVisual()}
-              </motion.div>
-            </AnimatePresence>
+          {/* Right Side: Centered Neural Nodes */}
+          <div className="md:col-span-6 flex flex-col items-center gap-32 relative py-20">
+            {STAGES.map((stage, i) => (
+              <div key={stage.id} className="relative">
+                <Node index={i} scrollProgress={smoothProgress} color={stage.color} icon={stage.icon} />
+                <Path index={i} scrollProgress={smoothProgress} />
+              </div>
+            ))}
           </div>
 
         </div>

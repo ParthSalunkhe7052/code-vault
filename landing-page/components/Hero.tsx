@@ -6,16 +6,9 @@ import { motion } from 'framer-motion';
 
 const Hero: React.FC = () => {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background pt-20">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
       
-      {/* Background Ambience - High Zazz, Optimized GPU */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-indigo-600/10 rounded-[100%] blur-[80px]" />
-        <div className="absolute bottom-[-10%] left-1/4 w-[600px] h-[400px] bg-purple-600/5 rounded-[100%] blur-[60px]" />
-        
-        {/* Subtle Grid with Radial Fade */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:64px_64px] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_50%,#000_70%,transparent_100%)]" />
-      </div>
+      {/* Background Ambience - Removed for global unity */}
 
       <div className="relative z-10 max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
         
