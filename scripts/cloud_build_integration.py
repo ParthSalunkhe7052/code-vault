@@ -914,9 +914,21 @@ echo "[Cloud Build] Webhook completed"
                     return None
                 from datetime import datetime
 
-                # Convert seconds and nanos to datetime
-                dt = datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9)
-                return dt.isoformat()
+                # Handle DatetimeWithNanoseconds (google.api_core.datetime_helpers)
+                # This is returned by newer google-cloud-build versions
+                if hasattr(ts, "isoformat") and callable(
+                    getattr(ts, "isoformat", None)
+                ):
+                    # Already a datetime-like object
+                    return ts.isoformat()
+
+                # Handle raw protobuf Timestamp (has seconds and nanos attributes)
+                if hasattr(ts, "seconds") and hasattr(ts, "nanos"):
+                    dt = datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9)
+                    return dt.isoformat()
+
+                # Fallback: try to convert to string
+                return str(ts)
 
             return {
                 "status": status,
