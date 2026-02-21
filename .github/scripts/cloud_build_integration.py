@@ -334,11 +334,21 @@ echo "[Cloud Build] Source prepared"
         self, config_url: str, target_platforms: str
     ) -> Dict[str, Any]:
         """Create config download step."""
-        script = f"""if [[ "{target_platforms}" == "" ]]; then
+        # Skip config download if URL is empty
+        if not config_url:
+            script = """echo "[Cloud Build] No config URL provided, skipping config download"
+echo '{}' > /workspace/config.json
+"""
+        else:
+            script = f"""if [[ "{target_platforms}" == "" ]]; then
   exit 0
 fi
 echo "[Cloud Build] Downloading config..."
-gsutil cp "{config_url}" /workspace/config.json
+if [[ "{config_url}" == gs://* ]]; then
+  gsutil cp "{config_url}" /workspace/config.json
+else
+  curl -L -o /workspace/config.json "{config_url}"
+fi
 """
 
         return {
@@ -554,6 +564,8 @@ gsutil cp "/workspace/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/wi
         steps = []
 
         # Node.js build step (handles both Windows and Linux)
+        # IMPORTANT: No fallback! If cloud_runner_nodejs.py fails, the build fails.
+        # This ensures all builds have proper license protection and error handling.
         build_script = f"""set -e
 echo "[Cloud Build] ===== Building for Node.js ====="
 
@@ -570,33 +582,35 @@ echo "[Cloud Build] Config:"
 cat /workspace/config.json
 echo ""
 
-if [ -f ".github/scripts/cloud_runner_nodejs.py" ]; then
-  echo "[Cloud Build] Running cloud_runner_nodejs.py..."
-  python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)" 2>&1 || {{
-    exit_code=$?
-    echo "[Cloud Build] Runner failed with exit code: $exit_code"
-    echo "[Cloud Build] Attempting direct pkg fallback..."
-    
-    if [ -f "package.json" ]; then
-      sed -i 's/"echo \\([^"]*\\)\\([""]\\)/"echo \\\\\"\\1\\\\\"\\2/g' package.json || true
-    else
-      entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
-      echo '{{"name": "{output_name}", "version": "1.0.0", "main": "$entry_file", "private": true}}' > package.json
-    fi
-    
-    mkdir -p /workspace
-    npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/{output_name}.exe" --compress GZip 2>&1 || true
-  }}
-else
-  echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
-  if [ ! -f "package.json" ]; then
-    entry_file=$(ls *.js 2>/dev/null | head 1 || echo "index.js")
-    echo '{{"name": "{output_name}", "version": "1.0.0", "main": "$entry_file", "private": true}}' > package.json
-  fi
-  npm install --quiet 2>/dev/null || true
-  mkdir -p /workspace
-  npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/{output_name}.exe" --compress GZip
+# Check for cloud_runner_nodejs.py - required for all builds
+if [ ! -f ".github/scripts/cloud_runner_nodejs.py" ]; then
+  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py not found!"
+  echo "[Cloud Build] This file should be included in the source upload."
+  echo "failed" > /workspace/build_status_windows
+  echo "failed" > /workspace/build_status_linux
+  echo "cloud_runner_nodejs.py not found - cannot proceed without license wrapper" > /workspace/windows_error
+  echo "cloud_runner_nodejs.py not found - cannot proceed without license wrapper" > /workspace/linux_error
+  exit 1
 fi
+
+echo "[Cloud Build] Running cloud_runner_nodejs.py..."
+echo "[Cloud Build] This will inject license protection and build for all target platforms."
+
+# Run the runner - if it fails, the build fails (no fallback!)
+python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)" 2>&1
+runner_exit_code=$?
+
+if [ $runner_exit_code -ne 0 ]; then
+  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py failed with exit code $runner_exit_code"
+  echo "[Cloud Build] Build cannot proceed without license wrapper."
+  echo "failed" > /workspace/build_status_windows
+  echo "failed" > /workspace/build_status_linux
+  echo "License wrapper injection failed - check build logs for details" > /workspace/windows_error
+  echo "License wrapper injection failed - check build logs for details" > /workspace/linux_error
+  exit 1
+fi
+
+echo "[Cloud Build] cloud_runner_nodejs.py completed successfully"
 
 echo "[Cloud Build] Artifacts directory contents:"
 ls -la /workspace/ 2>/dev/null || echo "Workspace empty"
@@ -605,48 +619,54 @@ ls -la /workspace/ 2>/dev/null || echo "Workspace empty"
 target_plats=$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
 echo "[Cloud Build] Target platforms: $target_plats"
 
-# Windows artifact
+# Windows artifact - strict: only accept expected output file
 if [[ "$target_plats" == *"windows"* ]]; then
   if [ -f "build_output_windows/{output_name}.exe" ]; then
-    cp "build_output_windows/{output_name}.exe" /workspace/
-    echo "completed" > /workspace/build_status_windows
-    echo "{output_name}.exe" > /workspace/windows_artifacts
-  elif [ -f "/workspace/{output_name}.exe" ]; then
-    echo "completed" > /workspace/build_status_windows
-    echo "{output_name}.exe" > /workspace/windows_artifacts
-  else
-    found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
-    if [ -n "$found_exe" ]; then
-      cp "$found_exe" /workspace/
-      echo "completed" > /workspace/build_status_windows
-      echo "$(basename $found_exe)" > /workspace/windows_artifacts
-    else
+    exe_size=$(stat -c%s "build_output_windows/{output_name}.exe" 2>/dev/null || echo "0")
+    echo "[Cloud Build] Found Windows exe: build_output_windows/{output_name}.exe ($exe_size bytes)"
+    if [ "$exe_size" -lt 10000 ]; then
+      echo "[Cloud Build] WARNING: EXE seems too small, may be corrupted"
       echo "failed" > /workspace/build_status_windows
-      echo "Node.js Windows build output not found" > /workspace/windows_error
+      echo "Windows EXE file is too small ($exe_size bytes) - likely corrupted" > /workspace/windows_error
+    else
+      cp "build_output_windows/{output_name}.exe" /workspace/
+      echo "completed" > /workspace/build_status_windows
+      echo "{output_name}.exe" > /workspace/windows_artifacts
+      echo "[Cloud Build] Windows artifact ready: {output_name}.exe"
     fi
+  else
+    echo "[Cloud Build] ERROR: Expected output not found at build_output_windows/{output_name}.exe"
+    echo "[Cloud Build] Build output directory contents:"
+    ls -la build_output_windows/ 2>/dev/null || echo "Directory does not exist"
+    echo "failed" > /workspace/build_status_windows
+    echo "Windows build output not found at expected location" > /workspace/windows_error
   fi
 else
   echo "skipped" > /workspace/build_status_windows
 fi
 
-# Linux artifact
+# Linux artifact - strict: only accept expected output file
 if [[ "$target_plats" == *"linux"* ]]; then
   if [ -f "build_output_linux/{output_name}" ]; then
-    cp "build_output_linux/{output_name}" /workspace/
-    chmod +x "/workspace/{output_name}"
-    echo "completed" > /workspace/build_status_linux
-    echo "{output_name}" > /workspace/linux_artifacts
-  else
-    found_linux=$(find ./build_output_linux -type f -executable 2>/dev/null | head -1)
-    if [ -n "$found_linux" ]; then
-      cp "$found_linux" /workspace/
-      chmod +x "/workspace/$(basename $found_linux)"
-      echo "completed" > /workspace/build_status_linux
-      echo "$(basename $found_linux)" > /workspace/linux_artifacts
-    else
+    linux_size=$(stat -c%s "build_output_linux/{output_name}" 2>/dev/null || echo "0")
+    echo "[Cloud Build] Found Linux binary: build_output_linux/{output_name} ($linux_size bytes)"
+    if [ "$linux_size" -lt 10000 ]; then
+      echo "[Cloud Build] WARNING: Binary seems too small, may be corrupted"
       echo "failed" > /workspace/build_status_linux
-      echo "Node.js Linux build output not found" > /workspace/linux_error
+      echo "Linux binary file is too small ($linux_size bytes) - likely corrupted" > /workspace/linux_error
+    else
+      cp "build_output_linux/{output_name}" /workspace/
+      chmod +x "/workspace/{output_name}"
+      echo "completed" > /workspace/build_status_linux
+      echo "{output_name}" > /workspace/linux_artifacts
+      echo "[Cloud Build] Linux artifact ready: {output_name}"
     fi
+  else
+    echo "[Cloud Build] ERROR: Expected output not found at build_output_linux/{output_name}"
+    echo "[Cloud Build] Build output directory contents:"
+    ls -la build_output_linux/ 2>/dev/null || echo "Directory does not exist"
+    echo "failed" > /workspace/build_status_linux
+    echo "Linux build output not found at expected location" > /workspace/linux_error
   fi
 else
   echo "skipped" > /workspace/build_status_linux

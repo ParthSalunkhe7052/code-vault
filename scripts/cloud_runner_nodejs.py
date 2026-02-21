@@ -743,6 +743,29 @@ class NodeJSBuilder:
             # Properly wrap user code INSIDE the async IIFE
             protected_code = prefix + original_code + suffix
 
+            # CRITICAL: Validate the WRAPPED code syntax too!
+            # This catches issues where prefix + code + suffix creates invalid JS
+            logger.info("Validating wrapped code syntax...")
+            temp_path = entry_path.with_suffix(".wrapped.tmp")
+            try:
+                temp_path.write_text(protected_code, encoding="utf-8")
+                is_valid_wrapped, wrapped_error = self.validate_js_syntax(temp_path)
+                if not is_valid_wrapped:
+                    logger.error(f"Wrapped code has syntax errors:")
+                    logger.error(wrapped_error)
+                    error_file = self.source_dir / "SYNTAX_ERROR.txt"
+                    error_file.write_text(
+                        f"JavaScript Syntax Error after wrapping:\n\n{wrapped_error}\n\n"
+                        f"This usually means your code has incompatible syntax.\n"
+                        f"Please check your JavaScript code and rebuild.",
+                        encoding="utf-8",
+                    )
+                    temp_path.unlink(missing_ok=True)
+                    return False
+                logger.info("Wrapped code syntax validation passed")
+            finally:
+                temp_path.unlink(missing_ok=True)
+
             with open(entry_path, "w", encoding="utf-8") as f:
                 f.write(protected_code)
 
