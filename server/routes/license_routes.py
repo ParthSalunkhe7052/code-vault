@@ -136,9 +136,9 @@ async def _push_validation_log_to_redis(log_data: dict):
     # Prefer Upstash REST API for serverless environments
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
-            from upstash_redis.asyncio import AsyncRedis
+            from upstash_redis.asyncio import Redis
 
-            r = AsyncRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+            r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
             await r.lpush("license_logs_queue", json.dumps(log_data))
             return
         except ImportError:

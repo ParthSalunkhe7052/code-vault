@@ -37,10 +37,10 @@ async def init_rate_limiter(redis_url: str) -> None:
     # Prefer Upstash REST API for serverless environments
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
-            from upstash_redis.asyncio import AsyncRedis
+            from upstash_redis.asyncio import Redis
 
             logger.info("[RateLimiter] Using Upstash REST API...")
-            _redis_client = AsyncRedis(
+            _redis_client = Redis(
                 url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN
             )
             # Test connection

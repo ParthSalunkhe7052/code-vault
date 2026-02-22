@@ -553,9 +553,9 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
     # Prefer Upstash REST API for serverless environments (no TCP connection issues)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
-            from upstash_redis.asyncio import AsyncRedis
+            from upstash_redis.asyncio import Redis
 
-            r = AsyncRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+            r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
 
             # Check if jti exists (replay attack)
             exists = await r.exists(redis_key)
