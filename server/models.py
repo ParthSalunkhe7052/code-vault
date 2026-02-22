@@ -117,6 +117,9 @@ class ProjectConfigRequest(BaseModel):
     skip_obfuscation: Optional[bool] = True  # Default: skip for faster builds
     enable_lease: Optional[bool] = False  # Default: lease disabled
     heartbeat_interval: Optional[int] = 300  # Default: 5 minutes
+    # Build mode options
+    use_onefile: Optional[bool] = False  # Default: standalone mode (lower AV risk)
+    is_gui_app: Optional[bool] = False  # Default: console app (lower AV risk)
     # Security options
     enable_binary_hash: Optional[bool] = False  # Default: OFF for AV compatibility
 

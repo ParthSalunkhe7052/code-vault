@@ -28,10 +28,32 @@ Windows requires code signing certificates for trusted execution. Without signin
 
 | Mode | AV Risk | Output | Use Case |
 |------|---------|--------|----------|
-| **Fast Mode** | Low | Directory + launcher script | Development, testing |
-| **Standard Mode** | Medium | Single .exe | Distribution |
+| **Standalone (Default)** | Low | ZIP with EXE + DLLs folder | Development, testing, distribution |
+| **Onefile** | Medium | Single .exe | Convenience distribution |
 
-**For development and testing, use Fast Mode to minimize AV warnings.**
+**For best AV compatibility, use Standalone mode (now the default).**
+
+### Standalone vs Onefile
+
+**Standalone Mode** (Recommended):
+- Produces a ZIP containing EXE + all required DLLs
+- Much lower AV false positive rate
+- No self-extraction at runtime
+- Slightly larger download but faster startup
+
+**Onefile Mode**:
+- Single self-contained executable
+- Higher AV false positive risk due to compression/packing
+- Convenient for simple distribution
+- Slower first startup (extraction time)
+
+## Console Mode
+
+CodeVault forces console mode by default, which reduces AV false positives. This is because:
+- Console apps have more predictable behavior
+- GUI-only apps with hidden windows can trigger heuristics
+
+If your application is a GUI app (tkinter, PyQt, etc.), the build system will detect this and disable the console window automatically.
 
 ## Security Feature Trade-offs
 
@@ -79,7 +101,7 @@ If Windows Defender or other AV blocks the application:
 
 ### For Developers
 
-1. **Use Fast Mode for testing** - Produces directory output with fewer AV issues
+1. **Use Standalone Mode** - Now the default, produces ZIP with much lower AV false positives
 
 2. **Disable Binary Hash** - If AV warnings are a major concern for your users
 
@@ -87,8 +109,8 @@ If Windows Defender or other AV blocks the application:
    - Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission
    - VirusTotal: Upload file and use "False Positive" submission
 
-4. **Code Signing** (Future)
-   - Azure Artifact Signing: $9.99/month
+4. **Code Signing** (Recommended for production)
+   - Azure Artifact Signing: ~$10/month
    - Provides immediate SmartScreen trust
    - Requires Microsoft identity verification
 
@@ -97,6 +119,8 @@ If Windows Defender or other AV blocks the application:
 ### Nuitka Compilation Flags Used
 
 CodeVault uses these flags to minimize false positives:
+- `--standalone` - Directory output (default, lower AV risk)
+- `--windows-console-mode=force` - Forces console window (lower AV risk)
 - `--company-name=CodeVault`
 - `--product-name=<app_name>`
 - `--file-version=1.0.0.0`
@@ -106,13 +130,23 @@ These add legitimate metadata to the executable.
 
 ### Default Configuration
 
+- Build mode: **Standalone** (ZIP with EXE + DLLs)
+- Console mode: **Forced** (for CLI tools, auto-detected for GUI)
 - Binary hash verification: **OFF** (for AV compatibility)
 - Obfuscation: **OFF** (for faster builds)
-- Fast mode: **OFF** (produces single .exe by default)
+
+### Cache Strategy
+
+To speed up builds, CodeVault caches:
+- pip packages
+- MinGW compiler (for Windows cross-compilation)
+- ccache (C compilation cache)
+
+This reduces build times from 8-10 minutes to 3-5 minutes for subsequent builds.
 
 ## Future Improvements
 
 When budget allows, implement:
-1. Azure Artifact Signing integration ($9.99/month)
+1. Azure Artifact Signing integration (~$10/month)
 2. Code signing step in cloud build pipeline
 3. EV certificate for immediate SmartScreen trust

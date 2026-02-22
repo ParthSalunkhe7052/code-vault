@@ -42,9 +42,11 @@ def generate_build_steps(
     steps.append(_generate_restore_cache_step(gcs_bucket))
 
     # Step 2: Download source
-    steps.append(_generate_download_source_step(
-        build_id, project_id, language, target_platforms, output_name, source_url
-    ))
+    steps.append(
+        _generate_download_source_step(
+            build_id, project_id, language, target_platforms, output_name, source_url
+        )
+    )
 
     # Step 3: Extract source
     steps.append(_generate_extract_source_step())
@@ -55,48 +57,52 @@ def generate_build_steps(
     # Language-specific build steps
     if language == "python":
         # Python Linux build
-        steps.append(_generate_python_linux_build_step(
-            target_platforms, output_name, gcs_bucket
-        ))
+        steps.append(
+            _generate_python_linux_build_step(target_platforms, output_name, gcs_bucket)
+        )
 
         # Python Linux upload
-        steps.append(_generate_python_linux_upload_step(
-            target_platforms, gcs_bucket, build_id
-        ))
+        steps.append(
+            _generate_python_linux_upload_step(target_platforms, gcs_bucket, build_id)
+        )
 
         # Python Windows build
-        steps.append(_generate_python_windows_build_step(
-            target_platforms, output_name, gcs_bucket
-        ))
+        steps.append(
+            _generate_python_windows_build_step(
+                target_platforms, output_name, gcs_bucket
+            )
+        )
 
         # Python Windows upload
-        steps.append(_generate_python_windows_upload_step(
-            target_platforms, gcs_bucket, build_id, output_name
-        ))
+        steps.append(
+            _generate_python_windows_upload_step(
+                target_platforms, gcs_bucket, build_id, output_name
+            )
+        )
 
     elif language == "nodejs":
         # Node.js build (Windows + Linux)
-        steps.append(_generate_nodejs_build_step(
-            target_platforms, output_name, gcs_bucket
-        ))
+        steps.append(
+            _generate_nodejs_build_step(target_platforms, output_name, gcs_bucket)
+        )
 
         # Node.js Windows upload
-        steps.append(_generate_nodejs_windows_upload_step(
-            target_platforms, gcs_bucket, build_id
-        ))
+        steps.append(
+            _generate_nodejs_windows_upload_step(target_platforms, gcs_bucket, build_id)
+        )
 
         # Node.js Linux upload
-        steps.append(_generate_nodejs_linux_upload_step(
-            target_platforms, gcs_bucket, build_id
-        ))
+        steps.append(
+            _generate_nodejs_linux_upload_step(target_platforms, gcs_bucket, build_id)
+        )
 
     # Save cache
     steps.append(_generate_save_cache_step(gcs_bucket))
 
     # Webhook callback
-    steps.append(_generate_webhook_step(
-        callback_url, callback_secret, build_id, gcs_bucket
-    ))
+    steps.append(
+        _generate_webhook_step(callback_url, callback_secret, build_id, gcs_bucket)
+    )
 
     return steps
 
@@ -134,6 +140,22 @@ else
   echo "[Cloud Build] ccache not found"
 fi
 
+# Restore MinGW cache (for Windows cross-compilation speedup)
+if gsutil -q stat "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" 2>/dev/null; then
+  mingw_size=$(gsutil du "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" 2>/dev/null | awk '{{print $1}}' | cut -d'.' -f1)
+  if [ -n "$mingw_size" ] && [ "$mingw_size" -gt 524288000 ]; then
+    echo "[Cloud Build] Skipping MinGW cache (too large: $mingw_size bytes)"
+  else
+    echo "[Cloud Build] Restoring MinGW cache..."
+    gsutil cp "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" /tmp/mingw-cache.tar.gz
+    mkdir -p /workspace/.mingw-cache
+    tar -xzf /tmp/mingw-cache.tar.gz -C /workspace/.mingw-cache 2>/dev/null || true
+    echo "[Cloud Build] MinGW cache restored"
+  fi
+else
+  echo "[Cloud Build] MinGW cache not found"
+fi
+
 # Restore Nuitka cache
 if gsutil -q stat "gs://{gcs_bucket}/cache/nuitka-cache-default.tar.gz" 2>/dev/null; then
   cache_size=$(gsutil du "gs://{gcs_bucket}/cache/nuitka-cache-default.tar.gz" 2>/dev/null | awk '{{print $1}}' | cut -d'.' -f1)
@@ -150,7 +172,8 @@ else
   echo "[Cloud Build] Nuitka cache not found"
 fi
 
-echo "[Cloud Build] Cache restore complete""",
+echo "[Cloud Build] Cache restore complete"
+""",
         ],
         "waitFor": ["-"],
     }
@@ -210,7 +233,9 @@ echo "[Cloud Build] Source prepared""",
     }
 
 
-def _generate_download_config_step(config_url: str, target_platforms: str) -> Dict[str, Any]:
+def _generate_download_config_step(
+    config_url: str, target_platforms: str
+) -> Dict[str, Any]:
     """Generate config download step."""
     # Skip config download if URL is empty
     if not config_url:
@@ -236,7 +261,9 @@ fi"""
     }
 
 
-def _generate_python_linux_build_step(target_platforms: str, output_name: str, gcs_bucket: str) -> Dict[str, Any]:
+def _generate_python_linux_build_step(
+    target_platforms: str, output_name: str, gcs_bucket: str
+) -> Dict[str, Any]:
     """Generate Python Linux build step."""
     return {
         "name": "gcr.io/cloudbuild-486309/codevault-builder:latest",
@@ -264,6 +291,11 @@ if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
 fi
 
 decoded_config=$(cat /workspace/config.json)
+
+# Check build mode from config
+use_onefile=$(echo "$decoded_config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('use_onefile', False))" 2>/dev/null || echo "False")
+echo "[Cloud Build] Build mode: use_onefile=$use_onefile"
+
 export NUITKA_JOBS=6
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 mkdir -p $NUITKA_CACHE_DIR
@@ -280,50 +312,63 @@ python3 "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_co
 cd "./project/source"
 output_name="{output_name}"
 
-# Check for standalone output directory
-if [ -d "build_output_linux" ]; then
+# Check for standalone build first (directory with binary + libs)
+dist_dir="build_output_linux/${{output_name}}.dist"
+
+if [ -d "$dist_dir" ]; then
+  echo "[Cloud Build] Found standalone build directory: $dist_dir"
+  
+  # Create ZIP of standalone build
+  mkdir -p /workspace/artifacts
+  cd "$dist_dir/.."
+  tar -czf "/workspace/artifacts/${{output_name}}.tar.gz" "${{output_name}}.dist"
+  zip_size=$(ls -lh "/workspace/artifacts/${{output_name}}.tar.gz" | awk '{{print $5}}')
+  echo "[Cloud Build] Created standalone archive: $zip_size"
+  
+  echo "completed" > /workspace/artifacts/build_status_linux
+  echo "${{output_name}}.tar.gz" > /workspace/artifacts/linux_artifacts
+  echo "standalone" > /workspace/artifacts/build_mode_linux
+  echo "[Cloud Build] Linux artifact ready: ${{output_name}}.tar.gz (standalone mode)"
+elif [ -d "build_output_linux" ]; then
   found_binary=$(find build_output_linux -type f -name "$output_name" 2>/dev/null | head -1)
   if [ -n "$found_binary" ]; then
-    cp "$found_binary" ./
+    chmod +x "$found_binary"
+    tar -czf "$output_name.tar.gz" -C "$(dirname $found_binary)" "$(basename $found_binary)"
+    mkdir -p /workspace/artifacts
+    mv "$output_name.tar.gz" /workspace/artifacts/
+    echo "completed" > /workspace/artifacts/build_status_linux
+    echo "$output_name.tar.gz" > /workspace/artifacts/linux_artifacts
+    echo "onefile" > /workspace/artifacts/build_mode_linux
+    echo "[Cloud Build] Linux artifact ready: $output_name.tar.gz (onefile mode)"
   fi
 fi
 
-linux_artifacts=""
-linux_status="failed"
-linux_error=""
-
-if [ -f "$output_name" ]; then
-  chmod +x "$output_name"
-  tar -czf "$output_name.tar.gz" "$output_name"
-  mkdir -p /workspace/artifacts
-  mv "$output_name.tar.gz" /workspace/artifacts/
-  linux_artifacts="$output_name.tar.gz"
-  linux_status="completed"
-  echo "[Cloud Build] Linux artifact ready: $linux_artifacts"
-else
+# Handle errors
+if [ ! -f "/workspace/artifacts/linux_artifacts" ]; then
   if [ -f "error_message.txt" ]; then
     linux_error=$(cat error_message.txt)
   else
-    linux_error="Linux build output '$output_name' not found"
+    linux_error="Linux build output not found"
   fi
+  echo "failed" > /workspace/artifacts/build_status_linux
+  echo "$linux_error" > /workspace/artifacts/linux_error
 fi
-
-echo "$linux_status" > /workspace/artifacts/build_status_linux
-echo "$linux_artifacts" > /workspace/artifacts/linux_artifacts
-echo "$linux_error" > /workspace/artifacts/linux_error
 
 # Save Nuitka cache
 if [ -d "$HOME/.cache/Nuitka" ]; then
   mkdir -p /workspace/.nuitka-cache
   cp -r $HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
-fi""",
+fi
+""",
         ],
         "waitFor": ["download-config"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
     }
 
 
-def _generate_python_linux_upload_step(target_platforms: str, gcs_bucket: str, build_id: str) -> Dict[str, Any]:
+def _generate_python_linux_upload_step(
+    target_platforms: str, gcs_bucket: str, build_id: str
+) -> Dict[str, Any]:
     """Generate Python Linux upload step."""
     return {
         "name": "gcr.io/cloud-builders/gsutil",
@@ -370,7 +415,9 @@ fi""",
     }
 
 
-def _generate_python_windows_build_step(target_platforms: str, output_name: str, gcs_bucket: str) -> Dict[str, Any]:
+def _generate_python_windows_build_step(
+    target_platforms: str, output_name: str, gcs_bucket: str
+) -> Dict[str, Any]:
     """Generate Python Windows build step."""
     return {
         "name": "docker.io/tobix/pywine:3.11",
@@ -391,6 +438,13 @@ echo "[Cloud Build] ===== Building for Windows ====="
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 mkdir -p $NUITKA_CACHE_DIR
 
+# Restore MinGW cache if available (faster builds)
+if [ -d /workspace/.mingw-cache ]; then
+  echo "[Cloud Build] Restoring MinGW cache..."
+  mkdir -p /root/.cache/Nuitka/downloads
+  cp -r /workspace/.mingw-cache/. /root/.cache/Nuitka/downloads/ 2>/dev/null || true
+fi
+
 wine python -m pip install --upgrade --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography pefile
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
@@ -407,28 +461,59 @@ if [ -n "$nuitka_depends_py" ]; then
 fi
 
 decoded_config=$(cat /workspace/config.json)
+
+# Check build mode from config
+use_onefile=$(echo "$decoded_config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('use_onefile', False))" 2>/dev/null || echo "False")
+echo "[Cloud Build] Build mode: use_onefile=$use_onefile"
+
 wine python "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_config" --source "$(winepath -w $(realpath ./project/source))"
 
 output_name="{output_name}"
 echo "[Cloud Build] Looking for Windows build output..."
 
 found_exe=""
+dist_dir="./project/source/build_output_windows_wine/${{output_name}}.dist"
 
-if [ -f "./project/source/build_output_windows_wine/${{output_name}}.exe" ]; then
+# Check for standalone build first (directory with EXE + DLLs)
+if [ -d "$dist_dir" ]; then
+  echo "[Cloud Build] Found standalone build directory: $dist_dir"
+  if [ -f "$dist_dir/${{output_name}}.exe" ]; then
+    found_exe="$dist_dir/${{output_name}}.exe"
+  else
+    found_exe=$(find "$dist_dir" -type f -name "*.exe" 2>/dev/null | head -1)
+  fi
+  
+  if [ -n "$found_exe" ]; then
+    exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
+    echo "[Cloud Build] EXE size: $exe_size"
+    
+    # Create ZIP of standalone build
+    mkdir -p /workspace/artifacts
+    cd "$dist_dir/.."
+    zip -r "/workspace/artifacts/${{output_name}}.zip" "${{output_name}}.dist" -x "*.pyc" -x "__pycache__/*"
+    zip_size=$(ls -lh "/workspace/artifacts/${{output_name}}.zip" | awk '{{print $5}}')
+    echo "[Cloud Build] Created standalone ZIP: $zip_size"
+    
+    echo "completed" > /workspace/artifacts/build_status_windows
+    echo "${{output_name}}.zip" > /workspace/artifacts/windows_artifacts
+    echo "standalone" > /workspace/artifacts/build_mode_windows
+    echo "[Cloud Build] Windows artifact ready: ${{output_name}}.zip (standalone mode)"
+  fi
+elif [ -f "./project/source/build_output_windows_wine/${{output_name}}.exe" ]; then
   found_exe="./project/source/build_output_windows_wine/${{output_name}}.exe"
   echo "[Cloud Build] Found onefile EXE: $found_exe"
-else
+fi
+
+# Handle onefile build
+if [ -z "$found_exe" ] || [ ! -f "$found_exe" ]; then
   found_exe=$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
   if [ -n "$found_exe" ]; then
     echo "[Cloud Build] Found EXE: $found_exe"
   fi
 fi
 
-windows_artifacts=""
-windows_status="failed"
-windows_error=""
-
-if [ -n "$found_exe" ] && [ -f "$found_exe" ]; then
+# If we found an EXE but haven't created artifacts yet (onefile mode)
+if [ -n "$found_exe" ] && [ -f "$found_exe" ] && [ ! -f "/workspace/artifacts/windows_artifacts" ]; then
   exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
   echo "[Cloud Build] EXE size: $exe_size"
   
@@ -436,30 +521,39 @@ if [ -n "$found_exe" ] && [ -f "$found_exe" ]; then
   cp "$found_exe" "/workspace/artifacts/${{output_name}}.exe"
   
   if [ -f "/workspace/artifacts/${{output_name}}.exe" ]; then
-    windows_artifacts="${{output_name}}.exe"
-    windows_status="completed"
-    echo "[Cloud Build] Windows artifact ready: $windows_artifacts"
-  else
-    windows_error="Failed to copy EXE to artifacts"
-  fi
-else
-  if [ -f "./project/source/error_message.txt" ]; then
-    windows_error=$(cat ./project/source/error_message.txt)
-  else
-    windows_error="Windows EXE not found in build output"
+    echo "completed" > /workspace/artifacts/build_status_windows
+    echo "${{output_name}}.exe" > /workspace/artifacts/windows_artifacts
+    echo "onefile" > /workspace/artifacts/build_mode_windows
+    echo "[Cloud Build] Windows artifact ready: ${{output_name}}.exe (onefile mode)"
   fi
 fi
 
-echo "$windows_status" > /workspace/artifacts/build_status_windows
-echo "$windows_artifacts" > /workspace/artifacts/windows_artifacts
-echo "$windows_error" > /workspace/artifacts/windows_error""",
+# Handle errors
+if [ ! -f "/workspace/artifacts/windows_artifacts" ]; then
+  if [ -f "./project/source/error_message.txt" ]; then
+    windows_error=$(cat ./project/source/error_message.txt)
+  else
+    windows_error="Windows build output not found"
+  fi
+  echo "failed" > /workspace/artifacts/build_status_windows
+  echo "$windows_error" > /workspace/artifacts/windows_error
+fi
+
+# Save MinGW cache for faster future builds
+if [ -d /root/.cache/Nuitka/downloads ]; then
+  echo "[Cloud Build] Saving MinGW cache..."
+  mkdir -p /workspace/.mingw-cache
+  cp -r /root/.cache/Nuitka/downloads/. /workspace/.mingw-cache/ 2>/dev/null || true
+fi""",
         ],
         "waitFor": ["download-config"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
     }
 
 
-def _generate_python_windows_upload_step(target_platforms: str, gcs_bucket: str, build_id: str, output_name: str) -> Dict[str, Any]:
+def _generate_python_windows_upload_step(
+    target_platforms: str, gcs_bucket: str, build_id: str, output_name: str
+) -> Dict[str, Any]:
     """Generate Python Windows upload step."""
     return {
         "name": "gcr.io/cloud-builders/gsutil",
@@ -477,14 +571,17 @@ if [ -z "$windows_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Windows: $windows_artifact"
-gsutil cp "/workspace/artifacts/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"""",
+gsutil cp "/workspace/artifacts/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+""",
         ],
         "waitFor": ["build-windows"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
     }
 
 
-def _generate_nodejs_build_step(target_platforms: str, output_name: str, gcs_bucket: str) -> Dict[str, Any]:
+def _generate_nodejs_build_step(
+    target_platforms: str, output_name: str, gcs_bucket: str
+) -> Dict[str, Any]:
     """Generate Node.js build step."""
     return {
         "name": "node:20-slim",
@@ -622,14 +719,18 @@ else
   echo "skipped" > /workspace/artifacts/build_status_linux
 fi
 
-echo "[Cloud Build] Node.js build step complete""".replace("BUILD_ID_PLACEHOLDER", "${{BUILD_ID}}"),
+echo "[Cloud Build] Node.js build step complete""".replace(
+                "BUILD_ID_PLACEHOLDER", "${{BUILD_ID}}"
+            ),
         ],
         "waitFor": ["download-config"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
     }
 
 
-def _generate_nodejs_windows_upload_step(target_platforms: str, gcs_bucket: str, build_id: str) -> Dict[str, Any]:
+def _generate_nodejs_windows_upload_step(
+    target_platforms: str, gcs_bucket: str, build_id: str
+) -> Dict[str, Any]:
     """Generate Node.js Windows upload step."""
     return {
         "name": "gcr.io/cloud-builders/gsutil",
@@ -647,14 +748,17 @@ if [ -z "$windows_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Node.js Windows artifact: $windows_artifact"
-gsutil cp "/workspace/artifacts/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"""",
+gsutil cp "/workspace/artifacts/$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$windows_artifact"
+""",
         ],
         "waitFor": ["build-nodejs"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
     }
 
 
-def _generate_nodejs_linux_upload_step(target_platforms: str, gcs_bucket: str, build_id: str) -> Dict[str, Any]:
+def _generate_nodejs_linux_upload_step(
+    target_platforms: str, gcs_bucket: str, build_id: str
+) -> Dict[str, Any]:
     """Generate Node.js Linux upload step."""
     return {
         "name": "gcr.io/cloud-builders/gsutil",
@@ -672,7 +776,8 @@ if [ -z "$linux_artifact" ]; then
   exit 0
 fi
 echo "[Cloud Build] Uploading Node.js Linux artifact: $linux_artifact"
-gsutil cp "/workspace/artifacts/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"""",
+gsutil cp "/workspace/artifacts/$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$linux_artifact"
+""",
         ],
         "waitFor": ["build-nodejs"],
         "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
@@ -710,16 +815,36 @@ if [ -d /workspace/.ccache ]; then
   fi
 fi
 
+# Save MinGW cache (for Windows cross-compilation)
+if [ -d /workspace/.mingw-cache ]; then
+  mingw_cache_size=$(du -s /workspace/.mingw-cache 2>/dev/null | cut -f1)
+  if [ "$mingw_cache_size" -gt 10000 ] && [ "$mingw_cache_size" -lt 600000 ]; then
+    tar -czf /tmp/mingw-cache.tar.gz -C /workspace/.mingw-cache . 2>/dev/null
+    gsutil cp /tmp/mingw-cache.tar.gz "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz"
+    echo "[Cloud Build] Saved MinGW cache ($mingw_cache_size KB)"
+  else
+    echo "[Cloud Build] Skipping MinGW cache save (size: $mingw_cache_size KB)"
+  fi
+fi
+
 # Skip Nuitka cache save (causes slow builds when too large)
 echo "[Cloud Build] Skipping Nuitka cache save (disabled)"
 
-echo "[Cloud Build] Cache save complete""",
+echo "[Cloud Build] Cache save complete"
+""",
         ],
-        "waitFor": ["upload-linux", "upload-windows", "upload-nodejs-windows", "upload-nodejs-linux"],
+        "waitFor": [
+            "upload-linux",
+            "upload-windows",
+            "upload-nodejs-windows",
+            "upload-nodejs-linux",
+        ],
     }
 
 
-def _generate_webhook_step(callback_url: str, callback_secret: str, build_id: str, gcs_bucket: str) -> Dict[str, Any]:
+def _generate_webhook_step(
+    callback_url: str, callback_secret: str, build_id: str, gcs_bucket: str
+) -> Dict[str, Any]:
     """Generate webhook callback step."""
     return {
         "name": "gcr.io/cloud-builders/curl",

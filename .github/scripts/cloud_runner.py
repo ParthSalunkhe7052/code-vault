@@ -908,6 +908,10 @@ class CloudRunner:
 
         logger.info(f"Output name: {output_name}")
 
+        # Build mode: standalone (default, lower AV false positives) or onefile
+        use_onefile = self.config.get("use_onefile", False)
+        is_gui_app = self.config.get("is_gui_app", False)
+
         # Platform specific output naming
         if sys.platform == "win32":
             output_exe = f"{output_name}.exe"
@@ -920,22 +924,37 @@ class CloudRunner:
             sys.executable,
             "-m",
             "nuitka",
-            "--onefile",  # Single self-contained EXE with all DLLs embedded
-            "--standalone",  # Required base for onefile
+            "--standalone",
             "--assume-yes-for-downloads",
-            "--lto=no",  # Disable Link-Time Optimization (much faster builds)
+            "--lto=no",
         ]
 
-        # Add macOS specific flags
+        if use_onefile:
+            cmd.append("--onefile")
+            logger.info("Using --onefile mode (single EXE, higher AV risk)")
+
         if sys.platform == "darwin":
             cmd.append("--macos-create-app-bundle")
 
-        # Windows/Wine specific handling
         if sys.platform == "win32":
-            logger.info("Windows/Wine: Using --onefile for single EXE output")
-            # Use pefile for dependency detection (works better in Wine)
             cmd.append("--experimental=use_pefile_recursion")
-            # Add Windows metadata for better legitimacy (reduces AV false positives)
+
+            if use_onefile:
+                logger.info("Windows/Wine: Using --onefile for single EXE output")
+            else:
+                logger.info(
+                    "Windows/Wine: Using --standalone mode (lower AV false positives)"
+                )
+
+            if not is_gui_app:
+                cmd.append("--windows-console-mode=force")
+                logger.info(
+                    "Windows: Forcing console mode (reduces AV false positives)"
+                )
+            else:
+                cmd.append("--windows-console-mode=disable")
+                logger.info("Windows: Disabling console for GUI application")
+
             cmd.extend(
                 [
                     "--company-name=CodeVault",
@@ -947,7 +966,10 @@ class CloudRunner:
                 ]
             )
         else:
-            logger.info("Using --onefile mode (single self-contained binary)")
+            if use_onefile:
+                logger.info("Using --onefile mode (single self-contained binary)")
+            else:
+                logger.info("Using --standalone mode (directory output)")
 
         cmd.extend(
             [f"--output-filename={output_exe}", f"--output-dir={self.output_dir}"]
@@ -1114,21 +1136,45 @@ class CloudRunner:
             subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
 
         final_path = self.output_dir / output_exe
-        if not final_path.exists():
-            # Search recursive if Nuitka moved it
-            found = list(self.output_dir.rglob(output_exe))
-            if found:
-                final_path = found[0]
-            else:
-                # Fallback for macOS: checking if it produced a binary instead of .app
-                if sys.platform == "darwin":
-                    fallback = self.output_dir / output_name
-                    if fallback.exists():
-                        final_path = fallback
+        dist_dir = self.output_dir / f"{output_name}.dist"
+
+        if use_onefile:
+            if not final_path.exists():
+                found = list(self.output_dir.rglob(output_exe))
+                if found:
+                    final_path = found[0]
+                else:
+                    if sys.platform == "darwin":
+                        fallback = self.output_dir / output_name
+                        if fallback.exists():
+                            final_path = fallback
+                        else:
+                            raise FileNotFoundError("Output executable not found")
                     else:
                         raise FileNotFoundError("Output executable not found")
+        else:
+            if dist_dir.exists():
+                final_path = dist_dir / output_exe
+                if not final_path.exists():
+                    found_exe = list(dist_dir.rglob(output_exe))
+                    if found_exe:
+                        final_path = found_exe[0]
+                    else:
+                        raise FileNotFoundError(f"EXE not found in {dist_dir}")
+                logger.info(f"Standalone build created directory: {dist_dir}")
+            elif final_path.exists():
+                pass
+            else:
+                found = list(self.output_dir.rglob(output_exe))
+                if found:
+                    final_path = found[0]
                 else:
                     raise FileNotFoundError("Output executable not found")
+
+        if not use_onefile and dist_dir.exists():
+            logger.info(f"Build complete: {final_path}")
+            logger.info(f"Standalone directory: {dist_dir}")
+            return final_path
 
         logger.info(f"Build complete: {final_path}")
         return final_path

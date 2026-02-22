@@ -890,6 +890,9 @@ async def start_cloud_build(
             "compatibility_mode": request.compatibility_mode,
             "skip_obfuscation": project_settings.get("skip_obfuscation", True),
             "enable_lease": project_settings.get("enable_lease", False),
+            # Build mode options
+            "use_onefile": project_settings.get("use_onefile", False),
+            "is_gui_app": project_settings.get("is_gui_app", False),
         }
 
         # CVE-003 FIX: Wrap credit deduction + build records in transaction
