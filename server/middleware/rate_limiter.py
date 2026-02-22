@@ -32,6 +32,28 @@ async def init_rate_limiter(redis_url: str) -> None:
     """
     global _redis_client
 
+    from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+
+    # Prefer Upstash REST API for serverless environments
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import AsyncRedis
+
+            logger.info("[RateLimiter] Using Upstash REST API...")
+            _redis_client = AsyncRedis(
+                url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN
+            )
+            # Test connection
+            await _redis_client.ping()
+            logger.info("[RateLimiter] Connected to Upstash Redis successfully")
+            return
+        except ImportError:
+            logger.warning(
+                "[RateLimiter] upstash-redis not installed, falling back to redis-py"
+            )
+        except Exception as e:
+            logger.warning(f"[RateLimiter] Upstash REST API error: {e}")
+
     if not redis_url:
         logger.warning("[RateLimiter] No Redis URL configured - rate limiting disabled")
         return
@@ -55,11 +77,20 @@ async def init_rate_limiter(redis_url: str) -> None:
     except Exception as e:
         # Handle common Upstash connection issues gracefully
         error_msg = str(e)
-        if "getaddrinfo failed" in error_msg or "Name or service not known" in error_msg:
-            logger.warning("[RateLimiter] Cannot reach Upstash Redis (DNS/network issue)")
-            logger.info("[RateLimiter] Rate limiting will be disabled - this is OK for local development")
+        if (
+            "getaddrinfo failed" in error_msg
+            or "Name or service not known" in error_msg
+        ):
+            logger.warning(
+                "[RateLimiter] Cannot reach Upstash Redis (DNS/network issue)"
+            )
+            logger.info(
+                "[RateLimiter] Rate limiting will be disabled - this is OK for local development"
+            )
         elif "Connection refused" in error_msg:
-            logger.warning("[RateLimiter] Redis connection refused - ensure Redis server is running")
+            logger.warning(
+                "[RateLimiter] Redis connection refused - ensure Redis server is running"
+            )
             logger.info("[RateLimiter] Rate limiting disabled")
         else:
             logger.warning(f"[RateLimiter] Failed to connect to Redis: {e}")
@@ -109,7 +140,7 @@ class RateLimitExceeded(HTTPException):
         super().__init__(
             status_code=429,
             detail=f"Rate limit exceeded. Please try again in {retry_after} seconds.",
-            headers={"Retry-After": str(retry_after)}
+            headers={"Retry-After": str(retry_after)},
         )
         self.retry_after = retry_after
 
@@ -200,6 +231,7 @@ def rate_limit(
         async def login(request: Request, data: LoginRequest):
             ...
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -222,7 +254,11 @@ def rate_limit(
             else:
                 identifier = _get_client_ip(request)
 
-            key = f"{prefix}:{_hash_identifier(identifier)}" if prefix else _hash_identifier(identifier)
+            key = (
+                f"{prefix}:{_hash_identifier(identifier)}"
+                if prefix
+                else _hash_identifier(identifier)
+            )
 
             # Check rate limit
             allowed, remaining, retry_after = await check_rate_limit(
@@ -246,6 +282,7 @@ def rate_limit(
             return response
 
         return wrapper
+
     return decorator
 
 
@@ -281,7 +318,11 @@ class RateLimitDependency:
         else:
             identifier = _get_client_ip(request)
 
-        key = f"{self.prefix}:{_hash_identifier(identifier)}" if self.prefix else _hash_identifier(identifier)
+        key = (
+            f"{self.prefix}:{_hash_identifier(identifier)}"
+            if self.prefix
+            else _hash_identifier(identifier)
+        )
 
         # Check rate limit
         allowed, remaining, retry_after = await check_rate_limit(
@@ -298,33 +339,29 @@ class RateLimitDependency:
 
 # Pre-configured rate limiters for common use cases
 login_rate_limit = RateLimitDependency(
-    max_requests=5,
-    window_seconds=60,
-    prefix="auth:login"
+    max_requests=5, window_seconds=60, prefix="auth:login"
 )
 
 register_rate_limit = RateLimitDependency(
     max_requests=3,
     window_seconds=300,  # 5 minutes
-    prefix="auth:register"
+    prefix="auth:register",
 )
 
 license_validate_rate_limit = RateLimitDependency(
-    max_requests=30,
-    window_seconds=60,
-    prefix="license:validate"
+    max_requests=30, window_seconds=60, prefix="license:validate"
 )
 
 api_key_regen_rate_limit = RateLimitDependency(
     max_requests=3,
     window_seconds=3600,  # 1 hour
-    prefix="auth:apikey"
+    prefix="auth:apikey",
 )
 
 password_reset_rate_limit = RateLimitDependency(
     max_requests=3,
     window_seconds=300,  # 5 minutes
-    prefix="auth:reset"
+    prefix="auth:reset",
 )
 
 

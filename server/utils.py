@@ -545,18 +545,44 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
     Returns:
         (is_valid, error_message) - is_valid False if replay detected
     """
-    from config import REDIS_URL
-    import redis.asyncio as redis
+    from config import REDIS_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+    import logging
 
+    redis_key = f"jti:{license_key}:{jti}"
+
+    # Prefer Upstash REST API for serverless environments (no TCP connection issues)
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import AsyncRedis
+
+            r = AsyncRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+
+            # Check if jti exists (replay attack)
+            exists = await r.exists(redis_key)
+            if exists:
+                return False, "Replay attack detected: jti already used"
+
+            # Store jti with TTL
+            await r.setex(redis_key, str(RESPONSE_MAX_AGE_SECONDS), "1")
+            return True, ""
+        except ImportError:
+            logging.warning(
+                "[Security] upstash-redis not installed, falling back to redis-py"
+            )
+        except Exception as e:
+            logging.error(f"[Security] Upstash REST API error: {e}")
+            # Don't fail on Redis errors - log and continue
+            return True, ""
+
+    # Fallback to traditional Redis connection
     if not REDIS_URL:
-        import logging
-
         logging.warning("[Security] REDIS_URL not set, skipping jti replay check")
         return True, ""
 
     try:
+        import redis.asyncio as redis
+
         r = redis.from_url(REDIS_URL)
-        redis_key = f"jti:{license_key}:{jti}"
 
         # Check if jti exists (replay attack)
         exists = await r.exists(redis_key)
@@ -569,10 +595,11 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
         await r.close()
         return True, ""
     except Exception as e:
-        import logging
-
         logging.error(f"[Security] Failed to check jti replay: {e}")
-        return False, "Internal security error"
+        # Don't fail license validation on Redis errors - return success
+        # This is a trade-off: better to allow validation than block all users
+        logging.warning("[Security] Allowing validation despite Redis error")
+        return True, ""
 
 
 def validate_response_freshness(

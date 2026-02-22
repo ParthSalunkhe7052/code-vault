@@ -131,14 +131,32 @@ def get_geo_from_ip(ip_address: str) -> dict:
 
 async def _push_validation_log_to_redis(log_data: dict):
     """Push validation log to Redis queue for asynchronous processing by log worker."""
-    from config import REDIS_URL
-    import redis.asyncio as redis
+    from config import REDIS_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
 
+    # Prefer Upstash REST API for serverless environments
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import AsyncRedis
+
+            r = AsyncRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+            await r.lpush("license_logs_queue", json.dumps(log_data))
+            return
+        except ImportError:
+            logging.warning(
+                "[Redis] upstash-redis not installed, falling back to redis-py"
+            )
+        except Exception as e:
+            logging.error(f"[Redis] Upstash REST API error: {e}")
+            return
+
+    # Fallback to traditional Redis connection
     if not REDIS_URL:
         logging.warning("[Redis] REDIS_URL not set, log will be dropped")
         return
 
     try:
+        import redis.asyncio as redis
+
         r = redis.from_url(REDIS_URL)
         await r.lpush("license_logs_queue", json.dumps(log_data))
         await r.close()
