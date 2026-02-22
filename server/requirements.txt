@@ -47,3 +47,4 @@ google-cloud-storage==2.19.0
 
 # Cryptography (Ed25519 signing)
 cryptography>=44.0.1
+
