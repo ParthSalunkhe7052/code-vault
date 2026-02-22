@@ -849,19 +849,28 @@ class CloudRunner:
         if not entry_path.exists():
             raise FileNotFoundError(f"Entry file not found: {entry_file}")
 
-        logger.info(
-            "Injecting license protection (Ed25519 + Binary Hash + Heartbeat)..."
-        )
         original_code = entry_path.read_text(encoding="utf-8")
-
         license_key = self.config.get("license_key", "GENERIC_BUILD")
         api_url = self.config.get("api_url", "")
 
-        # New security features
+        # Security features
         public_key = self.config.get("signing_public_key") or self.config.get(
             "public_key", ""
         )
-        binary_hash = self.config.get("binary_hash", "skip")
+
+        # Binary hash verification - only enable if explicitly set (default OFF for AV compatibility)
+        enable_binary_hash = self.config.get("enable_binary_hash", False)
+        if enable_binary_hash:
+            binary_hash = self.config.get("binary_hash", "skip")
+            logger.info(
+                "Injecting license protection (Ed25519 + Binary Hash + Heartbeat)..."
+            )
+        else:
+            binary_hash = "skip"  # Skip binary hash verification
+            logger.info(
+                "Injecting license protection (Ed25519 + Heartbeat) - Binary hash disabled for AV compatibility..."
+            )
+
         heartbeat_interval = self.config.get("heartbeat_interval", 300)
         app_name = self.config.get("app_name", "Protected Application")
         lease_enabled = self.config.get("lease_enabled", True)
@@ -926,6 +935,17 @@ class CloudRunner:
             logger.info("Windows/Wine: Using --onefile for single EXE output")
             # Use pefile for dependency detection (works better in Wine)
             cmd.append("--experimental=use_pefile_recursion")
+            # Add Windows metadata for better legitimacy (reduces AV false positives)
+            cmd.extend(
+                [
+                    "--company-name=CodeVault",
+                    f"--product-name={output_name}",
+                    "--file-version=1.0.0.0",
+                    "--product-version=1.0.0.0",
+                    f"--file-description={output_name} - CodeVault Protected Application",
+                    "--copyright=Copyright 2025 CodeVault",
+                ]
+            )
         else:
             logger.info("Using --onefile mode (single self-contained binary)")
 
@@ -1079,15 +1099,17 @@ class CloudRunner:
         logger.info(f"Nuitka command (first 500 chars): {' '.join(cmd)[:500]}...")
 
         if sys.platform == "win32":
-            # Use os.system on Windows/Wine to avoid subprocess handle bugs
-            # Set WINEDEBUG=-all to reduce handle usage and chatter
-            cmd_str = "set WINEDEBUG=-all && " + " ".join(
-                [f'"{c}"' if " " in c else c for c in cmd]
+            # Use subprocess with list-based arguments to avoid command injection
+            # Pass environment variables directly to the call
+            custom_env = os.environ.copy()
+            custom_env["WINEDEBUG"] = "-all"
+
+            logger.info(
+                f"Nuitka command (Windows/Subprocess): {' '.join(cmd)[:500]}..."
             )
-            logger.info(f"Nuitka command (Windows): {cmd_str[:500]}...")
-            exit_code = os.system(cmd_str)
-            if exit_code != 0:
-                raise RuntimeError(f"Nuitka failed with exit code {exit_code}")
+            subprocess.check_call(
+                cmd, stdout=sys.stdout, stderr=sys.stderr, env=custom_env
+            )
         else:
             subprocess.check_call(cmd, stdout=sys.stdout, stderr=sys.stderr)
 

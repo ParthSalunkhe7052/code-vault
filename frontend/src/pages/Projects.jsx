@@ -162,6 +162,7 @@ const Projects = () => {
                 file_tree: config.settings?.file_tree || null,
                 skip_obfuscation: config.skip_obfuscation ?? true,
                 enable_lease: config.enable_lease ?? false,
+                enable_binary_hash: config.enable_binary_hash ?? false,
                 compiler_options: config.compiler_options || {}
             });
         } catch (error) {
@@ -192,7 +193,8 @@ const Projects = () => {
                 nuitka_options: configData.nuitka_options,
                 compiler_options: configData.compiler_options,
                 skip_obfuscation: configData.skip_obfuscation,
-                enable_lease: configData.enable_lease
+                enable_lease: configData.enable_lease,
+                enable_binary_hash: configData.enable_binary_hash
             });
             if (showNotification) {
                 toast.success('Configuration saved!');

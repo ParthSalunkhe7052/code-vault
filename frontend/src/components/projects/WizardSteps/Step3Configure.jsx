@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, memo } from 'react';
-import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap, Box, Layers, Code, Cpu, Shield, Sparkles } from 'lucide-react';
+import { Settings, FileCode, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Lock, Palette, Package, FolderOpen, Image, Zap, Box, Layers, Code, Cpu, Shield, Sparkles, AlertTriangle, Fingerprint } from 'lucide-react';
 import { usePricing } from '../../../contexts/PricingContext';
 
 // Check if we're in Tauri
@@ -42,7 +42,10 @@ const Step3Configure = memo(({
     setEnableLease,
     // Fast build props
     fastBuild = false,
-    setFastBuild
+    setFastBuild,
+    // Binary hash verification props (Python only)
+    enableBinaryHash = false,
+    setEnableBinaryHash
 }) => {
     const [iconDragOver, setIconDragOver] = useState(false);
 
@@ -155,6 +158,11 @@ const Step3Configure = memo(({
         setFastBuild(!fastBuild);
     }, [fastBuild, setFastBuild]);
 
+    // Memoized binary hash toggle
+    const toggleBinaryHash = useCallback(() => {
+        setEnableBinaryHash(!enableBinaryHash);
+    }, [enableBinaryHash, setEnableBinaryHash]);
+
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
             <div className="text-left">
@@ -242,28 +250,17 @@ const Step3Configure = memo(({
 
             <div className="border-t border-white/10 my-6" />
 
-            {/* PROMINENT: Advanced Obfuscation Toggle - Only for Node.js */}
+            {/* PROMINENT: Advanced Security Toggles */}
             {isNodeJS ? (
                 <ObfuscationToggleCard 
                     enableObfuscation={enableObfuscation}
                     setEnableObfuscation={setEnableObfuscation}
                 />
             ) : (
-                <div className="bg-gradient-to-br from-amber-500/10 to-orange-600/10 rounded-2xl border border-amber-500/20 p-6">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
-                            <Shield size={24} />
-                        </div>
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-white text-lg">Advanced Obfuscation</h3>
-                            </div>
-                            <p className="text-sm text-slate-400">
-                                Obfuscation is not available for Python projects. Python compilation with Nuitka produces native executables which are already protected at the binary level.
-                            </p>
-                        </div>
-                    </div>
-                </div>
+                <BinaryHashToggleCard 
+                    enableBinaryHash={enableBinaryHash}
+                    setEnableBinaryHash={setEnableBinaryHash}
+                />
             )}
 
             {/* Bottom Section: Bento Grid for Advanced Options */}
@@ -494,7 +491,6 @@ const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation })
     }, [isPro, enableObfuscation, setEnableObfuscation]);
 
     const handleUpgrade = useCallback(() => {
-        // Navigate to pricing page
         window.open('/pricing', '_blank');
     }, []);
 
@@ -504,7 +500,6 @@ const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation })
                 ? 'bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border-purple-500/50 shadow-lg shadow-purple-500/20' 
                 : 'bg-white/5 border-white/10 hover:border-white/20'
         }`}>
-            {/* Background decoration for Pro users */}
             {isPro && enableObfuscation && (
                 <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 to-indigo-500/10 animate-pulse" />
             )}
@@ -532,8 +527,8 @@ const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation })
                             </div>
                             <p className="text-sm text-slate-400 max-w-lg">
                                 {isPro 
-                                    ? 'Protect your source code with advanced obfuscation. Makes reverse engineering significantly harder.'
-                                    : 'Upgrade to Pro to enable advanced code obfuscation and protect against reverse engineering.'
+                                    ? 'Protect your source code with advanced obfuscation techniques.'
+                                    : 'Upgrade to Pro to enable advanced code obfuscation.'
                                 }
                             </p>
                         </div>
@@ -568,26 +563,54 @@ const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation })
                     </div>
                 </div>
 
-                {/* Feature highlights */}
                 {isPro && (
-                    <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4">
-                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
-                            <div className="text-2xl font-bold text-white mb-1">
-                                {enableObfuscation ? 'Hard' : 'Easy'}
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="bg-white/5 rounded-xl p-4">
+                                <h4 className="text-sm font-semibold text-emerald-400 mb-2 flex items-center gap-2">
+                                    <CheckCircle size={14} />
+                                    What This Protects Against
+                                </h4>
+                                <ul className="text-xs text-slate-400 space-y-1">
+                                    <li>• Source code reverse engineering</li>
+                                    <li>• JavaScript decompilation & analysis</li>
+                                    <li>• License bypass attempts via code inspection</li>
+                                    <li>• Intellectual property theft</li>
+                                </ul>
                             </div>
-                            <div className="text-xs text-slate-500">Reversal Difficulty</div>
+                            <div className="bg-white/5 rounded-xl p-4">
+                                <h4 className="text-sm font-semibold text-amber-400 mb-2 flex items-center gap-2">
+                                    <AlertTriangle size={14} />
+                                    Trade-offs
+                                </h4>
+                                <ul className="text-xs text-slate-400 space-y-1">
+                                    <li>• ~15-30% larger file size</li>
+                                    <li>• Slightly slower startup time</li>
+                                    <li>• Debugging stack traces harder to read</li>
+                                    <li>• May trigger some antivirus heuristics</li>
+                                </ul>
+                            </div>
                         </div>
-                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
-                            <div className="text-2xl font-bold text-white mb-1">
-                                {enableObfuscation ? '5+' : '0'}
+                        
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                                <div className="text-2xl font-bold text-white mb-1">
+                                    {enableObfuscation ? 'Hard' : 'Easy'}
+                                </div>
+                                <div className="text-xs text-slate-500">Reversal Difficulty</div>
                             </div>
-                            <div className="text-xs text-slate-500">Protection Layers</div>
-                        </div>
-                        <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
-                            <div className="text-2xl font-bold text-white mb-1">
-                                {enableObfuscation ? 'High' : 'None'}
+                            <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                                <div className="text-2xl font-bold text-white mb-1">
+                                    {enableObfuscation ? '5+' : '0'}
+                                </div>
+                                <div className="text-xs text-slate-500">Protection Layers</div>
                             </div>
-                            <div className="text-xs text-slate-500">Security Level</div>
+                            <div className={`text-center p-3 rounded-xl transition-colors ${enableObfuscation ? 'bg-purple-500/10' : 'bg-white/5'}`}>
+                                <div className="text-2xl font-bold text-white mb-1">
+                                    {enableObfuscation ? 'High' : 'None'}
+                                </div>
+                                <div className="text-xs text-slate-500">Security Level</div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -597,6 +620,122 @@ const ObfuscationToggleCard = memo(({ enableObfuscation, setEnableObfuscation })
 });
 
 ObfuscationToggleCard.displayName = 'ObfuscationToggleCard';
+
+// =============================================================================
+// BINARY HASH TOGGLE CARD - Python Security Feature
+// =============================================================================
+
+const BinaryHashToggleCard = memo(({ enableBinaryHash, setEnableBinaryHash }) => {
+    const handleToggle = useCallback(() => {
+        setEnableBinaryHash(!enableBinaryHash);
+    }, [enableBinaryHash, setEnableBinaryHash]);
+
+    return (
+        <div className={`relative overflow-hidden rounded-2xl border-2 mb-8 transition-all duration-300 ${
+            enableBinaryHash 
+                ? 'bg-gradient-to-r from-cyan-900/40 to-blue-900/40 border-cyan-500/50 shadow-lg shadow-cyan-500/20' 
+                : 'bg-white/5 border-white/10 hover:border-white/20'
+        }`}>
+            {enableBinaryHash && (
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 animate-pulse" />
+            )}
+            
+            <div className="relative z-10 p-6">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${
+                            enableBinaryHash
+                                ? 'bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
+                                : 'bg-white/10 text-slate-400'
+                        }`}>
+                            <Fingerprint size={28} />
+                        </div>
+                        
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-white text-lg">Binary Integrity Verification</h3>
+                                <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 text-xs font-bold rounded-full">
+                                    PYTHON
+                                </span>
+                            </div>
+                            <p className="text-sm text-slate-400 max-w-lg">
+                                Detect if your executable has been tampered with or modified after compilation.
+                            </p>
+                        </div>
+                    </div>
+
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <span className={`text-sm font-medium ${enableBinaryHash ? 'text-cyan-400' : 'text-slate-500'}`}>
+                            {enableBinaryHash ? 'Enabled' : 'Disabled'}
+                        </span>
+                        <div 
+                            onClick={handleToggle}
+                            className={`w-16 h-9 rounded-full p-1 transition-colors duration-300 cursor-pointer ${
+                                enableBinaryHash ? 'bg-cyan-600' : 'bg-slate-700'
+                            }`}
+                        >
+                            <div className={`w-7 h-7 rounded-full bg-white shadow-sm transition-transform duration-300 ${
+                                enableBinaryHash ? 'translate-x-7' : 'translate-x-0'
+                            }`} />
+                        </div>
+                    </label>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-white/10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="bg-white/5 rounded-xl p-4">
+                            <h4 className="text-sm font-semibold text-emerald-400 mb-2 flex items-center gap-2">
+                                <CheckCircle size={14} />
+                                What This Protects Against
+                            </h4>
+                            <ul className="text-xs text-slate-400 space-y-1">
+                                <li>• Binary patching & modification attacks</li>
+                                <li>• Crackers modifying your EXE to bypass license</li>
+                                <li>• Code injection into the compiled binary</li>
+                                <li>• Malware injection into your distributable</li>
+                            </ul>
+                        </div>
+                        <div className="bg-amber-500/10 rounded-xl p-4 border border-amber-500/20">
+                            <h4 className="text-sm font-semibold text-amber-400 mb-2 flex items-center gap-2">
+                                <AlertTriangle size={14} />
+                                Why Default OFF?
+                            </h4>
+                            <ul className="text-xs text-slate-400 space-y-1">
+                                <li>• May trigger antivirus false positives</li>
+                                <li>• Self-integrity checks resemble malware behavior</li>
+                                <li>• Windows Defender may block execution</li>
+                                <li>• User may need to add AV exclusion</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableBinaryHash ? 'bg-cyan-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableBinaryHash ? 'High' : 'Low'}
+                            </div>
+                            <div className="text-xs text-slate-500">Tamper Protection</div>
+                        </div>
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableBinaryHash ? 'bg-amber-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableBinaryHash ? 'Higher' : 'Lower'}
+                            </div>
+                            <div className="text-xs text-slate-500">AV Risk</div>
+                        </div>
+                        <div className={`text-center p-3 rounded-xl transition-colors ${enableBinaryHash ? 'bg-cyan-500/10' : 'bg-white/5'}`}>
+                            <div className="text-2xl font-bold text-white mb-1">
+                                {enableBinaryHash ? 'SHA-256' : 'None'}
+                            </div>
+                            <div className="text-xs text-slate-500">Hash Algorithm</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+BinaryHashToggleCard.displayName = 'BinaryHashToggleCard';
 
 Step3Configure.displayName = 'Step3Configure';
 

@@ -57,6 +57,7 @@ sdk/                    # Client SDKs
 conductor/              # Project documentation
   tracks/               # Development tracks
   code_styleguides/     # Language-specific style guides
+  antivirus-guidance.md # AV false positive guidance for users
 ```
 
 ## Code Style

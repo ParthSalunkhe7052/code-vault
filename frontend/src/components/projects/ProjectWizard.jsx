@@ -73,6 +73,7 @@ const ProjectWizard = ({
     const [enableObfuscation, setEnableObfuscation] = useState(false); // Obfuscation off by default for faster builds
     const [enableLease, setEnableLease] = useState(false); // Offline lease OFF by default
     const [fastBuild, setFastBuild] = useState(false); // Fast build OFF by default (produces onefile exe)
+    const [enableBinaryHash, setEnableBinaryHash] = useState(false); // Binary hash verification OFF by default for AV compatibility
 
     // Distribution settings (local state that overrides settings defaults during this wizard session)
     const [distributionType, setDistributionType] = useState(settings.defaultDistributionType || 'portable');
@@ -191,6 +192,10 @@ const ProjectWizard = ({
             if (configData.fast_build !== undefined) {
                 setFastBuild(configData.fast_build);
             }
+            // Sync binary hash state from config
+            if (configData.enable_binary_hash !== undefined) {
+                setEnableBinaryHash(configData.enable_binary_hash);
+            }
             // Sync node target from compiler options
             if (configData.compiler_options?.target) {
                 setNodeTarget(configData.compiler_options.target);
@@ -224,6 +229,7 @@ const ProjectWizard = ({
             configData.skip_obfuscation !== !enableObfuscation ||
             configData.enable_lease !== enableLease ||
             configData.fast_build !== fastBuild ||
+            configData.enable_binary_hash !== enableBinaryHash ||
             configData.nuitka_options?.demo_mode !== demoMode ||
             configData.nuitka_options?.demo_duration !== demoDuration ||
             configData.compiler_options?.target !== nodeTarget;
@@ -249,6 +255,7 @@ const ProjectWizard = ({
             skip_obfuscation: !enableObfuscation,  // Invert: UI shows "enable", config stores "skip"
             enable_lease: enableLease,
             fast_build: fastBuild,  // Fast build mode (skips --onefile for faster compilation)
+            enable_binary_hash: enableBinaryHash,  // Binary integrity verification
             nuitka_options: {
                 ...prev.nuitka_options,
                 demo_mode: demoMode,
@@ -598,6 +605,9 @@ const ProjectWizard = ({
                         // Fast build props
                         fastBuild={fastBuild}
                         setFastBuild={setFastBuild}
+                        // Binary hash props (Python only)
+                        enableBinaryHash={enableBinaryHash}
+                        setEnableBinaryHash={setEnableBinaryHash}
                     />
                 );
             case 4:

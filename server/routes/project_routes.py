@@ -223,6 +223,8 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             # Build options
             "skip_obfuscation": settings.get("skip_obfuscation", True),
             "enable_lease": settings.get("enable_lease", False),
+            # Security options
+            "enable_binary_hash": settings.get("enable_binary_hash", False),
             # White-label branding tier info
             "tier": tier_info["tier"],
             "is_pro": tier_info["is_pro"],
@@ -250,10 +252,11 @@ async def update_project_config(
 ):
     # Debug: Log what we're receiving
     logger.debug(
-        "Saving config for project %s: skip_obfuscation=%s, enable_lease=%s, compiler_options=%s",
+        "Saving config for project %s: skip_obfuscation=%s, enable_lease=%s, enable_binary_hash=%s, compiler_options=%s",
         project_id,
         data.skip_obfuscation,
         data.enable_lease,
+        data.enable_binary_hash,
         data.compiler_options,
     )
 
@@ -283,6 +286,8 @@ async def update_project_config(
                 # Build options
                 "skip_obfuscation": data.skip_obfuscation,
                 "enable_lease": data.enable_lease,
+                # Security options
+                "enable_binary_hash": data.enable_binary_hash,
             }
         )
 
