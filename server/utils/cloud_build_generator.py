@@ -827,8 +827,17 @@ if [ -d /workspace/.mingw-cache ]; then
   fi
 fi
 
-# Skip Nuitka cache save (causes slow builds when too large)
-echo "[Cloud Build] Skipping Nuitka cache save (disabled)"
+# Save Nuitka cache (only essentials, max 100MB)
+if [ -d "$HOME/.cache/Nuitka" ]; then
+  nuitka_cache_size=$(du -s $HOME/.cache/Nuitka 2>/dev/null | cut -f1)
+  if [ -n "$nuitka_cache_size" ] && [ "$nuitka_cache_size" -lt 102400 ]; then
+    echo "[Cloud Build] Saving Nuitka cache ($nuitka_cache_size KB)..."
+    tar -czf /tmp/nuitka-cache.tar.gz -C $HOME/.cache/Nuitka . 2>/dev/null
+    gsutil cp /tmp/nuitka-cache.tar.gz "gs://{gcs_bucket}/cache/nuitka-cache-default.tar.gz"
+  else
+    echo "[Cloud Build] Skipping Nuitka cache save (size: $nuitka_cache_size KB, limit: 100MB)"
+  fi
+fi
 
 echo "[Cloud Build] Cache save complete"
 """,

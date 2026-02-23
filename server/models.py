@@ -122,6 +122,10 @@ class ProjectConfigRequest(BaseModel):
     is_gui_app: Optional[bool] = False  # Default: console app (lower AV risk)
     # Security options
     enable_binary_hash: Optional[bool] = False  # Default: OFF for AV compatibility
+    # Data files to include in build (glob patterns or explicit paths)
+    data_files: List[str] = []
+    # Data directories to auto-include (relative to source root)
+    data_dirs: List[str] = []
 
 
 class ProjectBrandingRequest(BaseModel):

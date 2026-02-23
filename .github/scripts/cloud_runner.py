@@ -830,9 +830,26 @@ class CloudRunner:
             for py_file in self.source_dir.rglob("*.py"):
                 try:
                     content = py_file.read_text(encoding="utf-8", errors="ignore")
-                    # Check for tkinter imports
                     if re.search(
                         r"^(?:import\s+tkinter|from\s+tkinter\s+import)",
+                        content,
+                        re.MULTILINE,
+                    ):
+                        return True
+                except Exception:
+                    continue
+            return False
+        except Exception:
+            return False
+
+    def _module_imported(self, module_name: str) -> bool:
+        """Check if module is actually imported in source files."""
+        try:
+            for py_file in self.source_dir.rglob("*.py"):
+                try:
+                    content = py_file.read_text(encoding="utf-8", errors="ignore")
+                    if re.search(
+                        rf"^(?:import\s+{module_name}|from\s+{module_name})",
                         content,
                         re.MULTILINE,
                     ):
@@ -980,9 +997,10 @@ class CloudRunner:
         env_jobs = os.environ.get("NUITKA_JOBS", "")
 
         if sys.platform == "win32":
-            # Windows/Wine is unstable with multiple jobs - keep at 1
-            job_count = 1
-            logger.warning("Windows/Wine: Using 1 job for stability")
+            job_count = min(available_cpus, 4)
+            logger.info(
+                f"Windows/Wine: Using {job_count} jobs (increased from 1 for parallel builds)"
+            )
         else:
             # Linux: Use environment variable or calculate optimal jobs
             if env_jobs:
@@ -1039,31 +1057,23 @@ class CloudRunner:
             "idlelib",
             "tkinter",
             "curses",
-            # Heavy libraries that cause Nuitka recursion issues - compiled as bytecode instead
+        ]
+
+        heavy_modules = [
             "sqlalchemy",
             "pandas",
             "numpy",
             "scipy",
             "PIL",
             "matplotlib",
-            "certifi",
-            "_uuid",
-            "_zoneinfo",
-            "_cffi_backend",
-            "_lzma",
-            "_bz2",
-            "_socket",
-            "_sqlite3",
-            "_asyncio",
-            "_overlapped",
-            "_queue",
-            "_multiprocessing",
-            "_decimal",
-            "_elementtree",
-            "_ctypes",
             "cryptography",
             "cffi",
         ]
+        for module in heavy_modules:
+            if not self._module_imported(module):
+                blacklist.append(module)
+            else:
+                logger.info(f"Heavy module '{module}' is imported, including in build")
 
         compatibility_mode = self.config.get("compatibility_mode", False)
 
@@ -1099,6 +1109,34 @@ class CloudRunner:
 
         for module in blacklist:
             cmd.append(f"--nofollow-import-to={module}")
+
+        include_packages = self.config.get("nuitka_options", {}).get(
+            "include_packages", []
+        )
+        for pkg in include_packages:
+            cmd.append(f"--include-package={pkg}")
+            logger.info(f"Including package: {pkg}")
+
+        include_modules = self.config.get("include_modules", [])
+        for mod in include_modules:
+            cmd.append(f"--include-module={mod}")
+            logger.info(f"Including module: {mod}")
+
+        data_files = self.config.get("data_files", [])
+        for data_pattern in data_files:
+            cmd.append(f"--include-data-files={data_pattern}")
+            logger.info(f"Including data files: {data_pattern}")
+
+        data_dirs = self.config.get("data_dirs", [])
+        auto_data_dirs = ["data", "assets", "models", "resources", "config", "static"]
+        for data_dir in auto_data_dirs:
+            if (self.source_dir / data_dir).exists() and data_dir not in data_dirs:
+                data_dirs.append(data_dir)
+
+        for data_dir in data_dirs:
+            if (self.source_dir / data_dir).exists():
+                cmd.append(f"--include-data-dir={data_dir}={data_dir}")
+                logger.info(f"Including data directory: {data_dir}")
 
         # NOTE: Removed --enable-plugin=tk-inter as it significantly slows builds
         # The wrapper code has fallback for when tkinter is not available

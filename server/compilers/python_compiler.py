@@ -20,7 +20,10 @@ from typing import Optional, Callable
 import re
 
 # Import wrapper templates (using raw strings with .replace() for safety)
-from .templates.python_license_wrapper import PYTHON_WRAPPER_TEMPLATE, PYTHON_DEMO_WRAPPER
+from .templates.python_license_wrapper import (
+    PYTHON_WRAPPER_TEMPLATE,
+    PYTHON_DEMO_WRAPPER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +160,8 @@ class PythonCompiler:
 
         This avoids f-string escaping issues with braces and docstrings.
         """
-        return (
-            PYTHON_WRAPPER_TEMPLATE
-            .replace("{license_key}", license_key)
-            .replace("{server_url}", api_url)
+        return PYTHON_WRAPPER_TEMPLATE.replace("{license_key}", license_key).replace(
+            "{server_url}", api_url
         )
 
     def _get_demo_wrapper(self) -> str:
@@ -204,13 +205,22 @@ class PythonCompiler:
             "-m",
             "nuitka",
             "--standalone",
-            "--onefile",
             "--remove-output",
             "--assume-yes-for-downloads",
-            "--show-progress",  # Enable progress output for better UX
+            "--show-progress",
             f"--output-filename={output_exe_name}",
             f"--output-dir={output_dir}",
         ]
+
+        if options.get("use_onefile", False):
+            cmd.append("--onefile")
+            await self.log(
+                "Using --onefile mode (single EXE, higher AV risk)", log_callback
+            )
+        else:
+            await self.log(
+                "Using --standalone mode (lower AV false positives)", log_callback
+            )
 
         # === PERFORMANCE OPTIMIZATIONS ===
         # Use all available CPU cores for parallel C compilation
