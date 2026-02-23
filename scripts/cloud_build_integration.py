@@ -400,16 +400,27 @@ linux_artifacts=""
 linux_status="failed"
 linux_error=""
 
-# Check for standalone output (build_output_linux/{output_name}.dist folder)
-dist_dir="build_output_linux/{output_name}.dist"
+# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
+# e.g., main.py -> main.dist, not {output_name}.dist
+dist_dir=$$(find ./project/source/build_output_linux -type d -name "*.dist" 2>/dev/null | head -1)
 
-if [ -d "$$dist_dir" ]; then
-  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir"
+if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
+  dist_name=$$(basename "$$dist_dir")
+  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir (name: $$dist_name)"
+  
   # Zip the entire .dist folder with all dependencies (including python dlls)
-  tar -czf "/workspace/{output_name}.tar.gz" -C "build_output_linux" "{output_name}.dist"
-  linux_artifacts="{output_name}.tar.gz"
-  linux_status="completed"
-  echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (standalone folder with dependencies)"
+  parent_dir=$$(dirname "$$dist_dir")
+  cd "$$parent_dir"
+  tar -czf "/workspace/{output_name}.tar.gz" "$$dist_name"
+  cd /workspace
+  
+  if [ -f "/workspace/{output_name}.tar.gz" ]; then
+    linux_artifacts="{output_name}.tar.gz"
+    linux_status="completed"
+    echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (standalone folder with dependencies)"
+  else
+    linux_error="Failed to create tar.gz from .dist folder"
+  fi
 elif [ -d "build_output_linux" ]; then
   # Fallback: Check for onefile mode (single binary)
   found_binary=$$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
@@ -512,18 +523,22 @@ windows_artifacts=""
 windows_status="failed"
 windows_error=""
 
-# Check for standalone output (build_output_windows_wine/{output_name}.dist folder)
-dist_dir="./project/source/build_output_windows_wine/{output_name}.dist"
+# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
+# e.g., main.py -> main.dist, not {output_name}.dist
+dist_dir=$$(find ./project/source/build_output_windows_wine -type d -name "*.dist" 2>/dev/null | head -1)
 
-if [ -d "$$dist_dir" ]; then
-  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir"
+if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
+  dist_name=$$(basename "$$dist_dir")
+  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir (name: $$dist_name)"
   # List contents for debugging
   echo "[Cloud Build] .dist folder contents:"
   ls -la "$$dist_dir/" 2>/dev/null || true
   
   # Zip the entire .dist folder with all dependencies (including python311.dll)
-  cd ./project/source/build_output_windows_wine
-  tar -czf "/workspace/{output_name}.tar.gz" "{output_name}.dist"
+  # Use the actual .dist folder name, not {output_name}
+  parent_dir=$$(dirname "$$dist_dir")
+  cd "$$parent_dir"
+  tar -czf "/workspace/{output_name}.tar.gz" "$$dist_name"
   cd /workspace
   
   if [ -f "/workspace/{output_name}.tar.gz" ]; then
