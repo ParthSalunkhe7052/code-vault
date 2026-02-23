@@ -29,6 +29,8 @@ const Projects = () => {
     });
     const [configLoading, setConfigLoading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(false);
+    const [uploadPercent, setUploadPercent] = useState(0);
+    const [uploadStage, setUploadStage] = useState('uploading');
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [compileStatus, setCompileStatus] = useState(null);
     const [projectLicenses, setProjectLicenses] = useState([]);
@@ -235,8 +237,15 @@ const Projects = () => {
         }
 
         setUploadProgress(true);
+        setUploadPercent(0);
+        setUploadStage('uploading');
         try {
-            const uploaded = await projectApi.uploadFiles(selectedProject.id, files);
+            const uploaded = await projectApi.uploadFiles(selectedProject.id, files, (percent) => {
+                setUploadPercent(percent);
+                if (percent === 100) {
+                    setUploadStage('processing');
+                }
+            });
             if (uploaded && Array.isArray(uploaded)) {
                 setConfigData(prev => ({
                     ...prev,
@@ -249,6 +258,7 @@ const Projects = () => {
             toast.error('Failed to upload files: ' + (error.response?.data?.detail || error.message));
         } finally {
             setUploadProgress(false);
+            setUploadPercent(0);
             if (fileInputRef.current) {
                 fileInputRef.current.value = '';
             }
@@ -271,8 +281,15 @@ const Projects = () => {
         }
 
         setUploadProgress(true);
+        setUploadPercent(0);
+        setUploadStage('uploading');
         try {
-            const result = await projectApi.uploadZip(selectedProject.id, file);
+            const result = await projectApi.uploadZip(selectedProject.id, file, (percent) => {
+                setUploadPercent(percent);
+                if (percent === 100) {
+                    setUploadStage('extracting');
+                }
+            });
 
             setConfigData(prev => ({
                 ...prev,
@@ -287,6 +304,7 @@ const Projects = () => {
             toast.error('Failed to upload ZIP: ' + (error.response?.data?.detail || error.message));
         } finally {
             setUploadProgress(false);
+            setUploadPercent(0);
             e.target.value = '';
         }
     };
@@ -402,6 +420,8 @@ const Projects = () => {
                 configData={configData}
                 setConfigData={setConfigData}
                 uploadProgress={uploadProgress}
+                uploadPercent={uploadPercent}
+                uploadStage={uploadStage}
                 onFileUpload={handleFileUpload}
                 onZipUpload={handleZipUpload}
                 onDeleteFile={handleDeleteFile}

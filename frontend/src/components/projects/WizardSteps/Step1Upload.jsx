@@ -12,7 +12,9 @@ const Step1Upload = memo(({
     files = [],
     fileTree,
     onDeleteFile,
-    project
+    project,
+    uploadPercent = 0,  // Progress percentage (0-100)
+    uploadStage = 'uploading'  // 'uploading' | 'processing' | 'extracting'
 }) => {
     // Memoized language-specific values
     const isNodeJS = useMemo(() => project?.language === 'nodejs', [project?.language]);
@@ -164,9 +166,27 @@ const Step1Upload = memo(({
                                                 <Cloud size={24} className="text-indigo-400" />
                                             </div>
                                         </div>
-                                        <div>
+                                        <div className="text-center">
                                             <h3 className="text-xl font-bold text-white mb-1">Uploading...</h3>
-                                            <p className="text-slate-400">Extracting project files</p>
+                                            {uploadPercent > 0 && uploadPercent < 100 && (
+                                                <div className="mb-2">
+                                                    <div className="w-48 h-2 bg-white/10 rounded-full overflow-hidden mx-auto">
+                                                        <div 
+                                                            className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                                            style={{ width: `${uploadPercent}%` }}
+                                                        />
+                                                    </div>
+                                                    <p className="text-indigo-400 text-sm mt-1">{uploadPercent}%</p>
+                                                </div>
+                                            )}
+                                            <p className="text-slate-400">
+                                                {uploadStage === 'processing' ? 'Processing files...' : 
+                                                 uploadStage === 'extracting' ? 'Extracting project...' : 
+                                                 'Preparing your project...'}
+                                            </p>
+                                            <p className="text-slate-500 text-xs mt-3 max-w-xs">
+                                                Uploads may take longer than expected. We process and validate your files in the background to ensure a smooth build experience.
+                                            </p>
                                         </div>
                                     </div>
                                 ) : (

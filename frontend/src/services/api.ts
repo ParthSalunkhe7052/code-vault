@@ -161,18 +161,34 @@ export const projects = {
     delete: (id: string): Promise<{ success: boolean }> => api.delete(`/projects/${id}`).then(res => res.data),
     getConfig: (id: string): Promise<ProjectConfig> => api.get(`/projects/${id}/config`).then(res => res.data),
     updateConfig: (id: string, data: Partial<ProjectConfig>): Promise<ProjectConfig> => api.put(`/projects/${id}/config`, data).then(res => res.data),
-    uploadFiles: (id: string, files: File[]): Promise<{ message: string; files: string[] }> => {
+    uploadFiles: (id: string, files: File[], onProgress?: (progress: number) => void): Promise<{ message: string; files: string[] }> => {
         const formData = new FormData();
         for (let i = 0; i < files.length; i++) {
             formData.append('files', files[i] as Blob);
         }
         // Don't set Content-Type header - let browser set it with boundary
-        return api.post(`/projects/${id}/upload`, formData).then(res => res.data);
+        return api.post(`/projects/${id}/upload`, formData, {
+            onUploadProgress: (progressEvent) => {
+                if (onProgress && progressEvent.total) {
+                    const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    onProgress(progress);
+                }
+            },
+            timeout: 300000, // 5 minutes for large files
+        }).then(res => res.data);
     },
-    uploadZip: (id: string, file: File): Promise<{ message: string; files: string[] }> => {
+    uploadZip: (id: string, file: File, onProgress?: (progress: number) => void): Promise<{ message: string; files: string[] }> => {
         const formData = new FormData();
         formData.append('file', file);
-        return api.post(`/projects/${id}/upload-zip`, formData).then(res => res.data);
+        return api.post(`/projects/${id}/upload-zip`, formData, {
+            onUploadProgress: (progressEvent) => {
+                if (onProgress && progressEvent.total) {
+                    const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    onProgress(progress);
+                }
+            },
+            timeout: 300000, // 5 minutes for large files
+        }).then(res => res.data);
     },
     listFiles: (id: string): Promise<any[]> => api.get(`/projects/${id}/files`).then(res => res.data),
     deleteFile: (projectId: string, fileId: string): Promise<{ success: boolean }> => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),

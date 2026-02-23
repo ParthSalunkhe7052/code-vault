@@ -26,6 +26,8 @@ const ProjectWizard = ({
     configData,
     setConfigData,
     uploadProgress,
+    uploadPercent = 0,
+    uploadStage = 'uploading',
     onFileUpload,
     onZipUpload,
     onDeleteFile,
@@ -553,6 +555,8 @@ const ProjectWizard = ({
                         onFileUpload={onFileUpload}
                         onZipUpload={onZipUpload}
                         uploadProgress={uploadProgress}
+                        uploadPercent={uploadPercent}
+                        uploadStage={uploadStage}
                         files={configData.files || []}
                         fileTree={configData.file_tree}
                         onDeleteFile={onDeleteFile}
