@@ -1134,9 +1134,11 @@ class CloudRunner:
                 data_dirs.append(data_dir)
 
         for data_dir in data_dirs:
-            if (self.source_dir / data_dir).exists():
-                cmd.append(f"--include-data-dir={data_dir}={data_dir}")
-                logger.info(f"Including data directory: {data_dir}")
+            source_path = self.source_dir / data_dir
+            if source_path.exists():
+                # Use absolute path for source to ensure Nuitka can find it
+                cmd.append(f"--include-data-dir={source_path}={data_dir}")
+                logger.info(f"Including data directory: {source_path} -> {data_dir}")
 
         # NOTE: Removed --enable-plugin=tk-inter as it significantly slows builds
         # The wrapper code has fallback for when tkinter is not available
