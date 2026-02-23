@@ -365,7 +365,7 @@ fi
         """Create Python-specific build and upload steps."""
         steps = []
 
-        # Linux build step
+        # Linux build step - FIXED: Package entire .dist folder for standalone builds
         linux_build_script = f"""set -e
 if [[ "{target_platforms}" != *"linux"* ]]; then
   echo "[Cloud Build] Skipping Linux build"
@@ -396,29 +396,45 @@ python3 "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_c
 
 cd "./project/source"
 
-if [ -d "build_output_linux" ]; then
-  found_binary=$$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
-  if [ -n "$$found_binary" ]; then
-    cp "$$found_binary" ./
-  fi
-fi
-
 linux_artifacts=""
 linux_status="failed"
 linux_error=""
 
-if [ -f "{output_name}" ]; then
-  chmod +x "{output_name}"
-  tar -czf "{output_name}.tar.gz" "{output_name}"
-  mv "{output_name}.tar.gz" /workspace/
+# Check for standalone output (build_output_linux/{output_name}.dist folder)
+dist_dir="build_output_linux/{output_name}.dist"
+
+if [ -d "$$dist_dir" ]; then
+  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir"
+  # Zip the entire .dist folder with all dependencies (including python dlls)
+  tar -czf "/workspace/{output_name}.tar.gz" -C "build_output_linux" "{output_name}.dist"
   linux_artifacts="{output_name}.tar.gz"
   linux_status="completed"
-  echo "[Cloud Build] Linux artifact ready: $$linux_artifacts"
+  echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (standalone folder with dependencies)"
+elif [ -d "build_output_linux" ]; then
+  # Fallback: Check for onefile mode (single binary)
+  found_binary=$$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
+  if [ -n "$$found_binary" ]; then
+    cp "$$found_binary" ./
+  fi
+  
+  if [ -f "{output_name}" ]; then
+    chmod +x "{output_name}"
+    tar -czf "/workspace/{output_name}.tar.gz" "{output_name}"
+    linux_artifacts="{output_name}.tar.gz"
+    linux_status="completed"
+    echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (onefile binary)"
+  else
+    if [ -f "error_message.txt" ]; then
+      linux_error=$$(cat error_message.txt)
+    else
+      linux_error="Linux build output '{output_name}' not found"
+    fi
+  fi
 else
   if [ -f "error_message.txt" ]; then
     linux_error=$$(cat error_message.txt)
   else
-    linux_error="Linux build output '{output_name}' not found"
+    linux_error="Linux build output directory not found"
   fi
 fi
 
@@ -462,7 +478,7 @@ gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/lin
             }
         )
 
-        # Windows build step
+        # Windows build step - FIXED: Package entire .dist folder for standalone builds
         windows_build_script = f"""set -e
 if [[ "{target_platforms}" != *"windows"* ]]; then
   echo "[Cloud Build] Skipping Windows build"
@@ -492,33 +508,65 @@ fi
 decoded_config=$$(cat /workspace/config.json)
 wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))"
 
-found_exe=""
-if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
-  found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
-else
-  found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
-fi
-
 windows_artifacts=""
 windows_status="failed"
 windows_error=""
 
-if [ -n "$$found_exe" ] && [ -f "$$found_exe" ]; then
-  exe_size=$$(ls -lh "$$found_exe" | awk '{{print $$5}}')
-  echo "[Cloud Build] EXE size: $$exe_size"
-  cp "$$found_exe" "/workspace/{output_name}.exe"
-  if [ -f "/workspace/{output_name}.exe" ]; then
-    windows_artifacts="{output_name}.exe"
+# Check for standalone output (build_output_windows_wine/{output_name}.dist folder)
+dist_dir="./project/source/build_output_windows_wine/{output_name}.dist"
+
+if [ -d "$$dist_dir" ]; then
+  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir"
+  # List contents for debugging
+  echo "[Cloud Build] .dist folder contents:"
+  ls -la "$$dist_dir/" 2>/dev/null || true
+  
+  # Zip the entire .dist folder with all dependencies (including python311.dll)
+  cd ./project/source/build_output_windows_wine
+  tar -czf "/workspace/{output_name}.tar.gz" "{output_name}.dist"
+  cd /workspace
+  
+  if [ -f "/workspace/{output_name}.tar.gz" ]; then
+    archive_size=$$(ls -lh "/workspace/{output_name}.tar.gz" | awk '{{print $$5}}')
+    echo "[Cloud Build] Archive size: $$archive_size"
+    windows_artifacts="{output_name}.tar.gz"
     windows_status="completed"
-    echo "[Cloud Build] Windows artifact ready: $$windows_artifacts"
+    echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (standalone folder with dependencies)"
   else
-    windows_error="Failed to copy EXE to artifacts"
+    windows_error="Failed to create tar.gz from .dist folder"
   fi
 else
-  if [ -f "./project/source/error_message.txt" ]; then
-    windows_error=$$(cat ./project/source/error_message.txt)
+  # Fallback: Check for onefile mode (single EXE)
+  echo "[Cloud Build] No .dist folder found, checking for onefile EXE..."
+  found_exe=""
+  
+  if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
+    found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
+    echo "[Cloud Build] Found onefile EXE: $$found_exe"
   else
-    windows_error="Windows EXE not found in build output"
+    found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
+    if [ -n "$$found_exe" ]; then
+      echo "[Cloud Build] Found EXE: $$found_exe"
+    fi
+  fi
+
+  if [ -n "$$found_exe" ] && [ -f "$$found_exe" ]; then
+    exe_size=$$(ls -lh "$$found_exe" | awk '{{print $$5}}')
+    echo "[Cloud Build] EXE size: $$exe_size"
+    cp "$$found_exe" "/workspace/{output_name}.exe"
+    if [ -f "/workspace/{output_name}.exe" ]; then
+      windows_artifacts="{output_name}.exe"
+      windows_status="completed"
+      echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (self-contained onefile EXE)"
+    else
+      windows_error="Failed to copy EXE to artifacts"
+    fi
+  else
+    if [ -f "./project/source/error_message.txt" ]; then
+      windows_error=$$(cat ./project/source/error_message.txt)
+    else
+      windows_error="Windows EXE not found in build output"
+    fi
   fi
 fi
 
