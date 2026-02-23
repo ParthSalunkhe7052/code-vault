@@ -116,7 +116,9 @@ def find_artifact_in_gcs(build_id: str, platform: str) -> Optional[Tuple[str, st
         blobs = list(bucket.list_blobs(prefix=prefix, max_results=20))
 
         # Priority order for different artifact types
-        extensions_priority = [".exe", ".zip", ".tar.gz", ""]
+        # .tar.gz is preferred for Python builds (contains .dist folder with all DLLs)
+        # .exe is for onefile builds or Node.js builds
+        extensions_priority = [".tar.gz", ".exe", ".zip", ""]
 
         for ext in extensions_priority:
             for blob in blobs:
@@ -148,9 +150,13 @@ def get_artifact_filename_priority(
     """Get prioritized list of possible artifact filenames.
 
     Order based on:
-    - Language (nodejs -> exe/binary, python -> exe/tar.gz)
-    - Platform (windows -> exe, linux -> binary/tar.gz)
-    - Build type (onefile is now default)
+    - Language (nodejs -> exe/binary, python -> tar.gz with dependencies)
+    - Platform (windows -> tar.gz/exe, linux -> tar.gz/binary)
+    - Build type (standalone -> tar.gz with .dist folder, onefile -> single exe)
+
+    For Python builds:
+    - Standalone mode (default): Creates .tar.gz containing .dist folder with all DLLs
+    - Onefile mode: Creates single .exe (but has higher AV false positive risk)
     """
     filenames = []
 
@@ -158,6 +164,8 @@ def get_artifact_filename_priority(
         if language == "nodejs":
             filenames.append(f"{output_name}.exe")
         else:
+            # Python builds: .tar.gz contains .dist folder with all dependencies (python311.dll, etc.)
+            filenames.append(f"{output_name}.tar.gz")
             filenames.append(f"{output_name}.exe")
             filenames.append(f"{output_name}-windows.zip")
             filenames.append(f"{output_name}.zip")
@@ -166,6 +174,7 @@ def get_artifact_filename_priority(
             filenames.append(f"{output_name}")
             filenames.append(f"{output_name}.bin")
         else:
+            # Python builds: .tar.gz contains .dist folder with all dependencies
             filenames.append(f"{output_name}.tar.gz")
             filenames.append(f"{output_name}-linux.tar.gz")
             filenames.append(f"{output_name}")
