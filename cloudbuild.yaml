@@ -148,13 +148,19 @@ steps:
 
         echo "[Cloud Build] ===== Building for Linux (6 parallel jobs, standalone mode) ====="
 
+        # Ensure artifacts directory exists
+        mkdir -p /workspace/artifacts
+
         # Pre-installed in codevault-builder image: patchelf, build-essential, ccache, python3-tk, python3-dev
         # Install Nuitka with pinned version for consistency
         pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
 
         if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
-          echo "cloud_runner.py not found" > ./project/source/error_message.txt
-          echo "failed" > /workspace/build_status_linux
+          echo "cloud_runner.py not found in source package" > ./project/source/error_message.txt
+          echo "failed" > /workspace/artifacts/build_status_linux
+          echo "" > /workspace/artifacts/linux_artifacts
+          echo "cloud_runner.py not found in source package" > /workspace/artifacts/linux_error
+          echo "[Cloud Build] ERROR: cloud_runner.py not found!"
           exit 0
         fi
 
@@ -319,14 +325,20 @@ steps:
 
         echo "[Cloud Build] ===== Building for Windows ====="
 
+        # Ensure artifacts directory exists
+        mkdir -p /workspace/artifacts
+
         export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
         mkdir -p $$NUITKA_CACHE_DIR
 
         wine python -m pip install --upgrade --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography pefile
 
         if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
-          echo "cloud_runner.py not found" > ./project/source/error_message.txt
-          echo "failed" > /workspace/build_status_windows
+          echo "cloud_runner.py not found in source package" > ./project/source/error_message.txt
+          echo "failed" > /workspace/artifacts/build_status_windows
+          echo "" > /workspace/artifacts/windows_artifacts
+          echo "cloud_runner.py not found in source package" > /workspace/artifacts/windows_error
+          echo "[Cloud Build] ERROR: cloud_runner.py not found!"
           exit 0
         fi
 
@@ -338,7 +350,25 @@ steps:
         fi
 
         decoded_config=$$(cat /workspace/config.json)
-        wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))"
+        
+        echo "[Cloud Build] Running cloud_runner.py for Windows build..."
+        echo "[Cloud Build] Source directory: $$(realpath ./project/source)"
+        
+        # Run cloud_runner.py and capture exit code
+        # Note: winepath -w converts Unix path to Windows path for Wine
+        set +e  # Temporarily disable exit on error to capture the exit code
+        wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))" 2>&1
+        runner_exit_code=$?
+        set -e  # Re-enable exit on error
+        
+        if [ $$runner_exit_code -ne 0 ]; then
+          echo "[Cloud Build] ERROR: cloud_runner.py exited with code $$runner_exit_code"
+          echo "Build runner failed with exit code $$runner_exit_code" > ./project/source/error_message.txt
+        fi
+        
+        # Debug: Show build output directory contents
+        echo "[Cloud Build] Build output directory contents:"
+        ls -la ./project/source/build_output_windows_wine 2>/dev/null || echo "No build output directory found"
 
         output_name="${_OUTPUT_NAME}"
         echo "[Cloud Build] Looking for Windows build output..."
@@ -720,8 +750,13 @@ steps:
         echo "[Cloud Build] DEBUG: Artifacts directory contents:"
         ls -la /workspace/artifacts/ 2>/dev/null || echo "Artifacts dir not found"
         
-        # Download config for language detection
-        gsutil cp "gs://codevault-builds/builds/${_BUILD_ID}/config.json" /workspace/config.json 2>/dev/null || echo "Config not found"
+        # Config was already downloaded to /workspace/config.json in Step #3 from R2
+        # No need to download from GCS - just check if it exists locally
+        if [ -f /workspace/config.json ]; then
+          echo "[Cloud Build] Config found locally (downloaded from R2 in Step #3)"
+        else
+          echo "[Cloud Build] Config not found locally"
+        fi
 
         # Read status files - check both Python and Node.js build outputs
         linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
