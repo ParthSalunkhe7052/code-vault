@@ -48,6 +48,7 @@ from routes.cloud_build_utils import (
     validate_safe_path,
     generate_gcs_signed_url,
 )
+from cloud_build_integration import CloudBuildClient
 
 logger = logging.getLogger(__name__)
 
@@ -524,12 +525,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
     conn = None
     try:
         # Always use Cloud Build API client (supports Workload Identity on Heroku)
-        import sys
-
-        scripts_path = Path(__file__).parent.parent.parent / "scripts"
-        if str(scripts_path) not in sys.path:
-            sys.path.insert(0, str(scripts_path))
-        from cloud_build_integration import CloudBuildClient
+        # CloudBuildClient imported at top of file
 
         logger.info("[CloudBuild] Using Cloud Build API client")
 
@@ -588,8 +584,7 @@ async def trigger_cloud_build(build_id: str, config: dict, source_dir: Path) -> 
             "config_url": config_url,
             "config": config,
             "output_name": config.get("output_name", "app"),
-            # Use direct Heroku URL for webhook (custom domain may have DNS issues)
-            "callback_url": "https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook",
+            "callback_url": f"{public_api_url}/api/v1/cloud-build/webhook",
             "callback_secret": BUILD_CALLBACK_SECRET or "",
             "plan_tier": config.get("plan_tier", "free"),
             "compatibility_mode": config.get("compatibility_mode", False),
@@ -867,11 +862,15 @@ async def start_cloud_build(
         # Fallback chain: PUBLIC_API_URL env -> Heroku default URL
         public_api_url = os.getenv("PUBLIC_API_URL", "")
         if not public_api_url or "localhost" in public_api_url:
-            # Use Heroku production URL as fallback for cloud builds
-            public_api_url = "https://code-vault-b66848f67c75.herokuapp.com"
-            logger.info(
-                f"[CloudBuild] Using production API URL for cloud build: {public_api_url}"
+            # SECURITY: Require PUBLIC_API_URL to be set properly for cloud builds
+            logger.warning(
+                "[CloudBuild] PUBLIC_API_URL not set or is localhost - cloud build license validation may fail"
             )
+            if ENVIRONMENT == "production":
+                raise HTTPException(
+                    500,
+                    "PUBLIC_API_URL must be configured for cloud builds in production",
+                )
 
         config = {
             "project_id": request.project_id,
@@ -1595,13 +1594,6 @@ async def get_build_status(
             and build["status"] in ["pending", "queued", "running"]
         ):
             try:
-                import sys
-
-                if sys.platform == "win32":
-                    from cloud_build_integration import CloudBuildClient
-                else:
-                    from cloud_build_integration import CloudBuildClient
-
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
 
@@ -1990,8 +1982,6 @@ async def sync_build_status(
                 "synced": False,
             }
 
-        from cloud_build_integration import CloudBuildClient
-
         cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
         gcp_status = cloud_build.get_build_status(remote_build_id)
 
@@ -2141,8 +2131,6 @@ async def gcp_direct_sync(
         # Try to get status from GCP if we have the build ID
         if remote_build_id:
             try:
-                from cloud_build_integration import CloudBuildClient
-
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
                 real_gcp_status = gcp_status.get("status", "")
@@ -2368,13 +2356,6 @@ async def cancel_cloud_build(
         # First, sync with Cloud Build to get real status
         if remote_build_id:
             try:
-                import sys
-
-                if sys.platform == "win32":
-                    from cloud_build_integration import CloudBuildClient
-                else:
-                    from cloud_build_integration import CloudBuildClient
-
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 gcp_status = cloud_build.get_build_status(remote_build_id)
 
@@ -2435,13 +2416,6 @@ async def cancel_cloud_build(
         # Cancel Cloud Build job if running
         if remote_build_id:
             try:
-                import sys
-
-                if sys.platform == "win32":
-                    from cloud_build_integration import CloudBuildClient
-                else:
-                    from cloud_build_integration import CloudBuildClient
-
                 cloud_build = CloudBuildClient(project_id=GCP_PROJECT_ID)
                 cloud_build.cancel_build(remote_build_id)
                 logger.info(
