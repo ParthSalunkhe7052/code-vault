@@ -196,6 +196,15 @@ if ENVIRONMENT == "production":
             "CORS_ALLOW_ALL=true is insecure in production. Use specific origins."
         )
 
+# O7 FIX: Also warn loudly in staging — staging environments often share
+# production-equivalent secrets or data, so wildcard CORS is equally dangerous.
+if ENVIRONMENT == "staging" and CORS_ALLOW_ALL:
+    import logging as _cfg_log
+    _cfg_log.getLogger(__name__).warning(
+        "[Config] CORS_ALLOW_ALL=true in staging is insecure. "
+        "Staging may share secrets with production — use specific origins."
+    )
+
 # Warn in development, fail in production
 if config_issues:
     if ENVIRONMENT == "production":
@@ -376,6 +385,7 @@ WEBHOOK_EVENTS = [
     "license.expired",
     "hwid.bound",
     "hwid.reset",
+    "hwid.suspicious",
     "compilation.started",
     "compilation.completed",
     "compilation.failed",

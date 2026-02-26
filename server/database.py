@@ -76,13 +76,26 @@ async def init_database_with_retry():
                 ssl_ctx.load_verify_locations(ca_path)
             # check_hostname and CERT_REQUIRED are the defaults from create_default_context
         else:
+            if ENVIRONMENT == "production":
+                # H1 FIX: Refuse to start in production with certificate verification
+                # disabled — a MITM attacker can impersonate the database and read all
+                # license keys, credentials, and subscription data in transit.
+                # To allow CERT_NONE in production (NOT recommended), set
+                # DB_SSL_ALLOW_INSECURE=true in your environment variables.
+                if os.getenv("DB_SSL_ALLOW_INSECURE", "false").lower() != "true":
+                    raise ValueError(
+                        "[Database] CRITICAL: SSL certificate verification (CERT_NONE) is "
+                        "disabled in production. This allows man-in-the-middle attacks on the "
+                        "database connection. Set DB_SSL_VERIFY=true and DB_SSL_CA_PATH to a "
+                        "valid CA bundle, or set DB_SSL_ALLOW_INSECURE=true to override (not "
+                        "recommended)."
+                    )
+                logger.warning(
+                    "[Database] SSL certificate verification is DISABLED (CERT_NONE) in "
+                    "production. This was explicitly allowed via DB_SSL_ALLOW_INSECURE=true."
+                )
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = ssl_module.CERT_NONE
-            if ENVIRONMENT == "production":
-                logger.warning(
-                    "[Database] SSL certificate verification is DISABLED (CERT_NONE). "
-                    "Set DB_SSL_VERIFY=true and DB_SSL_CA_PATH for production hardening."
-                )
         pool_kwargs["ssl"] = ssl_ctx
 
     # Retry loop for initial connection
