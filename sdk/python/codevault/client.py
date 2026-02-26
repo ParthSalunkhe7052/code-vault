@@ -48,8 +48,75 @@ class CodeVaultClient:
         atexit.register(self.release)
 
     def _get_hwid(self) -> str:
-        """Generate a stable hardware ID."""
-        info = f"{platform.node()}|{platform.machine()}|{platform.processor()}"
+        """Generate a stable multi-factor hardware ID.
+
+        Algorithm matches the compiled binary wrapper (unified_license_wrapper.py)
+        to ensure the same HWID is produced whether validating via the SDK during
+        development or running the compiled executable in production.
+
+        Factors (in order, all prefixed):
+          mac:  First non-loopback MAC address
+          disk: Windows disk serial via wmic (Windows only)
+          mb:   Windows motherboard serial via wmic (Windows only)
+          cpu:  CPU processor string (first 32 chars)
+
+        Falls back to node|system|machine if no components can be collected.
+        """
+        import subprocess
+        import uuid
+        import re
+
+        components = []
+
+        # MAC address
+        try:
+            mac_int = uuid.getnode()
+            mac = ":".join(re.findall("..", "%012x" % mac_int))
+            components.append(f"mac:{mac}")
+        except Exception:
+            pass
+
+        # Windows-only: disk serial + motherboard serial via wmic
+        if platform.system() == "Windows":
+            try:
+                result = subprocess.run(
+                    ["wmic", "diskdrive", "get", "serialnumber"],
+                    capture_output=True, text=True, timeout=5
+                )
+                lines = result.stdout.strip().split("\n")
+                if len(lines) > 1:
+                    disk_serial = lines[1].strip()
+                    if disk_serial and disk_serial != "SerialNumber":
+                        components.append(f"disk:{disk_serial}")
+            except Exception:
+                pass
+
+            try:
+                result = subprocess.run(
+                    ["wmic", "baseboard", "get", "serialnumber"],
+                    capture_output=True, text=True, timeout=5
+                )
+                lines = result.stdout.strip().split("\n")
+                if len(lines) > 1:
+                    mb_serial = lines[1].strip()
+                    if mb_serial and mb_serial != "SerialNumber":
+                        components.append(f"mb:{mb_serial}")
+            except Exception:
+                pass
+
+        # CPU processor string
+        try:
+            cpu_id = platform.processor()
+            if cpu_id:
+                components.append(f"cpu:{cpu_id[:32]}")
+        except Exception:
+            pass
+
+        if components:
+            return hashlib.sha256("|".join(components).encode()).hexdigest()[:32]
+
+        # Fallback: matches compiled wrapper fallback
+        info = f"{platform.node()}|{platform.system()}|{platform.machine()}"
         return hashlib.sha256(info.encode()).hexdigest()[:32]
 
     def _verify_signature(self, result: Dict[str, Any]) -> bool:

@@ -7,7 +7,7 @@ This is the new entry point that provides a modern, rich CLI experience.
 import typer
 from codevault_cli import __version__, __description__
 from codevault_cli.console import get_console, print_welcome_banner
-from codevault_cli.commands import auth, projects, system, presets
+from codevault_cli.commands import auth, projects, system
 
 # Create the main Typer app
 app = typer.Typer(
@@ -21,7 +21,6 @@ app = typer.Typer(
 app.add_typer(auth.app, name="auth", help="Authentication commands")
 app.add_typer(projects.app, name="project", help="Project management commands")
 app.add_typer(system.app, name="system", help="System and status commands")
-app.add_typer(presets.app, name="preset", help="Build preset management")
 
 
 @app.callback(invoke_without_command=True)

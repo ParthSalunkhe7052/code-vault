@@ -284,7 +284,7 @@ class BuildConfig:
 
     # Build options
     skip_obfuscation: bool = True
-    pkg_target: str = "node18-win-x64"
+    pkg_target: str = "node20-win-x64"
 
     # Additional files to include
     include_files: list = field(default_factory=list)

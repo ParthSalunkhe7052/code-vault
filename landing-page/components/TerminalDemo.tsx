@@ -6,7 +6,7 @@ const TerminalDemo: React.FC = () => {
   const [lines, setLines] = useState<string[]>([]);
 
   const sequence = [
-    { text: '$ codevault build ./server.js --target node18-win-x64 --lock=hwid', delay: 800 },
+    { text: '$ codevault build ./server.js --target node20-win-x64 --lock=hwid', delay: 800 },
     { text: '> [1/4] Analyzing dependency tree...', delay: 1500 },
     { text: '> [2/4] Encrypting bytecode snapshot...', delay: 2200 },
     { text: '> [3/4] Injecting HWID verification module...', delay: 3000 },

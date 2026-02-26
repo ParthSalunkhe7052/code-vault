@@ -283,9 +283,10 @@ const Step3Configure = memo(({
                                 onChange={(e) => setNodeTarget(e.target.value)}
                                 className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
                             >
-                                <option value="node18-win-x64">Windows x64 (Node 18)</option>
-                                <option value="node20-win-x64">Windows x64 (Node 20)</option>
-                                <option value="node18-linux-x64">Linux x64 (Node 18)</option>
+                                <option value="node20-win-x64">Windows x64 (Node 20 LTS)</option>
+                                <option value="node20-linux-x64">Linux x64 (Node 20 LTS)</option>
+                                <option value="node22-win-x64">Windows x64 (Node 22)</option>
+                                <option value="node22-linux-x64">Linux x64 (Node 22)</option>
                             </select>
                         </div>
                     )}

@@ -75,7 +75,7 @@ export interface NuitkaOptions {
 }
 
 export interface CompilerOptions {
-  target?: string; // e.g., "node18-win-x64"
+  target?: string; // e.g., "node20-win-x64"
 }
 
 export interface ProjectFile {

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 
 /**
  * Modal Component with Accessibility Features
@@ -90,77 +89,65 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
         return () => document.removeEventListener('keydown', handleKeyDown);
     }, [isOpen, onClose]);
 
+    if (!isOpen) return null;
+
     return createPortal(
-        <AnimatePresence>
-            {isOpen && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4
-                        bg-black/70 backdrop-blur-md"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="modal-title"
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4
+                bg-black/70 backdrop-blur-md transition-opacity duration-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+        >
+            {/* Click outside to close */}
+            <div
+                className="absolute inset-0"
+                onClick={onClose}
+                aria-hidden="true"
+            />
+
+            <div
+                ref={modalRef}
+                className={`
+                    relative ${sizes[size]} w-full
+                    rounded-2xl shadow-2xl shadow-black/50 overflow-hidden
+                    flex flex-col max-h-[85vh]
+                    transition-all duration-200
+                `}
+                style={{
+                    backgroundColor: 'var(--cv-card-solid)',
+                    border: '1px solid var(--cv-border)'
+                }}
+            >
+                {/* Header with gradient */}
+                <div
+                    className="flex items-center justify-between p-5 shrink-0"
+                    style={{
+                        borderBottom: '1px solid var(--cv-border)',
+                        background: 'linear-gradient(to right, var(--cv-border-subtle), transparent)'
+                    }}
                 >
-                    {/* Click outside to close */}
-                    <motion.div
-                        className="absolute inset-0"
+                    <h3 id="modal-title" className="font-bold text-lg" style={{ color: 'var(--cv-text)' }}>
+                        {title}
+                    </h3>
+                    <button
                         onClick={onClose}
-                        aria-hidden="true"
-                    />
-
-                    <motion.div
-                        ref={modalRef}
-                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                        transition={{ 
-                            duration: 0.3, 
-                            ease: [0.4, 0, 0.2, 1]
-                        }}
-                        className={`
-                            relative ${sizes[size]} w-full
-                            rounded-2xl shadow-2xl shadow-black/50 overflow-hidden
-                            flex flex-col max-h-[85vh]
-                        `}
+                        className="p-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-70"
                         style={{
-                            backgroundColor: 'var(--cv-card-solid)',
-                            border: '1px solid var(--cv-border)'
+                            color: 'var(--cv-text-muted)',
+                            '--tw-ring-color': 'var(--cv-accent, currentColor)',
                         }}
+                        aria-label="Close modal"
                     >
-                        {/* Header with gradient */}
-                        <div
-                            className="flex items-center justify-between p-5 shrink-0"
-                            style={{
-                                borderBottom: '1px solid var(--cv-border)',
-                                background: 'linear-gradient(to right, var(--cv-border-subtle), transparent)'
-                            }}
-                        >
-                            <h3 id="modal-title" className="font-bold text-lg" style={{ color: 'var(--cv-text)' }}>
-                                {title}
-                            </h3>
-                            <button
-                                onClick={onClose}
-                                className="p-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-70"
-                                style={{
-                                    color: 'var(--cv-text-muted)',
-                                    '--tw-ring-color': 'var(--cv-accent, currentColor)',
-                                }}
-                                aria-label="Close modal"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
+                        <X size={18} />
+                    </button>
+                </div>
 
-                        <div className="p-6 overflow-y-auto custom-scrollbar">
-                            {children}
-                        </div>
-                    </motion.div>
-                </motion.div>
-            )}
-        </AnimatePresence>,
+                <div className="p-6 overflow-y-auto custom-scrollbar">
+                    {children}
+                </div>
+            </div>
+        </div>,
         document.body
     );
 };

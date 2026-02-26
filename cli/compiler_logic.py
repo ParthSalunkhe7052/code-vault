@@ -769,7 +769,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
     else:
         target = compiler_opts.get("target", "node20-win-x64")
 
-    # Validate target format (should be like node18-win-x64)
+    # Validate target format (should be like node20-win-x64)
     if not re.match(r"^node\d+-[a-z]+-[a-z0-9]+$", target):
         color_print(f"[ERROR] Invalid target format: {target}", Colors.RED)
         return False, None

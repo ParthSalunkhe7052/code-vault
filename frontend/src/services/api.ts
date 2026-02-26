@@ -352,11 +352,12 @@ export const publicStore = {
     getLicensePortal: (licenseKey: string): Promise<any> => publicApi.get(`/public/license/${licenseKey}`).then(res => res.data),
 };
 
-// Trial Build API
+// Demo Build API (time-limited trial binaries — unlimited for all tiers)
 export const trialBuilds = {
     validate: (projectId: string, demoDurationMinutes: number = 60): Promise<{
         allowed: boolean;
         trial_builds_remaining: number;
+        trial_builds_limit: number;
         trial_token?: string;
         tier: string;
     }> => api.post('/builds/trial/validate', { project_id: projectId, demo_duration_minutes: demoDurationMinutes }).then(res => res.data),
@@ -367,7 +368,6 @@ export const trialBuilds = {
     getStatus: (): Promise<{
         tier: string;
         trial_builds_limit: number;
-        trial_builds_used: number;
         trial_builds_remaining: number;
         unlimited: boolean;
     }> => api.get('/builds/trial/status').then(res => res.data),
