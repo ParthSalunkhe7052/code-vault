@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 import shutil
@@ -540,43 +541,65 @@ async def upload_project_zip(
 
         zip_path = safe_join(project_dir, "project.zip")
 
-        # Stream upload for large files - process in chunks to avoid memory issues
-        CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+        # Stream upload for large files - process in chunks to avoid memory issues.
+        # Chunks are collected in memory as they arrive (async network I/O), then
+        # flushed to disk once in a thread so the event loop is never blocked by
+        # synchronous file-write syscalls.
+        CHUNK_SIZE = 1024 * 1024  # 1 MB chunks
         total_size = 0
+        collected_chunks: list[bytes] = []
 
-        with open(zip_path, "wb") as f:
-            while chunk := await file.read(CHUNK_SIZE):
-                total_size += len(chunk)
-                # Validate size as we go
-                is_valid, error_msg = validate_file_size(total_size, is_zip=True)
-                if not is_valid:
-                    f.close()
-                    zip_path.unlink(missing_ok=True)
-                    raise HTTPException(status_code=400, detail=error_msg)
-                f.write(chunk)
+        while chunk := await file.read(CHUNK_SIZE):
+            total_size += len(chunk)
+            is_valid, error_msg = validate_file_size(total_size, is_zip=True)
+            if not is_valid:
+                zip_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=400, detail=error_msg)
+            collected_chunks.append(chunk)
+
+        # Write to disk off the event loop so synchronous I/O doesn't block it.
+        def _write_zip() -> None:
+            with open(zip_path, "wb") as fh:
+                for c in collected_chunks:
+                    fh.write(c)
+
+        await asyncio.to_thread(_write_zip)
+        del collected_chunks  # Release memory immediately
 
         source_dir = safe_join(project_dir, "source")
-        if source_dir.exists():
-            shutil.rmtree(source_dir)
 
-        # Invalidate cached source in R2 to ensure fresh builds
-        await invalidate_cached_source(project_id)
+        # Remove old source tree and invalidate R2 cache concurrently — neither
+        # depends on the other.
+        async def _remove_old_source() -> None:
+            if source_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, source_dir)
+
+        await asyncio.gather(
+            _remove_old_source(),
+            invalidate_cached_source(project_id),
+        )
 
         source_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                # Validate all paths to prevent Zip Slip vulnerability
-                for member in zip_ref.namelist():
-                    member_path = (source_dir / member).resolve()
-                    if not str(member_path).startswith(str(source_dir.resolve())):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Invalid ZIP: contains path traversal attempt",
-                        )
-                zip_ref.extractall(source_dir)
-        except zipfile.BadZipFile:
-            raise HTTPException(status_code=400, detail="Invalid ZIP file")
+        # Validate Zip Slip and extract in a single pass — offloaded to a thread
+        # so the event loop is free while the OS performs the disk writes.
+        def _validate_and_extract() -> None:
+            """Validate ZIP paths (Zip Slip prevention) and extract in one pass."""
+            resolved_source = str(source_dir.resolve())
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    for member in zip_ref.infolist():
+                        member_path = (source_dir / member.filename).resolve()
+                        if not str(member_path).startswith(resolved_source):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Invalid ZIP: contains path traversal attempt",
+                            )
+                        zip_ref.extract(member, source_dir)
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+        await asyncio.to_thread(_validate_and_extract)
 
         language = (
             project.get("language", "python")
@@ -584,10 +607,13 @@ async def upload_project_zip(
             else project["language"]
         )
 
+        # Run the filesystem scan off the event loop — it is CPU/I/O bound.
         if language == "nodejs":
-            file_tree = scan_nodejs_project_structure(source_dir)
+            file_tree = await asyncio.to_thread(
+                scan_nodejs_project_structure, source_dir
+            )
         else:
-            file_tree = scan_project_structure(source_dir)
+            file_tree = await asyncio.to_thread(scan_project_structure, source_dir)
 
         if file_tree["total_files"] == 0:
             lang_name = "JavaScript/TypeScript" if language == "nodejs" else "Python"
@@ -612,7 +638,9 @@ async def upload_project_zip(
             project_id,
         )
 
-        zip_path.unlink()
+        # Remove the zip archive off the event loop (small unlink syscall,
+        # but keeps the pattern consistent and avoids any stall on slow storage).
+        await asyncio.to_thread(zip_path.unlink, True)
 
         return {
             "success": True,
