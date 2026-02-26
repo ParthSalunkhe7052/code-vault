@@ -350,46 +350,88 @@ def create_jwt_token(user_id: str, email: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+_REDIS_UNAVAILABLE_WARNED = False
+
+
 async def _is_jwt_blacklisted(jti: str) -> bool:
-    """Check if a JWT's jti is in the Redis blacklist."""
+    """Check if a JWT's jti is in the Redis blacklist.
+
+    H2 FIX (previous): If Redis is unavailable, fail CLOSED — treat the token
+    as blacklisted to prevent revoked tokens from regaining access during a
+    Redis outage.
+
+    C4 FIX: The standard Redis fallback previously called aioredis.from_url()
+    on every single authenticated request, creating and immediately closing a
+    TCP connection pool each time.  We now prefer the shared _redis_client from
+    rate_limiter.py (initialised once at startup) to avoid per-request
+    connection churn.  The Upstash REST path is unchanged (it is HTTP-based and
+    stateless — constructing the thin client object is negligible).
+    """
+    global _REDIS_UNAVAILABLE_WARNED
+    import logging as _log
+
     from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, REDIS_URL
 
     if not jti:
         return False
 
-    # Try Upstash REST API first
+    # Try Upstash REST API first (HTTP-based, no persistent connection)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
             from upstash_redis.asyncio import Redis
             r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
             result = await r.get(f"jwt_blacklist:{jti}")
+            _REDIS_UNAVAILABLE_WARNED = False  # reset on success
             return result is not None
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning(f"[JWT Blacklist] Upstash unavailable, failing CLOSED: {e}")
+            return True  # Fail closed: treat as blacklisted
 
-    # Fallback to standard Redis
+    # C4 FIX: Reuse the shared connection pool from rate_limiter instead of
+    # opening a new TCP connection for every request.
     if REDIS_URL:
         try:
+            from middleware.rate_limiter import get_redis_client
+            shared_client = await get_redis_client()
+            if shared_client is not None:
+                result = await shared_client.get(f"jwt_blacklist:{jti}")
+                _REDIS_UNAVAILABLE_WARNED = False
+                return result is not None
+            # Shared client not yet initialised — fall back to direct connection
             import redis.asyncio as aioredis
             r = aioredis.from_url(REDIS_URL)
             result = await r.get(f"jwt_blacklist:{jti}")
             await r.close()
+            _REDIS_UNAVAILABLE_WARNED = False
             return result is not None
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning(f"[JWT Blacklist] Redis unavailable, failing CLOSED: {e}")
+            return True  # Fail closed: treat as blacklisted
 
+    # No Redis configured — cannot check blacklist.
+    # Log a one-time warning and fail open (best-effort without Redis).
+    if not _REDIS_UNAVAILABLE_WARNED:
+        _log.warning(
+            "[JWT Blacklist] No Redis configured. Token revocation (logout blacklist) "
+            "is DISABLED. Configure REDIS_URL or UPSTASH_REDIS_REST_URL to enable it."
+        )
+        _REDIS_UNAVAILABLE_WARNED = True
     return False
 
 
 async def blacklist_jwt(jti: str, ttl_seconds: int) -> bool:
-    """Add a JWT's jti to the Redis blacklist with TTL."""
+    """Add a JWT's jti to the Redis blacklist with TTL.
+
+    C4 FIX: Reuse the shared rate-limiter Redis pool for the standard Redis
+    path instead of creating a new connection per call.
+    """
     from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, REDIS_URL
     import logging
 
     if not jti or ttl_seconds <= 0:
         return False
 
-    # Try Upstash REST API first
+    # Try Upstash REST API first (HTTP-based, stateless)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
             from upstash_redis.asyncio import Redis
@@ -399,9 +441,15 @@ async def blacklist_jwt(jti: str, ttl_seconds: int) -> bool:
         except Exception as e:
             logging.warning(f"[JWT Blacklist] Upstash error: {e}")
 
-    # Fallback to standard Redis
+    # C4 FIX: Reuse shared connection pool
     if REDIS_URL:
         try:
+            from middleware.rate_limiter import get_redis_client
+            shared_client = await get_redis_client()
+            if shared_client is not None:
+                await shared_client.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)
+                return True
+            # Shared client not available — fall back to direct connection
             import redis.asyncio as aioredis
             r = aioredis.from_url(REDIS_URL)
             await r.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)
@@ -549,13 +597,19 @@ def create_validation_response(
     if private_key_pem:
         signature = compute_ed25519_signature(response_data, private_key_pem)
     else:
-        # HMAC fallback ONLY for legacy projects without Ed25519 keys
-        # This is a security risk - responses can be forged if secret is compromised
+        # HMAC fallback ONLY for legacy projects without Ed25519 keys.
+        # H8 WARNING: All legacy projects that lack an Ed25519 signing key share the
+        # application-wide SECRET_KEY as their HMAC secret. Compromising SECRET_KEY
+        # breaks validation integrity for ALL such projects simultaneously.
+        # Mitigation: migrate projects to Ed25519 keys via the admin Ed25519 migration
+        # endpoint (/api/v1/admin/migrate-ed25519). New projects always get Ed25519 keys.
         import logging as _log
 
         _log.getLogger(__name__).warning(
-            "[SECURITY] HMAC fallback used for validation response. "
-            "Migrate this project to Ed25519 signing for stronger security."
+            "[SECURITY H8] HMAC fallback used for license validation response — this "
+            "project has no Ed25519 signing key. All HMAC-signed projects share the "
+            "global SECRET_KEY; a single key compromise breaks all legacy projects. "
+            "Migrate via POST /api/v1/admin/migrate-ed25519."
         )
         active_secret = secret or SECRET_KEY
         signature = compute_signature(response_data, active_secret)
@@ -599,6 +653,11 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
 
     redis_key = f"jti:{license_key}:{jti}"
 
+    # O3 FIX: Use SET key value EX ttl NX (set-if-not-exists) for an atomic
+    # check-and-store. The previous EXISTS + SETEX pair had a TOCTOU window where
+    # two concurrent requests with the same jti could both pass the check before
+    # either stored it.  SET NX is a single atomic Redis command.
+
     # Prefer Upstash REST API for serverless environments (no TCP connection issues)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
@@ -606,13 +665,11 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
 
             r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
 
-            # Check if jti exists (replay attack)
-            exists = await r.exists(redis_key)
-            if exists:
+            # SET NX: returns True if key was newly set (jti not seen before),
+            # False if key already existed (replay attack).
+            was_set = await r.set(redis_key, "1", ex=RESPONSE_MAX_AGE_SECONDS, nx=True)
+            if not was_set:
                 return False, "Replay attack detected: jti already used"
-
-            # Store jti with TTL
-            await r.setex(redis_key, str(RESPONSE_MAX_AGE_SECONDS), "1")
             return True, ""
         except ImportError:
             logging.warning(
@@ -620,7 +677,7 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
             )
         except Exception as e:
             logging.error(f"[Security] Upstash REST API error: {e}")
-            # Don't fail on Redis errors - log and continue
+            # Don't fail license validation on Redis errors — log and continue
             return True, ""
 
     # Fallback to traditional Redis connection
@@ -633,20 +690,14 @@ async def check_and_store_jti(jti: str, license_key: str) -> tuple[bool, str]:
 
         r = redis.from_url(REDIS_URL)
 
-        # Check if jti exists (replay attack)
-        exists = await r.exists(redis_key)
-        if exists:
-            await r.close()
-            return False, "Replay attack detected: jti already used"
-
-        # Store jti with TTL
-        await r.setex(redis_key, RESPONSE_MAX_AGE_SECONDS, "1")
+        # SET NX atomic check-and-store
+        was_set = await r.set(redis_key, "1", ex=RESPONSE_MAX_AGE_SECONDS, nx=True)
         await r.close()
+        if not was_set:
+            return False, "Replay attack detected: jti already used"
         return True, ""
     except Exception as e:
         logging.error(f"[Security] Failed to check jti replay: {e}")
-        # Don't fail license validation on Redis errors - return success
-        # This is a trade-off: better to allow validation than block all users
         logging.warning("[Security] Allowing validation despite Redis error")
         return True, ""
 
@@ -728,10 +779,22 @@ def create_lease_token(
 def validate_lease_token(
     lease_token: str,
     hwid: str,
-    private_key_pem: Optional[str] = None,
+    public_key_pem: Optional[str] = None,
     secret: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Validate a server-signed lease token.
+
+    H3 FIX: Parameter renamed from ``private_key_pem`` to ``public_key_pem``.
+    Lease tokens are *verified* with the Ed25519 **public** key, not signed
+    (signing uses the private key at issuance time in create_lease_token).
+    Passing a private key to Ed25519PublicKey.verify() causes a cryptography
+    library exception and would silently return False in the old code.
+
+    Args:
+        lease_token:    Base64-encoded lease blob returned by create_lease_token.
+        hwid:           Hardware ID of the machine attempting to use the lease.
+        public_key_pem: Ed25519 PUBLIC key PEM for Ed25519-signed leases.
+        secret:         HMAC shared secret for legacy leases without Ed25519.
 
     Returns:
         (is_valid, error_message)
@@ -758,8 +821,8 @@ def validate_lease_token(
     if lease_payload.get("hwid") != hwid:
         return False, "HWID mismatch"
 
-    if private_key_pem:
-        is_valid = verify_ed25519_signature(lease_payload, signature, private_key_pem)
+    if public_key_pem:
+        is_valid = verify_ed25519_signature(lease_payload, signature, public_key_pem)
     else:
         active_secret = secret or SECRET_KEY
         is_valid = verify_signature(lease_payload, signature, active_secret)

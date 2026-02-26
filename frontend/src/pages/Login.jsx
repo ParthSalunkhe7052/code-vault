@@ -1,11 +1,94 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail } from 'lucide-react';
+import { Activity, ArrowRight, Loader2, Lock, Hexagon, Mail, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 
 // Email validation regex (module-level constant — no need to recreate per render)
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ---------------------------------------------------------------------------
+// ForgotPasswordModal — self-service password reset request
+// Rendered as an inline overlay, no dependency on react-router or auth context
+// ---------------------------------------------------------------------------
+const ForgotPasswordModal = ({ onClose }) => {
+    const toast = useToast();
+    const [email, setEmail] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [sent, setSent] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!emailRegex.test(email)) {
+            toast.error('Please enter a valid email address');
+            return;
+        }
+        setLoading(true);
+        try {
+            await api.post('/auth/forgot-password', { email: email.trim() });
+        } catch {
+            // Swallow errors — always show success to avoid email enumeration
+        } finally {
+            setLoading(false);
+            setSent(true);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="glass-card w-full max-w-sm p-8 relative animate-scale-in">
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 text-cv-text-dim hover:text-cv-text transition-colors"
+                    aria-label="Close"
+                >
+                    <X size={18} />
+                </button>
+
+                <h2 className="text-lg font-bold text-cv-text mb-2">Reset Password</h2>
+
+                {sent ? (
+                    <div className="space-y-4">
+                        <p className="text-sm text-cv-text-muted">
+                            If an account exists for <span className="text-cv-text font-medium">{email}</span>, a password reset link has been sent. Check your inbox.
+                        </p>
+                        <button onClick={onClose} className="btn-primary w-full">
+                            Back to Login
+                        </button>
+                    </div>
+                ) : (
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <p className="text-sm text-cv-text-muted">
+                            Enter your account email and we&apos;ll send a reset link.
+                        </p>
+                        <div className="flex items-center gap-3">
+                            <Mail size={18} className="text-cv-text-muted shrink-0" />
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="your@email.com"
+                                required
+                                className="input flex-1 w-auto text-sm"
+                                autoFocus
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="btn-primary w-full flex items-center justify-center gap-2"
+                        >
+                            {loading ? <Loader2 size={16} className="animate-spin" /> : 'Send Reset Link'}
+                        </button>
+                    </form>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// ---------------------------------------------------------------------------
 
 const Login = () => {
     const toast = useToast();
@@ -16,6 +99,9 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [isRegisterMode, setIsRegisterMode] = useState(false);
+    const [showForgotPassword, setShowForgotPassword] = useState(false);
+    // Track which fields the user has touched so we only show errors after interaction
+    const [touched, setTouched] = useState({ email: false, password: false, name: false });
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -28,7 +114,7 @@ const Login = () => {
         setError('');
     }, [location.pathname, location.search]);
 
-    // Validate inputs (real-time feedback)
+    // Validate inputs — only compute, don't display until touched
     const validation = useMemo(() => {
         const errors = [];
 
@@ -50,6 +136,14 @@ const Login = () => {
             disabled: errors.length > 0 || loading
         };
     }, [email, password, name, isRegisterMode, loading]);
+
+    // Only show real-time hints for fields the user has already interacted with
+    const visibleErrors = validation.errors.filter(err => {
+        if (err.includes('email') && !touched.email) return false;
+        if (err.includes('Password') && !touched.password) return false;
+        if (err.includes('Name') && !touched.name) return false;
+        return true;
+    });
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -100,154 +194,165 @@ const Login = () => {
         setEmail('');
         setPassword('');
         setName('');
+        setTouched({ email: false, password: false, name: false });
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-background font-sans selection:bg-primary/30 selection:text-primary-light">
-            {/* Background Effects */}
-            <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/80 to-background pointer-events-none" />
+        <>
+            <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-cv-bg font-sans selection:bg-cv-primary/30 selection:text-cv-text">
+                {/* Background Effects */}
+                <div className="fixed inset-0 bg-grid-pattern opacity-20 pointer-events-none" />
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cv-bg/80 to-cv-bg pointer-events-none" />
 
-            {/* Animated Orbs */}
-            <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-primary/20 rounded-full blur-[120px] animate-pulse duration-[4s]"></div>
-            <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-secondary/20 rounded-full blur-[120px] animate-pulse duration-[5s] delay-1000"></div>
+                {/* Animated Orbs */}
+                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-cv-primary/20 rounded-full blur-[120px] animate-pulse duration-[4s]"></div>
+                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-cv-secondary/20 rounded-full blur-[120px] animate-pulse duration-[5s] delay-1000"></div>
 
-            <div className="w-full max-w-md z-10 p-4 relative">
-                <div className="glass-card p-8 md:p-10 relative overflow-hidden group border-t border-white/10 shadow-2xl">
+                <div className="w-full max-w-md z-10 p-4 relative">
+                    <div className="glass-card p-8 md:p-10 relative overflow-hidden group border-t border-white/10 shadow-2xl">
 
-                    {/* Scanner Effect */}
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50 animate-scan"></div>
+                        {/* Scanner Effect */}
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cv-primary to-transparent opacity-50 animate-scan"></div>
 
-                    <div className="flex flex-col items-center mb-10">
-                        <div className="relative w-20 h-20 mb-6 flex items-center justify-center">
-                            <div className="absolute inset-0 border border-primary/30 rounded-full animate-spin-slow"></div>
-                            <div className="absolute inset-2 border border-secondary/30 rounded-full animate-spin-reverse-slower"></div>
-                            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-primary/30 z-10">
-                                <Activity size={28} />
+                        <div className="flex flex-col items-center mb-10">
+                            <div className="relative w-20 h-20 mb-6 flex items-center justify-center">
+                                <div className="absolute inset-0 border border-cv-primary/30 rounded-full animate-spin-slow"></div>
+                                <div className="absolute inset-2 border border-cv-secondary/30 rounded-full animate-spin-reverse-slower"></div>
+                                <div className="w-14 h-14 rounded-xl bg-cv-primary-gradient flex items-center justify-center text-white shadow-lg shadow-cv-primary/30 z-10">
+                                    <Activity size={28} />
+                                </div>
                             </div>
+
+                            <h1 className="text-2xl font-bold text-center text-cv-text tracking-widest uppercase mb-2">
+                                CODEVAULT
+                            </h1>
+                            <p className="text-cv-primary text-[10px] font-mono tracking-[0.3em] uppercase opacity-80">
+                                {isRegisterMode ? 'Create New Account' : 'Secure Access Terminal'}
+                            </p>
                         </div>
 
-                        <h1 className="text-2xl font-bold text-center text-white tracking-widest uppercase mb-2">
-                            CODEVAULT
-                        </h1>
-                        <p className="text-primary text-[10px] font-mono tracking-[0.3em] uppercase opacity-80">
-                            {isRegisterMode ? 'Create New Account' : 'Secure Access Terminal'}
-                        </p>
-                    </div>
+                        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+                            {isRegisterMode && (
+                                <div className="flex items-center gap-4 group/input">
+                                    <div className="text-cv-text-muted group-focus-within/input:text-cv-primary transition-colors">
+                                        <Activity size={20} />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        onBlur={() => setTouched(prev => ({ ...prev, name: true }))}
+                                        className="input flex-1 w-auto text-sm"
+                                        placeholder="Full Name"
+                                        required
+                                    />
+                                </div>
+                            )}
 
-                    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                        {isRegisterMode && (
                             <div className="flex items-center gap-4 group/input">
-                                <div className="text-slate-500 group-focus-within/input:text-primary transition-colors">
-                                    <Activity size={20} />
+                                <div className="text-cv-text-muted group-focus-within/input:text-cv-primary transition-colors">
+                                    <Mail size={20} />
                                 </div>
                                 <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    className="input flex-1 w-auto bg-slate-900/50 border-white/10 focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all text-sm"
-                                    placeholder="Full Name"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    onBlur={() => setTouched(prev => ({ ...prev, email: true }))}
+                                    className="input flex-1 w-auto text-sm"
+                                    placeholder="Email Address"
                                     required
                                 />
                             </div>
-                        )}
 
-                        <div className="flex items-center gap-4 group/input">
-                            <div className="text-slate-500 group-focus-within/input:text-primary transition-colors">
-                                <Mail size={20} />
+                            <div className="flex items-center gap-4 group/input">
+                                <div className="text-cv-text-muted group-focus-within/input:text-cv-primary transition-colors">
+                                    <Lock size={20} />
+                                </div>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    onBlur={() => setTouched(prev => ({ ...prev, password: true }))}
+                                    className="input flex-1 w-auto font-mono tracking-wider placeholder:font-sans placeholder:tracking-normal text-sm"
+                                    placeholder="Password"
+                                    required
+                                />
                             </div>
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="input flex-1 w-auto bg-slate-900/50 border-white/10 focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all text-sm"
-                                placeholder="Email Address"
-                                required
-                            />
-                        </div>
 
-                        <div className="flex items-center gap-4 group/input">
-                            <div className="text-slate-500 group-focus-within/input:text-primary transition-colors">
-                                <Lock size={20} />
-                            </div>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="input flex-1 w-auto bg-slate-900/50 border-white/10 focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all font-mono tracking-wider placeholder:font-sans placeholder:tracking-normal text-sm"
-                                placeholder="Password"
-                                required
-                            />
-                        </div>
-
-                        {error && (
-                            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono flex items-center gap-2 animate-fade-in">
-                                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
-                                {error}
-                            </div>
-                        )}
-
-                        {/* Validation feedback (real-time) */}
-                        {!loading && !error && validation.errors.length > 0 && (
-                            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono animate-fade-in">
-                                <ul className="list-disc list-inside space-y-1">
-                                    {validation.errors.map((err, idx) => (
-                                        <li key={idx}>{err}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-
-                        <div className="flex justify-center mt-2">
-                            <button
-                                type="submit"
-                                disabled={validation.disabled}
-                                className={`btn-primary px-8 py-3 text-sm tracking-widest uppercase group rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all ${
-                                    validation.disabled && !loading ? 'opacity-50 cursor-not-allowed' : ''
-                                }`}
-                            >
-                                {loading ? (
-                                    <Loader2 className="animate-spin" size={18} />
-                                ) : (
-                                    <>
-                                        {isRegisterMode ? 'Create Account' : 'Initialize Session'}
-                                        <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </form>
-
-                    <div className="mt-8 pt-6 border-t border-white/5">
-                        <div className="text-center space-y-3">
-                            <button
-                                onClick={toggleMode}
-                                className="text-xs text-slate-400 hover:text-primary transition-colors font-mono uppercase tracking-wider"
-                            >
-                                {isRegisterMode ? '<- Back to Login' : 'Create New Account ->'}
-                            </button>
-
-                            {!isRegisterMode && (
-                                <div>
-                                    <a
-                                        href={`mailto:support@codevault.com?subject=Password Reset Request&body=Please reset my password for: ${encodeURIComponent(email)}`}
-                                        className="block text-[10px] text-slate-500 hover:text-primary/70 transition-colors font-mono"
-                                    >
-                                        Forgot Password?
-                                    </a>
+                            {error && (
+                                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono flex items-center gap-2 animate-fade-in">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                                    {error}
                                 </div>
                             )}
+
+                            {/* Validation feedback — only shown for touched fields, not on pristine form */}
+                            {!loading && !error && visibleErrors.length > 0 && (
+                                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono animate-fade-in">
+                                    <ul className="list-disc list-inside space-y-1">
+                                        {visibleErrors.map((err, idx) => (
+                                            <li key={idx}>{err}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            <div className="flex justify-center mt-2">
+                                <button
+                                    type="submit"
+                                    disabled={validation.disabled}
+                                    className={`btn-primary px-8 py-3 text-sm tracking-widest uppercase group rounded-full shadow-lg shadow-cv-primary/20 hover:shadow-cv-primary/40 transition-all flex items-center gap-2 ${
+                                        validation.disabled && !loading ? 'opacity-50 cursor-not-allowed' : ''
+                                    }`}
+                                >
+                                    {loading ? (
+                                        <Loader2 className="animate-spin" size={18} />
+                                    ) : (
+                                        <>
+                                            {isRegisterMode ? 'Create Account' : 'Initialize Session'}
+                                            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+
+                        <div className="mt-8 pt-6 border-t border-white/5">
+                            <div className="text-center space-y-3">
+                                <button
+                                    onClick={toggleMode}
+                                    className="text-xs text-cv-text-muted hover:text-cv-primary transition-colors font-mono uppercase tracking-wider"
+                                >
+                                    {isRegisterMode ? '<- Back to Login' : 'Create New Account ->'}
+                                </button>
+
+                                {!isRegisterMode && (
+                                    <div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowForgotPassword(true)}
+                                            className="text-[10px] text-cv-text-dim hover:text-cv-primary/70 transition-colors font-mono"
+                                        >
+                                            Forgot Password?
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="mt-8 text-center flex justify-center gap-4 opacity-30">
-                    <Hexagon size={14} className="text-slate-600 animate-pulse" />
-                    <Hexagon size={14} className="text-slate-600 animate-pulse delay-100" />
-                    <Hexagon size={14} className="text-slate-600 animate-pulse delay-200" />
+                    <div className="mt-8 text-center flex justify-center gap-4 opacity-30">
+                        <Hexagon size={14} className="text-cv-text-dim animate-pulse" />
+                        <Hexagon size={14} className="text-cv-text-dim animate-pulse delay-100" />
+                        <Hexagon size={14} className="text-cv-text-dim animate-pulse delay-200" />
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {showForgotPassword && (
+                <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />
+            )}
+        </>
     );
 };
 

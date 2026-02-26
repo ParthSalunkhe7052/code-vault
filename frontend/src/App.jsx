@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -7,7 +7,6 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { BuildProvider } from './contexts/BuildContext';
 import { PricingProvider } from './contexts/PricingContext';
-import { initializeAuth } from './services/api';
 import Spinner from './components/Spinner';
 import { AnimatedPage, pageVariants, pageTransition } from './components/AnimatedPage';
 import SessionExpiredModal from './components/SessionExpiredModal';
@@ -45,7 +44,7 @@ const FullPageLoader = () => (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--cv-bg, #0a0a0f)' }}>
         <div className="flex flex-col items-center gap-4">
             <Spinner size="xl" />
-            <p className="text-slate-400 text-sm animate-pulse">Loading...</p>
+            <p className="text-cv-text-muted text-sm animate-pulse">Loading...</p>
         </div>
     </div>
 );
@@ -94,21 +93,21 @@ const PublicRoute = ({ children }) => {
     return children;
 };
 
+// Redirect to an external URL safely (React Router <Navigate> only handles in-app paths)
+const ExternalRedirect = ({ to }) => {
+    window.location.replace(to);
+    return null;
+};
+
 function App() {
-    const [authInitialized, setAuthInitialized] = useState(false);
-
-    useEffect(() => {
-        initializeAuth().finally(() => setAuthInitialized(true));
-    }, []);
-
-    if (!authInitialized) return <FullPageLoader />;
-
+    // Auth initialization is now handled entirely inside AuthProvider.
+    // No pre-flight initializeAuth() needed here — single loading state.
     return (
         <ErrorBoundary>
             <AuthProvider>
-                <BuildProvider>
-                    <SettingsProvider>
-                        <PricingProvider>
+                <SettingsProvider>
+                    <PricingProvider>
+                        <BuildProvider>
                             <ToastProvider>
                                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                                     <Routes>
@@ -154,11 +153,11 @@ function App() {
                                             } />
                                         </Route>
 
-                                        {/* Legal pages - redirect to landing page */}
-                                        <Route path="/privacy" element={<Navigate to="https://codevault.com/privacy" replace />} />
-                                        <Route path="/terms" element={<Navigate to="https://codevault.com/terms" replace />} />
-                                        <Route path="/gdpr" element={<Navigate to="https://codevault.com/gdpr" replace />} />
-                                        <Route path="/sla" element={<Navigate to="https://codevault.com/sla" replace />} />
+                                        {/* Legal pages — use ExternalRedirect, not <Navigate>, for external URLs */}
+                                        <Route path="/privacy" element={<ExternalRedirect to="https://codevault.com/privacy" />} />
+                                        <Route path="/terms" element={<ExternalRedirect to="https://codevault.com/terms" />} />
+                                        <Route path="/gdpr" element={<ExternalRedirect to="https://codevault.com/gdpr" />} />
+                                        <Route path="/sla" element={<ExternalRedirect to="https://codevault.com/sla" />} />
 
                                         {/* Catch all - redirect to home */}
                                         <Route path="*" element={<Navigate to="/" replace />} />
@@ -166,9 +165,9 @@ function App() {
                                     <SessionExpiredHandler />
                                 </BrowserRouter>
                             </ToastProvider>
-                        </PricingProvider>
-                    </SettingsProvider>
-                </BuildProvider>
+                        </BuildProvider>
+                    </PricingProvider>
+                </SettingsProvider>
             </AuthProvider>
         </ErrorBoundary>
     );

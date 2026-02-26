@@ -15,10 +15,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Header
 from pydantic import BaseModel
-import jwt
 import httpx
 import asyncpg
 
@@ -29,21 +27,16 @@ from config import (
     POLAR_PRODUCT_BUSINESS,
     TIER_LIMITS,
     PRICING_CONFIG,
-    JWT_SECRET,
-    JWT_ALGORITHM,
     ENVIRONMENT,
 )
 from database import get_db, release_db
-from utils import hash_api_key
+from utils import hash_api_key, get_current_user as _get_current_user, verify_jwt_token_async
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/api/v1", tags=["polar"])
-
-# Security
-security = HTTPBearer(auto_error=False)
 
 # Polar API base URL
 POLAR_API_BASE = "https://api.polar.sh/v1"
@@ -72,46 +65,12 @@ class SubscriptionStatusResponse(BaseModel):
 # Authentication
 # =============================================================================
 
-
-def verify_jwt_token(token: str) -> Optional[dict]:
-    """Verify JWT token and return payload."""
-    try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except jwt.exceptions.PyJWTError:
-        return None
-
-
-async def get_current_user_for_polar(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    x_api_key: Optional[str] = Header(None),
-) -> dict:
-    """Verify JWT or API key and return user. Used for Polar routes."""
-    conn = await get_db()
-    try:
-        # Try JWT token first
-        if credentials:
-            payload = verify_jwt_token(credentials.credentials)
-            if payload:
-                user = await conn.fetchrow(
-                    "SELECT id, email, name, plan, role, api_key FROM users WHERE id = $1",
-                    payload["sub"],
-                )
-                if user:
-                    return dict(user)
-
-        # Try API key (hash before comparison)
-        if x_api_key:
-            hashed_key = hash_api_key(x_api_key)
-            user = await conn.fetchrow(
-                "SELECT id, email, name, plan, role, api_key FROM users WHERE api_key = $1",
-                hashed_key,
-            )
-            if user:
-                return dict(user)
-
-        raise HTTPException(status_code=401, detail="Authentication required")
-    finally:
-        await release_db(conn)
+# O1/O2 FIX: Use the shared get_current_user dependency from utils.py.
+# The previous local verify_jwt_token() / get_current_user_for_polar() were
+# duplicates that (a) skipped the JWT blacklist check and (b) diverged from the
+# canonical auth logic.  All Polar routes now use the same dependency as every
+# other route, ensuring that logged-out (blacklisted) tokens are rejected here too.
+get_current_user_for_polar = _get_current_user
 
 
 # =============================================================================
@@ -397,6 +356,13 @@ async def polar_webhook(request: Request):
             )
             return {"status": "success", "message": "Event already processed"}
 
+        # C8 FIX: Never raise HTTPException inside an asyncpg transaction() context —
+        # FastAPI intercepts it before the context manager can roll back.  Instead we
+        # run the handler dispatch inside the transaction and convert any HTTPException
+        # raised by a handler into a plain RuntimeError so the transaction rolls back
+        # cleanly, then re-raise the original HTTPException outside the block.
+        _captured_http_exc: Optional[HTTPException] = None
+
         async with conn.transaction():
             logger.info(f"[Polar Webhook] Processing event: {event_type}")
 
@@ -434,15 +400,29 @@ async def polar_webhook(request: Request):
                         f"[Polar Webhook] Idempotency race: Event {event_id} was already "
                         "processed by another request"
                     )
+                    # Return inside the transaction — no exception, clean commit.
                     return {"status": "success", "message": "Event already processed"}
 
-                return {"status": "success"}
-
+            except HTTPException as http_exc:
+                # Capture and re-raise as RuntimeError so the transaction rolls back
+                # cleanly, then we surface it below outside the transaction block.
+                _captured_http_exc = http_exc
+                logger.error(
+                    f"[Polar Webhook] Handler raised HTTPException for {event_type}: "
+                    f"{http_exc.status_code} {http_exc.detail}"
+                )
+                raise RuntimeError(f"handler_http_error:{http_exc.status_code}") from http_exc
             except Exception as handler_error:
                 logger.error(
                     f"[Polar Webhook] Handler error for {event_type}: {handler_error}"
                 )
-                raise handler_error
+                raise
+
+        # Re-raise the HTTPException after the transaction has been rolled back
+        if _captured_http_exc is not None:
+            raise _captured_http_exc
+
+        return {"status": "success"}
 
     except HTTPException:
         raise
@@ -536,21 +516,49 @@ def _verify_webhook_signature(
 async def _resolve_user_id(event_data: dict, conn) -> Optional[str]:
     """Resolve the CodeVault user_id from Polar webhook event data.
 
-    Tries multiple strategies:
-    1. metadata.user_id (set during checkout creation)
-    2. customer.external_id (set as user_id during checkout)
+    Tries multiple strategies in order of trust:
+    1. customer.external_id (set as user_id during checkout — most authoritative)
+    2. metadata.user_id cross-validated against customer.external_id or customer.email
     3. customer.email (match against users table)
     4. subscription ID lookup in subscriptions table
-    """
-    # Strategy 1: metadata
-    metadata = event_data.get("metadata", {}) or {}
-    if metadata.get("user_id"):
-        return metadata["user_id"]
 
-    # Strategy 2: customer.external_id
+    H5 FIX: metadata.user_id is no longer trusted blindly. It is only accepted when it
+    matches the customer.external_id or resolves to the same user as customer.email.
+    This prevents a spoofed webhook (possible in dev mode without signature checks) from
+    upgrading an arbitrary account by injecting a victim's user_id into the metadata field.
+    """
     customer = event_data.get("customer", {}) or {}
+    metadata = event_data.get("metadata", {}) or {}
+
+    # Strategy 1: customer.external_id — set by us during checkout, most authoritative
     if customer.get("external_id"):
-        return customer["external_id"]
+        external_id = customer["external_id"]
+        # Verify this external_id actually exists in our database
+        exists = await conn.fetchval(
+            "SELECT id FROM users WHERE id = $1", external_id
+        )
+        if exists:
+            return external_id
+
+    # Strategy 2: metadata.user_id — only accept if it matches customer.email lookup
+    # (cross-validate to prevent injection of arbitrary user_ids)
+    if metadata.get("user_id"):
+        candidate_id = metadata["user_id"]
+        customer_email = customer.get("email", "").lower().strip()
+        if customer_email:
+            # Confirm the candidate user has the same email as the Polar customer
+            db_email = await conn.fetchval(
+                "SELECT email FROM users WHERE id = $1", candidate_id
+            )
+            if db_email and db_email.lower().strip() == customer_email:
+                return candidate_id
+        else:
+            # No email to validate against; verify at least the user exists
+            exists = await conn.fetchval(
+                "SELECT id FROM users WHERE id = $1", candidate_id
+            )
+            if exists:
+                return candidate_id
 
     # Strategy 3: customer email
     customer_email = customer.get("email")
@@ -946,9 +954,7 @@ async def reconcile_subscription(
     This endpoint fetches the current subscription state from Polar and compares
     it with our local state. Returns any discrepancies found.
     """
-    from config import POLAR_API_KEY
-
-    if not POLAR_API_KEY:
+    if not POLAR_ACCESS_TOKEN:
         raise HTTPException(
             status_code=503, detail="Reconciliation service unavailable"
         )
@@ -980,7 +986,7 @@ async def reconcile_subscription(
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{POLAR_API_BASE}/subscriptions/{user_record['polar_subscription_id']}",
-                headers={"Authorization": f"Bearer {POLAR_API_KEY}"},
+                headers={"Authorization": f"Bearer {POLAR_ACCESS_TOKEN}"},
             )
 
             if response.status_code == 404:
@@ -1007,7 +1013,7 @@ async def reconcile_subscription(
 
         # Compare states
         polar_status = polar_data.get("status")
-        polar_tier = _map_product_id_to_tier(polar_data.get("product_id"))
+        polar_tier = get_tier_from_product_id(polar_data.get("product_id") or "")
 
         discrepancies = []
 
@@ -1087,13 +1093,12 @@ async def reconcile_fix(
             }
 
         # Fetch latest from Polar
-        from config import POLAR_API_KEY
         import httpx
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{POLAR_API_BASE}/subscriptions/{user_record['polar_subscription_id']}",
-                headers={"Authorization": f"Bearer {POLAR_API_KEY}"},
+                headers={"Authorization": f"Bearer {POLAR_ACCESS_TOKEN}"},
             )
 
             if response.status_code == 404:
@@ -1120,7 +1125,7 @@ async def reconcile_fix(
             polar_data = response.json()
 
         # Apply fix based on Polar state
-        new_plan = _map_product_id_to_tier(polar_data.get("product_id"))
+        new_plan = get_tier_from_product_id(polar_data.get("product_id") or "")
         polar_status = polar_data.get("status")
 
         if polar_status in ("canceled", "past_due", "unpaid"):

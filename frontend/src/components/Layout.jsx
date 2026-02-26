@@ -1,15 +1,32 @@
 
-import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { LogOut, Activity, Shield, Crown, Zap, Sparkles, LayoutDashboard, Box, Key, Webhook, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { useEffect, useState } from 'react';
 import backgroundMain from '../assets/background_main.png';
 import GlobalBuildStatus from './GlobalBuildStatus';
+import api from '../services/api';
 
 const Layout = () => {
     const navigate = useNavigate();
-    const location = useLocation();
     const { user, isAdmin, logout } = useAuth();
+    const [apiOnline, setApiOnline] = useState(null); // null = checking
+
+    useEffect(() => {
+        let cancelled = false;
+        const checkHealth = async () => {
+            try {
+                await api.get('/health');
+                if (!cancelled) setApiOnline(true);
+            } catch {
+                if (!cancelled) setApiOnline(false);
+            }
+        };
+        checkHealth();
+        const interval = setInterval(checkHealth, 60_000);
+        return () => { cancelled = true; clearInterval(interval); };
+    }, []);
     const { settings } = useSettings();
     const isDarkMatter = settings.theme === 'dark-matter';
 
@@ -37,10 +54,10 @@ const Layout = () => {
         : 'bg-primary/10 text-white border-primary/20 shadow-[0_0_15px_-5px_rgba(99,102,241,0.3)]';
 
     return (
-        <div className="flex h-screen w-full text-slate-200 overflow-hidden font-sans selection:bg-primary/30 selection:text-primary-light bg-cv-bg">
+        <div className="flex h-screen w-full text-cv-text overflow-hidden font-sans selection:bg-cv-primary/30 selection:text-cv-text bg-cv-bg">
             <a
                 href="#main-content"
-                className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-indigo-600 focus:text-white focus:font-semibold focus:text-sm focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-cv-primary focus:text-cv-text focus:font-semibold focus:text-sm focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-cv-primary"
             >
                 Skip to content
             </a>
@@ -78,12 +95,16 @@ const Layout = () => {
                                 }`
                             }
                         >
-                            <div className="w-8 h-8 flex items-center justify-center">
-                                 <item.icon size={20} />
-                            </div>
-                            <span className="font-medium tracking-wide">{item.label}</span>
-                            {(location.pathname === item.path || (item.path === '/' && location.pathname === '/')) && (
-                                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full bg-cv-primary shadow-cv-primary-glow-strong" />
+                            {({ isActive }) => (
+                                <>
+                                    <div className="w-8 h-8 flex items-center justify-center">
+                                        <item.icon size={20} />
+                                    </div>
+                                    <span className="font-medium tracking-wide">{item.label}</span>
+                                    {isActive && (
+                                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full bg-cv-primary shadow-cv-primary-glow-strong" />
+                                    )}
+                                </>
                             )}
                         </NavLink>
                     ))}
@@ -96,18 +117,22 @@ const Layout = () => {
                             <NavLink
                                 to="/admin"
                                 className={({ isActive }) =>
-                                    `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
+                                    `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border transition-all duration-150 ease-in-out ${isActive
                                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-cv-amber-active'
-                                        : 'border-transparent text-slate-400 hover:bg-cv-border-subtle hover:border-cv-border'
+                                        : 'border-transparent text-cv-text-muted hover:bg-cv-border-subtle hover:border-cv-border hover:text-cv-text'
                                     }`
                                 }
                             >
-                                <div className="w-8 h-8 flex items-center justify-center">
-                                    <Shield size={24} className="text-amber-400" />
-                                </div>
-                                <span className="font-medium tracking-wide">Admin Dashboard</span>
-                                {location.pathname === '/admin' && (
-                                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full shadow-cv-amber-strong" />
+                                {({ isActive }) => (
+                                    <>
+                                        <div className="w-8 h-8 flex items-center justify-center">
+                                            <Shield size={20} className="text-amber-400" />
+                                        </div>
+                                        <span className="font-medium tracking-wide">Admin Dashboard</span>
+                                        {isActive && (
+                                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full shadow-cv-amber-strong" />
+                                        )}
+                                    </>
                                 )}
                             </NavLink>
                         </>
@@ -119,18 +144,22 @@ const Layout = () => {
                     <NavLink
                         to="/build-settings"
                         className={({ isActive }) =>
-                            `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border ${isActive
+                            `flex items-center gap-3 px-4 py-3 rounded-xl relative overflow-hidden border transition-all duration-150 ease-in-out ${isActive
                                 ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-cv-purple-active'
-                                : 'border-transparent text-slate-400 hover:bg-cv-border-subtle hover:border-cv-border'
+                                : 'border-transparent text-cv-text-muted hover:bg-cv-border-subtle hover:border-cv-border hover:text-cv-text'
                             }`
                         }
                     >
-                        <div className="w-8 h-8 flex items-center justify-center">
-                            <Activity size={24} className="text-purple-400" />
-                        </div>
-                        <span className="font-medium tracking-wide">Build Settings</span>
-                        {location.pathname === '/build-settings' && (
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-purple-500 rounded-l-full shadow-cv-purple-strong" />
+                        {({ isActive }) => (
+                            <>
+                                <div className="w-8 h-8 flex items-center justify-center">
+                                    <Activity size={20} className="text-purple-400" />
+                                </div>
+                                <span className="font-medium tracking-wide">Build Settings</span>
+                                {isActive && (
+                                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-purple-500 rounded-l-full shadow-cv-purple-strong" />
+                                )}
+                            </>
                         )}
                     </NavLink>
 
@@ -139,11 +168,27 @@ const Layout = () => {
                     </div>
                     <div className="px-4 py-3 rounded-xl border mx-2 bg-cv-bg-elevated border-cv-border">
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-cv-text-muted">Core Systems</span>
-                            <span className="text-xs text-emerald-400 font-mono">ONLINE</span>
+                            <span className="text-xs text-cv-text-muted">API Server</span>
+                            {apiOnline === null && (
+                                <span className="text-xs text-cv-text-dim font-mono">CHECKING</span>
+                            )}
+                            {apiOnline === true && (
+                                <span className="text-xs text-emerald-400 font-mono">ONLINE</span>
+                            )}
+                            {apiOnline === false && (
+                                <span className="text-xs text-red-400 font-mono">OFFLINE</span>
+                            )}
                         </div>
                         <div className="w-full h-1 rounded-full overflow-hidden bg-cv-muted">
-                            <div className="h-full w-full bg-emerald-500 shadow-cv-emerald-pulse animate-pulse" />
+                            {apiOnline === null && (
+                                <div className="h-full w-1/2 bg-cv-text-dim animate-pulse" />
+                            )}
+                            {apiOnline === true && (
+                                <div className="h-full w-full bg-emerald-500 shadow-cv-emerald-pulse animate-pulse" />
+                            )}
+                            {apiOnline === false && (
+                                <div className="h-full w-full bg-red-500" />
+                            )}
                         </div>
                     </div>
                 </nav>
@@ -163,7 +208,7 @@ const Layout = () => {
 
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl border border-transparent text-slate-400 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 group transition-all duration-150 ease-in-out"
+                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl border border-transparent text-cv-text-muted hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 group transition-all duration-150 ease-in-out"
                     >
                         <LogOut size={18} className="group-hover:text-red-400 transition-colors duration-150" />
                         <span className="font-medium tracking-wide">Disconnect</span>

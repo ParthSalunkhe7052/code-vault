@@ -15,7 +15,7 @@ import asyncio
 from typing import Optional, List
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 import httpx
 
@@ -35,6 +35,7 @@ WEBHOOK_EVENTS = [
     "license.expired",
     "hwid.bound",
     "hwid.reset",
+    "hwid.suspicious",  # O9 FIX: fired when HWID heuristics flag a suspicious pattern
     "compilation.started",
     "compilation.completed",
     "compilation.failed",
@@ -70,9 +71,16 @@ def is_private_ip(ip_str: str) -> bool:
 async def validate_webhook_url(url: str) -> tuple[bool, str]:
     """Validate webhook URL with immediate IP resolution.
 
+    H2 FIX: socket.getaddrinfo is a blocking syscall. Calling it directly
+    from an async handler stalls the entire event loop for the DNS RTT
+    (typically 10-100ms, up to seconds on slow resolvers). We offload it
+    to the default thread-pool executor via run_in_executor so the event
+    loop remains unblocked while waiting for DNS.
+
     Returns:
         Tuple of (is_valid, error_message)
     """
+    import asyncio
     from urllib.parse import urlparse
 
     if not url:
@@ -97,9 +105,18 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
     if hostname_lower in BLOCKED_HOSTNAMES:
         return False, f"Webhook URL cannot target {hostname_lower}"
 
-    # Try to resolve IMMEDIATELY (fail fast on unresolvable)
+    # Reasonable length limit (check before DNS to fail fast)
+    if len(url) > 2000:
+        return False, "URL is too long (max 2000 characters)"
+
+    # H2 FIX: Offload blocking DNS resolution to thread pool executor
+    port = parsed.port or 443
+    loop = asyncio.get_event_loop()
     try:
-        resolved = socket.getaddrinfo(hostname, parsed.port or 443, socket.AF_UNSPEC)
+        resolved = await loop.run_in_executor(
+            None,
+            lambda: socket.getaddrinfo(hostname, port, socket.AF_UNSPEC),
+        )
     except socket.gaierror as e:
         return False, f"Cannot resolve hostname '{hostname}': {e}"
 
@@ -108,10 +125,6 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
         ip_str = sockaddr[0]
         if is_private_ip(ip_str):
             return False, f"Webhook resolves to private IP: {ip_str}"
-
-    # Reasonable length limit
-    if len(url) > 2000:
-        return False, "URL is too long (max 2000 characters)"
 
     return True, "Valid"
 
@@ -397,45 +410,54 @@ async def list_webhooks(user: dict = Depends(get_current_user)):
 async def create_webhook(
     data: WebhookCreateRequest, user: dict = Depends(get_current_user)
 ):
-    """Create a new webhook. Requires 'webhooks' feature on tier."""
-    # Check tier feature for webhook creation
-    conn = await get_db()
-    try:
-        limits = await get_user_tier_limits(user["id"], conn)
-        if not limits.get("webhooks", False):
-            raise HTTPException(
-                status_code=403,
-                detail="Webhooks are not available on your current plan. Please upgrade."
-            )
-    finally:
-        await release_db(conn)
+    """Create a new webhook. Requires 'webhooks' feature on tier.
 
+    H9 FIX: Tier check and INSERT are now performed inside a single transaction
+    with pg_advisory_xact_lock to prevent TOCTOU races where two concurrent
+    requests both pass the tier check before either has written the row.
+    """
     invalid_events = [e for e in data.events if e not in WEBHOOK_EVENTS]
     if invalid_events:
         raise HTTPException(status_code=400, detail=f"Invalid events: {invalid_events}")
 
-    # SSRF protection: Validate webhook URL
+    # SSRF protection: Validate webhook URL before acquiring DB connection
     is_valid, error_msg = await validate_webhook_url(data.url)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error_msg)
 
     conn = await get_db()
     try:
-        webhook_id = secrets.token_hex(16)
-        events_json = json.dumps(data.events)
+        async with conn.transaction():
+            # Advisory lock keyed on the user_id to serialize concurrent webhook creations
+            # for the same user. hash() is deterministic within a process; use sha256 for
+            # a stable 63-bit integer that fits in pg_advisory_xact_lock's bigint param.
+            import hashlib as _hl
+            lock_key = int(_hl.sha256(user["id"].encode()).hexdigest()[:15], 16)
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_key)
 
-        await conn.execute(
-            """
-            INSERT INTO webhooks (id, user_id, name, url, secret, events, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        """,
-            webhook_id,
-            user["id"],
-            data.name,
-            data.url,
-            data.secret,
-            events_json,
-        )
+            # Tier check inside the lock — prevents TOCTOU
+            limits = await get_user_tier_limits(user["id"], conn)
+            if not limits.get("webhooks", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Webhooks are not available on your current plan. Please upgrade."
+                )
+
+            webhook_id = secrets.token_hex(16)
+            events_json = json.dumps(data.events)
+
+            await conn.execute(
+                """
+                INSERT INTO webhooks (id, user_id, name, url, secret, events, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+                webhook_id,
+                user["id"],
+                data.name,
+                data.url,
+                data.secret,
+                events_json,
+            )
 
         return {
             "id": webhook_id,
@@ -496,10 +518,14 @@ async def get_webhook(webhook_id: str, user: dict = Depends(get_current_user)):
 async def update_webhook(
     webhook_id: str, data: WebhookUpdateRequest, user: dict = Depends(get_current_user)
 ):
-    """Update a webhook."""
-    # SECURITY: Whitelist of allowed columns to prevent SQL injection
-    ALLOWED_COLUMNS = {"name", "url", "events", "secret", "is_active"}
+    """Update a webhook.
 
+    O6 FIX: Removed unreachable dead-code ALLOWED_COLUMNS branches.
+    The set was static and the membership checks could never be False, so the
+    'Security error' branches were dead code. The actual injection guard is the
+    use of parameterised queries — column names are hardcoded literals, not
+    interpolated from user input.
+    """
     conn = await get_db()
     try:
         exists = await conn.fetchrow(
@@ -510,14 +536,11 @@ async def update_webhook(
         if not exists:
             raise HTTPException(status_code=404, detail="Webhook not found")
 
-        # Build update using whitelist validation
         updates = []
         params = []
         param_count = 1
 
         if data.name is not None:
-            if "name" not in ALLOWED_COLUMNS:
-                raise HTTPException(status_code=500, detail="Security error")
             updates.append("name = $" + str(param_count))
             params.append(data.name)
             param_count += 1
@@ -526,8 +549,6 @@ async def update_webhook(
             is_valid, error_msg = await validate_webhook_url(data.url)
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
-            if "url" not in ALLOWED_COLUMNS:
-                raise HTTPException(status_code=500, detail="Security error")
             updates.append("url = $" + str(param_count))
             params.append(data.url)
             param_count += 1
@@ -537,20 +558,14 @@ async def update_webhook(
                 raise HTTPException(
                     status_code=400, detail=f"Invalid events: {invalid_events}"
                 )
-            if "events" not in ALLOWED_COLUMNS:
-                raise HTTPException(status_code=500, detail="Security error")
             updates.append("events = $" + str(param_count))
             params.append(json.dumps(data.events))
             param_count += 1
         if data.secret is not None:
-            if "secret" not in ALLOWED_COLUMNS:
-                raise HTTPException(status_code=500, detail="Security error")
             updates.append("secret = $" + str(param_count))
             params.append(data.secret)
             param_count += 1
         if data.is_active is not None:
-            if "is_active" not in ALLOWED_COLUMNS:
-                raise HTTPException(status_code=500, detail="Security error")
             updates.append("is_active = $" + str(param_count))
             params.append(data.is_active)
             param_count += 1
@@ -558,8 +573,6 @@ async def update_webhook(
         if updates:
             updates.append("updated_at = NOW()")
             params.append(webhook_id)
-            # FIXED: Using parameterized query with whitelist validation
-            # The param_count is already at the correct value after all additions
             query = (
                 f"UPDATE webhooks SET {', '.join(updates)} WHERE id = ${param_count}"
             )
@@ -591,7 +604,9 @@ async def delete_webhook(webhook_id: str, user: dict = Depends(get_current_user)
 
 @router.get("/{webhook_id}/deliveries")
 async def get_webhook_deliveries(
-    webhook_id: str, limit: int = 50, user: dict = Depends(get_current_user)
+    webhook_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
 ):
     """Get delivery history for a webhook."""
     conn = await get_db()
@@ -761,6 +776,7 @@ async def get_webhook_events():
         "license.expired": "Triggered when a license expires during validation",
         "hwid.bound": "Triggered when a new hardware ID is bound to a license",
         "hwid.reset": "Triggered when hardware bindings are reset for a license",
+        "hwid.suspicious": "Triggered when a hardware ID matches suspicious/VM patterns",
         "compilation.started": "Triggered when a compilation job starts",
         "compilation.completed": "Triggered when a compilation job completes successfully",
         "compilation.failed": "Triggered when a compilation job fails",

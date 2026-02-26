@@ -56,42 +56,156 @@ def normalize_datetime_for_db(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
-# GeoIP has been removed. Geo fields are no longer attached to validation logs.
+# GeoIP functions (import from geoip module when created, for now inline)
+_geoip_warned = False  # Module-level flag to avoid log spam
+
+# O5 FIX: Hold a single GeoIP reader open for the lifetime of the process.
+# Previously a new Reader was opened and closed on every license validation
+# call, which is expensive (file open + mmap on every request).
+# The geoip2 Reader is thread-safe per MaxMind documentation.
+_geoip_reader = None
+_geoip_reader_initialized = False
+
+
+def _get_geoip_reader():
+    """Return the module-level GeoIP reader, initialising it on first call."""
+    global _geoip_reader, _geoip_reader_initialized, _geoip_warned
+
+    if _geoip_reader_initialized:
+        return _geoip_reader
+
+    _geoip_reader_initialized = True
+    try:
+        import geoip2.database
+        from pathlib import Path
+
+        geoip_path = Path(__file__).parent.parent / "data" / "GeoLite2-City.mmdb"
+        if geoip_path.exists():
+            _geoip_reader = geoip2.database.Reader(str(geoip_path))
+            logging.info(f"[GeoIP] Database loaded from {geoip_path}")
+        else:
+            if not _geoip_warned:
+                logging.warning(
+                    f"[GeoIP] Database not found at {geoip_path}. "
+                    "Map data will be unavailable. Download GeoLite2-City.mmdb from MaxMind."
+                )
+                _geoip_warned = True
+    except Exception as e:
+        logging.warning(f"[GeoIP] Failed to initialise reader: {e}")
+
+    return _geoip_reader
+
+
+def get_geo_from_ip(ip_address: str) -> dict:
+    """Get geolocation data from IP address.
+
+    For localhost/private IPs, returns a "Dev Location" (New York) so the
+    Mission Control map works during local development.
+    """
+    # Default result
+    result = {"city": None, "country": None, "latitude": None, "longitude": None}
+
+    # For localhost/dev, return a sample location so the map works
+    if ip_address in ("127.0.0.1", "::1", "localhost", "unknown"):
+        return {
+            "city": "New York",
+            "country": "US",
+            "latitude": 40.7128,
+            "longitude": -74.0060,
+        }
+
+    try:
+        import ipaddress
+
+        ip = ipaddress.ip_address(ip_address)
+        if ip.is_private or ip.is_loopback or ip.is_reserved:
+            # Return dev location for private IPs too
+            return {
+                "city": "Local Network",
+                "country": "XX",
+                "latitude": 40.7128,
+                "longitude": -74.0060,
+            }
+    except ValueError:
+        return result
+
+    # Try GeoIP lookup using the singleton reader
+    reader = _get_geoip_reader()
+    if reader is None:
+        return result
+
+    try:
+        import geoip2.errors
+        response = reader.city(ip_address)
+        result["city"] = response.city.name
+        result["country"] = response.country.iso_code
+        result["latitude"] = response.location.latitude
+        result["longitude"] = response.location.longitude
+    except geoip2.errors.AddressNotFoundError:
+        # IP not in database, this is normal for some IPs
+        pass
+    except Exception as e:
+        logging.warning(f"[GeoIP] Lookup failed for {ip_address}: {e}")
+
+    return result
+
+
+# O4 FIX: Module-level shared Redis client pool.
+# Previously a new Redis connection was created and destroyed on every license
+# validation call (hundreds of TCP handshakes per second under load).
+# Now we hold a single client instance that is reused across calls.
+_redis_log_client = None
+_redis_log_client_initialized = False
+
+
+def _get_redis_log_client():
+    """Return a shared async Redis client for log pushes, initialised lazily."""
+    global _redis_log_client, _redis_log_client_initialized
+    from config import REDIS_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+
+    if _redis_log_client_initialized:
+        return _redis_log_client
+
+    _redis_log_client_initialized = True
+
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import Redis
+            _redis_log_client = Redis(
+                url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN
+            )
+            return _redis_log_client
+        except ImportError:
+            logging.warning("[Redis] upstash-redis not installed, falling back to redis-py")
+
+    if REDIS_URL:
+        try:
+            import redis.asyncio as aioredis
+            _redis_log_client = aioredis.from_url(REDIS_URL)
+            return _redis_log_client
+        except Exception as e:
+            logging.warning(f"[Redis] Failed to create shared client: {e}")
+
+    return None
 
 
 async def _push_validation_log_to_redis(log_data: dict):
     """Push validation log to Redis queue for asynchronous processing by log worker."""
     from config import REDIS_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
 
-    # Prefer Upstash REST API for serverless environments
-    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
-        try:
-            from upstash_redis.asyncio import Redis
-
-            r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
-            await r.lpush("license_logs_queue", json.dumps(log_data))
-            return
-        except ImportError:
-            logging.warning(
-                "[Redis] upstash-redis not installed, falling back to redis-py"
-            )
-        except Exception as e:
-            logging.error(f"[Redis] Upstash REST API error: {e}")
-            return
-
-    # Fallback to traditional Redis connection
-    if not REDIS_URL:
-        logging.warning("[Redis] REDIS_URL not set, log will be dropped")
+    client = _get_redis_log_client()
+    if client is None:
+        logging.warning("[Redis] No Redis client available, validation log will be dropped")
         return
 
     try:
-        import redis.asyncio as redis
-
-        r = redis.from_url(REDIS_URL)
-        await r.lpush("license_logs_queue", json.dumps(log_data))
-        await r.close()
+        await client.lpush("license_logs_queue", json.dumps(log_data))
     except Exception as e:
         logging.error(f"[Redis] Failed to push log: {e}")
+        # Reset client so it is re-created on the next call (handles connection drops)
+        global _redis_log_client, _redis_log_client_initialized
+        _redis_log_client = None
+        _redis_log_client_initialized = False
 
 
 @router.post("/license/validate", response_model=LicenseValidationResponse)
@@ -206,11 +320,10 @@ async def validate_license(
                 return create_validation_response(result_status, message, data.nonce)
 
             # SEC2: Binary integrity check — if client sends binary_hash,
-            # verify it matches a registered hash for this project
+            # verify it matches a registered hash for this project.
+            # H6 FIX: project_id is already available from the initial JOIN query;
+            # the redundant "SELECT project_id FROM licenses" query is removed.
             if data.binary_hash and license_row:
-                project_id = await conn.fetchval(
-                    "SELECT project_id FROM licenses WHERE id = $1", license_row["id"]
-                )
                 hash_match = await conn.fetchval(
                     "SELECT 1 FROM binary_hashes WHERE project_id = $1 AND binary_hash = $2",
                     project_id,

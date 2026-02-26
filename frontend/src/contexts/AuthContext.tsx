@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { auth } from '../services/api';
+import { auth, initializeAuth } from '../services/api';
 import { User } from '../types/api';
 
 interface AuthContextType {
@@ -81,6 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         const initAuth = async () => {
+            // Initialize encrypted token cache first, then check if we have a valid session
+            await initializeAuth();
             if (auth.isAuthenticated()) {
                 await refreshUser();
             }

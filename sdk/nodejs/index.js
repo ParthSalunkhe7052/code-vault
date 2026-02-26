@@ -90,7 +90,12 @@ class CodeVaultClient {
     }
 
     _verifySignature(result) {
-        if (!this.publicKeyPem) return true;
+        if (!this.publicKeyPem) {
+            throw new Error(
+                '[CodeVault] publicKeyPem is required for signature verification. ' +
+                'Pass the Ed25519 public key PEM when constructing CodeVaultClient.'
+            );
+        }
         if (!result.signature) return false;
 
         try {
@@ -214,23 +219,32 @@ class CodeVaultClient {
             session_token: this.sessionToken
         });
 
-        // Use sync spawn to ensure release happens before process dies
-        const url = `${this.serverUrl}/api/v1/license/release`;
+        // H4 FIX: Replace PowerShell/curl shell invocations (shell injection risk) with a
+        // direct synchronous HTTP request using Node's built-in http/https module via a
+        // synchronous worker-thread wrapper.  No shell is spawned — arguments are never
+        // interpolated into a command string.
+        const releaseUrl = new URL(`${this.serverUrl}/api/v1/license/release`);
         try {
-            if (process.platform === 'win32') {
-                require('child_process').spawnSync('powershell', [
-                    '-Command',
-                    `Invoke-RestMethod -Method Post -Uri "${url}" -ContentType "application/json" -Body '${postData}'`
-                ]);
-            } else {
-                require('child_process').spawnSync('curl', [
-                    '-X', 'POST',
-                    '-H', 'Content-Type: application/json',
-                    '-d', postData,
-                    url
-                ]);
-            }
-        } catch (e) {}
+            // Node has no built-in sync HTTP; use spawnSync with node -e to send the
+            // request in a fresh child process — but pass data via stdin (not args) so
+            // no user-controlled string is ever interpolated into a shell command.
+            const script = `
+const https=require('https'),http=require('http');
+let body='';process.stdin.on('data',d=>body+=d);
+process.stdin.on('end',()=>{
+  const u=new URL(process.argv[1]);
+  const lib=u.protocol==='https:'?https:http;
+  const req=lib.request(u,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}});
+  req.on('error',()=>{});req.write(body);req.end();
+});`;
+            require('child_process').spawnSync(
+                process.execPath,
+                ['-e', script, releaseUrl.toString()],
+                { input: postData, timeout: 5000 }
+            );
+        } catch (_e) {
+            // Best-effort: ignore errors during process exit
+        }
     }
 }
 
