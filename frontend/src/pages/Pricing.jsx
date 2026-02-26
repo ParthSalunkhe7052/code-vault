@@ -43,30 +43,30 @@ const PricingTier = ({
                 <Icon size={24} className="text-white" />
             </div>
             <div>
-                <h3 className="text-xl font-bold text-white">{name}</h3>
-                <p className="text-sm text-slate-400">{description}</p>
+                <h3 className="text-xl font-bold text-cv-text">{name}</h3>
+                <p className="text-sm text-cv-text-muted">{description}</p>
             </div>
         </div>
 
         <div className="mb-6">
-            <span className="text-4xl font-bold text-white">
+            <span className="text-4xl font-bold text-cv-text">
                 {typeof price === 'number' ? `$${price}` : price}
             </span>
-            {period && <span className="text-slate-400">/{period}</span>}
+            {period && <span className="text-cv-text-muted">/{period}</span>}
         </div>
 
         <div className="flex-1 space-y-3 mb-6">
             {features.map((feature, i) => (
                 <div key={i} className="flex items-start gap-2">
                     <Check size={18} className="text-emerald-400 mt-0.5 flex-shrink-0" />
-                    <span className="text-sm text-slate-300">{feature}</span>
+                    <span className="text-sm text-cv-text-muted">{feature}</span>
                 </div>
             ))}
 
             {limitations?.map((limitation, i) => (
                 <div key={i} className="flex items-start gap-2">
-                    <X size={18} className="text-slate-500 mt-0.5 flex-shrink-0" />
-                    <span className="text-sm text-slate-500">{limitation}</span>
+                    <X size={18} className="text-cv-text-dim mt-0.5 flex-shrink-0" />
+                    <span className="text-sm text-cv-text-dim">{limitation}</span>
                 </div>
             ))}
         </div>
@@ -75,10 +75,10 @@ const PricingTier = ({
             onClick={onSubscribe}
             disabled={loading || current}
             className={`w-full py-3 px-4 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${current
-                ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                ? 'bg-cv-muted text-cv-text-dim cursor-not-allowed'
                 : popular
-                    ? 'bg-gradient-to-r from-violet-500 to-indigo-500 text-white hover:from-violet-600 hover:to-indigo-600'
-                    : 'bg-white/10 text-white hover:bg-white/20'
+                    ? 'bg-cv-primary text-white hover:opacity-90'
+                    : 'bg-white/10 text-cv-text hover:bg-white/20'
                 }`}
         >
             {loading ? (
@@ -224,10 +224,10 @@ const Pricing = () => {
         <div className="min-h-screen py-12">
             <div className="max-w-6xl mx-auto px-6">
                 <div className="text-center mb-12">
-                    <h1 className="text-4xl font-bold text-white mb-4">
+                    <h1 className="text-4xl font-bold text-cv-text mb-4">
                         Simple, Transparent Pricing
                     </h1>
-                    <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+                    <p className="text-lg text-cv-text-muted max-w-2xl mx-auto">
                         Build once, distribute unlimited times with different license keys. Start free, scale when you ship.
                     </p>
                 </div>
@@ -238,7 +238,7 @@ const Pricing = () => {
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
                     {tiers.map((tier) => (
                         <PricingTier
                             key={tier.name}
@@ -261,25 +261,25 @@ const Pricing = () => {
                 </div>
 
                 <div className="glass-card p-8">
-                    <h2 className="text-2xl font-bold text-white mb-6 text-center">
+                    <h2 className="text-2xl font-bold text-cv-text mb-6 text-center">
                         Frequently Asked Questions
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">How does the Free tier work?</h3>
-                            <p className="text-slate-400 text-sm">You get 1 project and 50 licenses forever. Perfect for testing CodeVault before committing.</p>
+                            <h3 className="text-lg font-semibold text-cv-text mb-2">How does the Free tier work?</h3>
+                            <p className="text-cv-text-muted text-sm">You get 1 project and 50 licenses forever. Perfect for testing CodeVault before committing.</p>
                         </div>
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">What are Cloud Builds?</h3>
-                            <p className="text-slate-400 text-sm">Cloud builds compile your project on our servers so you don&apos;t need local compilers. Pro gets 25/month, Business gets 100/month.</p>
+                            <h3 className="text-lg font-semibold text-cv-text mb-2">What are Cloud Builds?</h3>
+                            <p className="text-cv-text-muted text-sm">Cloud builds compile your project on our servers so you don&apos;t need local compilers. Pro gets 25/month, Business gets 100/month.</p>
                         </div>
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">Can I cancel anytime?</h3>
-                            <p className="text-slate-400 text-sm">Yes. You can cancel from your Polar billing portal at any time. You&apos;ll keep access until the end of your billing period.</p>
+                            <h3 className="text-lg font-semibold text-cv-text mb-2">Can I cancel anytime?</h3>
+                            <p className="text-cv-text-muted text-sm">Yes. You can cancel from your Polar billing portal at any time. You&apos;ll keep access until the end of your billing period.</p>
                         </div>
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">What does &quot;build once, distribute unlimited&quot; mean?</h3>
-                            <p className="text-slate-400 text-sm">One cloud build produces a protected executable. You can then issue as many unique license keys as your plan allows to distribute it to different users.</p>
+                            <h3 className="text-lg font-semibold text-cv-text mb-2">What does &quot;build once, distribute unlimited&quot; mean?</h3>
+                            <p className="text-cv-text-muted text-sm">One cloud build produces a protected executable. You can then issue as many unique license keys as your plan allows to distribute it to different users.</p>
                         </div>
                     </div>
                 </div>

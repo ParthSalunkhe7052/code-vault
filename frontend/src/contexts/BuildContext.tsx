@@ -383,33 +383,36 @@ export const BuildProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, [connectWebSocket]);
 
 /**
-     * Clear a build from state (used after cancel/reset)
+     * Clear a build from state (used after cancel/reset).
+     * Uses the functional setState form to read latest state instead of
+     * closing over a potentially stale `builds` snapshot — prevents this
+     * callback from being re-created on every build state change.
      */
     const clearBuild = useCallback((projectId: string) => {
         removePersistedBuild(projectId);
-        
-        // Stop any active polling
-        const build = builds[projectId];
-        if (build?.jobId && activePollers.current.has(build.jobId)) {
-            const interval = activePollers.current.get(build.jobId);
-            if (interval) clearInterval(interval);
-            activePollers.current.delete(build.jobId);
-        }
-        
-        // Close any active WebSocket
-        if (build?.jobId && activeSockets.current.has(build.jobId)) {
-            const ws = activeSockets.current.get(build.jobId);
-            if (ws) ws.close();
-            activeSockets.current.delete(build.jobId);
-        }
-        
-        // Clear from state
+
         setBuilds(prev => {
+            const build = prev[projectId];
+
+            // Stop any active polling
+            if (build?.jobId && activePollers.current.has(build.jobId)) {
+                const interval = activePollers.current.get(build.jobId);
+                if (interval) clearInterval(interval);
+                activePollers.current.delete(build.jobId);
+            }
+
+            // Close any active WebSocket
+            if (build?.jobId && activeSockets.current.has(build.jobId)) {
+                const ws = activeSockets.current.get(build.jobId);
+                if (ws) ws.close();
+                activeSockets.current.delete(build.jobId);
+            }
+
             const next = { ...prev };
             delete next[projectId];
             return next;
         });
-    }, [builds]);
+    }, []);
 
     const getBuild = useCallback((projectId: string) => {
         return builds[projectId] || {

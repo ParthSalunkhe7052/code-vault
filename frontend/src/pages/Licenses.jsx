@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Filter, Download, Ban, Trash2, CheckCircle, XCircle, AlertTriangle, Key, Calendar, Monitor, Copy, Folder, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Filter, Download, Ban, Trash2, Key, Calendar, Monitor, Copy, Folder, ChevronLeft, ChevronRight } from 'lucide-react';
 import { licenses as licenseApi, projects as projectApi } from '../services/api';
 import { CreateLicenseModal, BindingsModal } from '../components/licenses';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
+import StatusBadge from '../components/StatusBadge';
+import useConfirmDialog from '../hooks/useConfirmDialog';
+import { getDaysUntilExpiry, getExpiryColorClass } from '../utils/formatters';
 
 const Licenses = () => {
     const toast = useToast();
-    
+    const { dialogProps, confirm } = useConfirmDialog();
+
     const [licenses, setLicenses] = useState([]);
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -18,16 +22,6 @@ const Licenses = () => {
     const [bindingsLoading, setBindingsLoading] = useState(false);
     const [resetStatus, setResetStatus] = useState(null);
     const [resetting, setResetting] = useState(false);
-
-    // Confirm Dialog State
-    const [confirmDialog, setConfirmDialog] = useState({
-        isOpen: false,
-        title: '',
-        message: '',
-        onConfirm: () => { },
-        confirmText: 'Confirm',
-        confirmVariant: 'danger'
-    });
 
     // Search and Filter
     const [searchQuery, setSearchQuery] = useState('');
@@ -83,26 +77,16 @@ const Licenses = () => {
 
     // Filter and search licenses
     const filteredLicenses = licenses.filter(license => {
-        // Search filter
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
-            const matchesSearch = 
+            const matchesSearch =
                 license.license_key.toLowerCase().includes(query) ||
                 (license.client_name && license.client_name.toLowerCase().includes(query)) ||
                 (license.client_email && license.client_email.toLowerCase().includes(query));
             if (!matchesSearch) return false;
         }
-
-        // Project filter
-        if (filterProject && license.project_id !== filterProject) {
-            return false;
-        }
-
-        // Status filter
-        if (filterStatus && license.status !== filterStatus) {
-            return false;
-        }
-
+        if (filterProject && license.project_id !== filterProject) return false;
+        if (filterStatus && license.status !== filterStatus) return false;
         return true;
     });
 
@@ -115,19 +99,14 @@ const Licenses = () => {
 
     // Get project name - prioritize from license data, fallback to projects lookup
     const getProjectName = (license) => {
-        // Use project_name from API if available
-        if (license.project_name) {
-            return license.project_name;
-        }
-        // Fallback to looking up in projects array
+        if (license.project_name) return license.project_name;
         const project = projects.find(p => p.id === license.project_id);
         return project ? project.name : 'Deleted Project';
     };
 
     const handleCreate = async (e) => {
         e.preventDefault();
-        
-        // Client-side validation
+
         if (!newLicense.project_id) {
             toast.error('Please select a project');
             return;
@@ -146,7 +125,9 @@ const Licenses = () => {
                 ...newLicense,
                 expires_at: newLicense.expires_at ? new Date(newLicense.expires_at).toISOString() : null
             };
-            await licenseApi.create(licenseData);
+            const created = await licenseApi.create(licenseData);
+            // Optimistic: prepend new license to local state
+            setLicenses(prev => [created, ...prev]);
             setIsModalOpen(false);
             setNewLicense({
                 project_id: projects[0]?.id || '',
@@ -158,9 +139,10 @@ const Licenses = () => {
                 features: []
             });
             setFeatureInput('');
-            fetchData();
+            toast.success('License created successfully');
         } catch (error) {
             console.error('Failed to create license:', error);
+            toast.error('Failed to create license');
         }
     };
 
@@ -182,47 +164,37 @@ const Licenses = () => {
         }));
     };
 
-    const handleRevoke = async (id) => {
-        setConfirmDialog({
-            isOpen: true,
+    const handleRevoke = (id) => {
+        confirm({
             title: 'Revoke License',
             message: 'Are you sure you want to revoke this license? The client will no longer be able to use it.',
             confirmText: 'Revoke',
             confirmVariant: 'warning',
             onConfirm: async () => {
-                try {
-                    await licenseApi.revoke(id);
-                    toast.success('License revoked successfully');
-                    fetchData();
-                } catch (error) {
-                    console.error('Failed to revoke license:', error);
-                    toast.error('Failed to revoke license');
-                }
+                const updated = await licenseApi.revoke(id);
+                // Optimistic: update status in local state
+                setLicenses(prev => prev.map(l => l.id === id ? { ...l, status: updated.status } : l));
+                toast.success('License revoked successfully');
             }
         });
     };
 
-    const handleDelete = async (id) => {
-        setConfirmDialog({
-            isOpen: true,
+    const handleDelete = (id) => {
+        confirm({
             title: 'Delete License',
             message: 'Are you sure you want to delete this license? This action cannot be undone.',
             confirmText: 'Delete',
             confirmVariant: 'danger',
             onConfirm: async () => {
-                try {
-                    await licenseApi.delete(id);
-                    setSelectedLicenses(prev => {
-                        const newSet = new Set(prev);
-                        newSet.delete(id);
-                        return newSet;
-                    });
-                    toast.success('License deleted successfully');
-                    fetchData();
-                } catch (error) {
-                    console.error('Failed to delete license:', error);
-                    toast.error('Failed to delete license');
-                }
+                await licenseApi.delete(id);
+                // Optimistic: remove from local state
+                setLicenses(prev => prev.filter(l => l.id !== id));
+                setSelectedLicenses(prev => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
+                toast.success('License deleted successfully');
             }
         });
     };
@@ -238,54 +210,48 @@ const Licenses = () => {
 
     const handleSelectLicense = (id) => {
         setSelectedLicenses(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(id)) {
-                newSet.delete(id);
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
             } else {
-                newSet.add(id);
+                next.add(id);
             }
-            return newSet;
+            return next;
         });
     };
 
-    const handleBulkRevoke = async () => {
-        setConfirmDialog({
-            isOpen: true,
+    const handleBulkRevoke = () => {
+        confirm({
             title: 'Revoke Multiple Licenses',
             message: `Are you sure you want to revoke ${selectedLicenses.size} license(s)?`,
             confirmText: 'Revoke All',
             confirmVariant: 'warning',
             onConfirm: async () => {
-                try {
-                    await Promise.all([...selectedLicenses].map(id => licenseApi.revoke(id)));
-                    toast.success(`${selectedLicenses.size} license(s) revoked successfully`);
-                    setSelectedLicenses(new Set());
-                    fetchData();
-                } catch (error) {
-                    console.error('Failed to bulk revoke:', error);
-                    toast.error('Failed to revoke some licenses');
-                }
+                const ids = [...selectedLicenses];
+                await Promise.all(ids.map(id => licenseApi.revoke(id)));
+                // Optimistic: mark all as revoked in local state
+                setLicenses(prev => prev.map(l =>
+                    ids.includes(l.id) ? { ...l, status: 'revoked' } : l
+                ));
+                toast.success(`${ids.length} license(s) revoked successfully`);
+                setSelectedLicenses(new Set());
             }
         });
     };
 
-    const handleBulkDelete = async () => {
-        setConfirmDialog({
-            isOpen: true,
+    const handleBulkDelete = () => {
+        confirm({
             title: 'Delete Multiple Licenses',
             message: `Are you sure you want to DELETE ${selectedLicenses.size} license(s)? This cannot be undone!`,
             confirmText: 'Delete All',
             confirmVariant: 'danger',
             onConfirm: async () => {
-                try {
-                    await Promise.all([...selectedLicenses].map(id => licenseApi.delete(id)));
-                    toast.success(`${selectedLicenses.size} license(s) deleted successfully`);
-                    setSelectedLicenses(new Set());
-                    fetchData();
-                } catch (error) {
-                    console.error('Failed to bulk delete:', error);
-                    toast.error('Failed to delete some licenses');
-                }
+                const ids = [...selectedLicenses];
+                await Promise.all(ids.map(id => licenseApi.delete(id)));
+                // Optimistic: remove all from local state
+                setLicenses(prev => prev.filter(l => !ids.includes(l.id)));
+                toast.success(`${ids.length} license(s) deleted successfully`);
+                setSelectedLicenses(new Set());
             }
         });
     };
@@ -319,6 +285,8 @@ const Licenses = () => {
         const a = document.createElement('a');
         a.href = url;
         a.download = `licenses_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.style.display = 'none';
+        a.setAttribute('tabindex', '-1');
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -350,10 +318,9 @@ const Licenses = () => {
         }
     };
 
-    const handleResetHwid = async () => {
+    const handleResetHwid = () => {
         if (!selectedLicense) return;
 
-        // Check if resets are available
         if (resetStatus && resetStatus.resets_remaining <= 0) {
             toast.warning('No HWID resets remaining this month. Please try again next month.');
             return;
@@ -364,8 +331,7 @@ const Licenses = () => {
             return;
         }
 
-        setConfirmDialog({
-            isOpen: true,
+        confirm({
             title: 'Reset HWID Bindings',
             message: 'This will remove all hardware bindings for this license. The client will need to reactivate on their machines.',
             confirmText: 'Reset HWID',
@@ -382,11 +348,13 @@ const Licenses = () => {
                         resets_this_month: prev.resets_this_month + 1,
                         resets_remaining: result.resets_remaining_this_month
                     } : null);
-                    fetchData();
+                    // Optimistic: update active_machines count in local state
+                    setLicenses(prev => prev.map(l =>
+                        l.id === selectedLicense.id ? { ...l, active_machines: 0 } : l
+                    ));
                 } catch (error) {
                     console.error('Failed to reset HWID:', error);
-                    const errorMessage = error.response?.data?.detail || 'Failed to reset HWID bindings.';
-                    toast.error(errorMessage);
+                    toast.error(error.response?.data?.detail || 'Failed to reset HWID bindings.');
                 } finally {
                     setResetting(false);
                 }
@@ -394,67 +362,43 @@ const Licenses = () => {
         });
     };
 
-    const handleRemoveBinding = async (bindingId) => {
-        setConfirmDialog({
-            isOpen: true,
+    const handleRemoveBinding = (bindingId) => {
+        confirm({
             title: 'Remove Machine Binding',
             message: 'Are you sure you want to remove this machine binding? The machine will need to re-activate.',
             confirmText: 'Remove',
             confirmVariant: 'danger',
             onConfirm: async () => {
-                try {
-                    await licenseApi.removeBinding(selectedLicense.id, bindingId);
-                    setBindings(bindings.filter(b => b.id !== bindingId));
-                    toast.success('Machine binding removed successfully');
-                    fetchData();
-                } catch (error) {
-                    console.error('Failed to remove binding:', error);
-                    toast.error('Failed to remove machine binding');
-                }
+                await licenseApi.removeBinding(selectedLicense.id, bindingId);
+                setBindings(prev => prev.filter(b => b.id !== bindingId));
+                toast.success('Machine binding removed successfully');
+                // Optimistic: decrement active_machines in local state
+                setLicenses(prev => prev.map(l =>
+                    l.id === selectedLicense.id
+                        ? { ...l, active_machines: Math.max(0, (l.active_machines || 1) - 1) }
+                        : l
+                ));
             }
         });
-    };
-
-    const getStatusBadge = (status) => {
-        switch (status) {
-            case 'active':
-                return (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle size={12} /> Active
-                    </span>
-                );
-            case 'revoked':
-                return (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
-                        <XCircle size={12} /> Revoked
-                    </span>
-                );
-            default:
-                return (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        <AlertTriangle size={12} /> {status}
-                    </span>
-                );
-        }
     };
 
     return (
         <div className="animate-fade-in">
             <div className="flex items-center justify-between mb-8">
                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Licenses</h1>
-                    <p className="text-slate-400">Issue and manage access keys.</p>
+                    <h1 className="text-3xl font-bold text-cv-text mb-2">Licenses</h1>
+                    <p className="text-cv-text-muted">Issue and manage access keys.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <button
                         onClick={handleExportCSV}
-                        className="btn btn-secondary"
+                        className="btn-secondary flex items-center gap-2"
                         title="Export to CSV"
                     >
                         <Download size={18} />
                         Export CSV
                     </button>
-                    <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+                    <button onClick={() => setIsModalOpen(true)} className="btn-primary flex items-center gap-2">
                         <Plus size={20} />
                         Issue License
                     </button>
@@ -465,21 +409,21 @@ const Licenses = () => {
             <div className="glass-card p-4 mb-6">
                 <div className="flex flex-wrap items-center gap-4">
                     <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-                        <Search size={20} className="text-slate-400" />
+                        <Search size={20} className="text-cv-text-muted" />
                         <input
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search by key, client name or email..."
-                            className="input flex-1 w-auto bg-slate-900/50"
+                            className="input flex-1 w-auto"
                         />
                     </div>
                     <div className="flex items-center gap-2">
-                        <Filter size={16} className="text-slate-400" />
+                        <Filter size={16} className="text-cv-text-muted" />
                         <select
                             value={filterProject}
                             onChange={(e) => setFilterProject(e.target.value)}
-                            className="input bg-slate-900/50"
+                            className="input"
                         >
                             <option value="">All Projects</option>
                             {projects.map(p => (
@@ -489,7 +433,7 @@ const Licenses = () => {
                         <select
                             value={filterStatus}
                             onChange={(e) => setFilterStatus(e.target.value)}
-                            className="input bg-slate-900/50"
+                            className="input"
                         >
                             <option value="">All Status</option>
                             <option value="active">Active</option>
@@ -501,21 +445,21 @@ const Licenses = () => {
 
                 {/* Bulk Actions Bar */}
                 {selectedLicenses.size > 0 && (
-                    <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
-                        <span className="text-sm text-slate-400">
+                    <div className="mt-4 pt-4 border-t border-cv-border flex items-center justify-between">
+                        <span className="text-sm text-cv-text-muted">
                             {selectedLicenses.size} license(s) selected
                         </span>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={handleBulkRevoke}
-                                className="btn btn-secondary text-amber-400 hover:bg-amber-500/10"
+                                className="btn-secondary flex items-center gap-2 text-amber-400 hover:bg-amber-500/10"
                             >
                                 <Ban size={16} />
                                 Revoke Selected
                             </button>
                             <button
                                 onClick={handleBulkDelete}
-                                className="btn btn-secondary text-red-400 hover:bg-red-500/10"
+                                className="btn-secondary flex items-center gap-2 text-red-400 hover:bg-red-500/10"
                             >
                                 <Trash2 size={16} />
                                 Delete Selected
@@ -526,7 +470,7 @@ const Licenses = () => {
             </div>
 
             <div className="glass-card overflow-hidden">
-                <div className="table-container border-0 bg-transparent">
+                <div className="border-0 bg-transparent">
                     <table>
                         <thead>
                             <tr>
@@ -535,7 +479,7 @@ const Licenses = () => {
                                         type="checkbox"
                                         checked={selectedLicenses.size === paginatedLicenses.length && paginatedLicenses.length > 0}
                                         onChange={handleSelectAll}
-                                        className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
+                                        className="rounded border-cv-border bg-cv-bg-elevated text-cv-primary focus:ring-cv-primary"
                                     />
                                 </th>
                                 <th>License Key</th>
@@ -551,131 +495,124 @@ const Licenses = () => {
                         <tbody>
                             {paginatedLicenses.length === 0 ? (
                                 <tr>
-                                    <td colSpan="9" className="text-center py-12 text-slate-500">
+                                    <td colSpan="9" className="text-center py-12 text-cv-text-dim">
                                         {loading ? 'Loading...' : 'No licenses found.'}
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedLicenses.map((license, index) => (
-                                    <tr key={license.id} className="group hover:bg-white/5 transition-colors animate-fade-in" style={{ animationDelay: `${index * 50}ms` }}>
-                                        <td>
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedLicenses.has(license.id)}
-                                                onChange={() => handleSelectLicense(license.id)}
-                                                className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
-                                            />
-                                        </td>
-                                        <td className="font-mono text-sm">
-                                            <div className="flex items-center gap-3">
-                                                <div className="p-2 rounded bg-white/5 text-slate-400">
-                                                    <Key size={14} />
-                                                </div>
-                                                <span className="text-indigo-300 font-medium">{license.license_key}</span>
-                                                <button
-                                                    onClick={() => copyToClipboard(license.license_key)}
-                                                    className="text-slate-500 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
-                                                    title="Copy Key"
-                                                >
-                                                    <Copy size={14} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-2">
-                                                <Folder size={14} className="text-blue-400" />
-                                                <span className="text-sm text-slate-300">{getProjectName(license)}</span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex flex-col">
-                                                <span className="font-medium text-white">{license.client_name || 'Unknown Client'}</span>
-                                                <span className="text-xs text-slate-500">{license.client_email || 'No email'}</span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            {getStatusBadge(license.status)}
-                                        </td>
-                                        <td>
-                                            {license.expires_at ? (
-                                                <div className="flex items-center gap-2">
-                                                    <Calendar size={14} className={(() => {
-                                                        const daysUntilExpiry = Math.ceil((new Date(license.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-                                                        if (daysUntilExpiry < 0) return 'text-red-400';
-                                                        if (daysUntilExpiry < 7) return 'text-red-400';
-                                                        if (daysUntilExpiry < 30) return 'text-amber-400';
-                                                        return 'text-slate-400';
-                                                    })()} />
-                                                    <span className={(() => {
-                                                        const daysUntilExpiry = Math.ceil((new Date(license.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-                                                        if (daysUntilExpiry < 0) return 'text-red-400';
-                                                        if (daysUntilExpiry < 7) return 'text-red-400';
-                                                        if (daysUntilExpiry < 30) return 'text-amber-400';
-                                                        return 'text-slate-400';
-                                                    })()}>
-                                                        {new Date(license.expires_at).toLocaleDateString()}
-                                                    </span>
-                                                </div>
-                                            ) : (
-                                                <span className="text-slate-500 text-sm">Never</span>
-                                            )}
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-indigo-500 rounded-full"
-                                                        style={{ width: `${(license.active_machines / license.max_machines) * 100}%` }}
-                                                    />
-                                                </div>
-                                                <span className="text-xs text-slate-400">
-                                                    {license.active_machines}/{license.max_machines}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex flex-wrap gap-1 max-w-[150px]">
-                                                {(license.features || []).slice(0, 2).map((feature, i) => (
-                                                    <span key={i} className="px-2 py-0.5 text-xs bg-indigo-500/20 text-indigo-300 rounded-full">
-                                                        {feature}
-                                                    </span>
-                                                ))}
-                                                {(license.features || []).length > 2 && (
-                                                    <span className="px-2 py-0.5 text-xs bg-slate-500/20 text-slate-400 rounded-full">
-                                                        +{license.features.length - 2}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleViewBindings(license)}
-                                                    className="p-2 rounded-lg hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 transition-colors"
-                                                    title="View Machines"
-                                                >
-                                                    <Monitor size={16} />
-                                                </button>
-                                                {license.status === 'active' && (
+                                paginatedLicenses.map((license, index) => {
+                                    const daysUntilExpiry = getDaysUntilExpiry(license.expires_at);
+                                    const expiryColor = getExpiryColorClass(daysUntilExpiry);
+
+                                    return (
+                                        <tr key={license.id} className="group hover:bg-white/5 transition-colors animate-fade-in" style={{ animationDelay: `${index * 50}ms` }}>
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedLicenses.has(license.id)}
+                                                    onChange={() => handleSelectLicense(license.id)}
+                                                    className="rounded border-cv-border bg-cv-bg-elevated text-cv-primary focus:ring-cv-primary"
+                                                />
+                                            </td>
+                                            <td className="font-mono text-sm">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2 rounded bg-cv-border-subtle text-cv-text-muted">
+                                                        <Key size={14} />
+                                                    </div>
+                                                    <span className="text-cv-primary font-medium">{license.license_key}</span>
                                                     <button
-                                                        onClick={() => handleRevoke(license.id)}
-                                                        className="p-2 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-                                                        title="Revoke License"
+                                                        onClick={() => copyToClipboard(license.license_key)}
+                                                        className="text-cv-text-dim hover:text-cv-text opacity-0 group-hover:opacity-100 transition-all"
+                                                        title="Copy Key"
                                                     >
-                                                        <Ban size={16} />
+                                                        <Copy size={14} />
                                                     </button>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex items-center gap-2">
+                                                    <Folder size={14} className="text-blue-400" />
+                                                    <span className="text-sm text-cv-text-muted">{getProjectName(license)}</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium text-cv-text">{license.client_name || 'Unknown Client'}</span>
+                                                    <span className="text-xs text-cv-text-dim">{license.client_email || 'No email'}</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <StatusBadge status={license.status} />
+                                            </td>
+                                            <td>
+                                                {license.expires_at ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <Calendar size={14} className={expiryColor} />
+                                                        <span className={expiryColor}>
+                                                            {new Date(license.expires_at).toLocaleDateString()}
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-cv-text-dim text-sm">Never</span>
                                                 )}
-                                                <button
-                                                    onClick={() => handleDelete(license.id)}
-                                                    className="p-2 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-                                                    title="Delete License"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
+                                            </td>
+                                            <td>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-24 h-1.5 bg-cv-border-subtle rounded-full overflow-hidden">
+                                                        <div
+                                                            className="h-full bg-cv-primary rounded-full"
+                                                            style={{ width: `${(license.active_machines / license.max_machines) * 100}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-xs text-cv-text-muted">
+                                                        {license.active_machines}/{license.max_machines}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex flex-wrap gap-1 max-w-[150px]">
+                                                    {(license.features || []).slice(0, 2).map((feature, i) => (
+                                                        <span key={i} className="px-2 py-0.5 text-xs bg-cv-primary/20 text-cv-primary rounded-full">
+                                                            {feature}
+                                                        </span>
+                                                    ))}
+                                                    {(license.features || []).length > 2 && (
+                                                        <span className="px-2 py-0.5 text-xs bg-cv-border-subtle text-cv-text-dim rounded-full">
+                                                            +{license.features.length - 2}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => handleViewBindings(license)}
+                                                        className="p-2 rounded-lg hover:bg-cv-primary/20 text-cv-text-muted hover:text-cv-primary transition-colors"
+                                                        title="View Machines"
+                                                    >
+                                                        <Monitor size={16} />
+                                                    </button>
+                                                    {license.status === 'active' && (
+                                                        <button
+                                                            onClick={() => handleRevoke(license.id)}
+                                                            className="p-2 rounded-lg hover:bg-red-500/20 text-cv-text-muted hover:text-red-400 transition-colors"
+                                                            title="Revoke License"
+                                                        >
+                                                            <Ban size={16} />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleDelete(license.id)}
+                                                        className="p-2 rounded-lg hover:bg-red-500/20 text-cv-text-muted hover:text-red-400 transition-colors"
+                                                        title="Delete License"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>
@@ -683,15 +620,15 @@ const Licenses = () => {
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-between px-6 py-4 border-t border-white/10">
-                        <span className="text-sm text-slate-400">
+                    <div className="flex items-center justify-between px-6 py-4 border-t border-cv-border">
+                        <span className="text-sm text-cv-text-muted">
                             Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredLicenses.length)} of {filteredLicenses.length} licenses
                         </span>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                                 disabled={currentPage === 1}
-                                className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                className="p-2 rounded-lg hover:bg-cv-border-subtle text-cv-text-muted hover:text-cv-text disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronLeft size={18} />
                             </button>
@@ -700,8 +637,8 @@ const Licenses = () => {
                                     key={i + 1}
                                     onClick={() => setCurrentPage(i + 1)}
                                     className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${currentPage === i + 1
-                                        ? 'bg-indigo-500 text-white'
-                                        : 'hover:bg-white/10 text-slate-400'
+                                        ? 'bg-cv-primary text-white'
+                                        : 'hover:bg-cv-border-subtle text-cv-text-muted'
                                         }`}
                                 >
                                     {i + 1}
@@ -713,7 +650,7 @@ const Licenses = () => {
                             <button
                                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                                 disabled={currentPage === totalPages}
-                                className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                className="p-2 rounded-lg hover:bg-cv-border-subtle text-cv-text-muted hover:text-cv-text disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 <ChevronRight size={18} />
                             </button>
@@ -756,15 +693,7 @@ const Licenses = () => {
             />
 
             {/* Confirm Dialog */}
-            <ConfirmDialog
-                isOpen={confirmDialog.isOpen}
-                onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-                onConfirm={confirmDialog.onConfirm}
-                title={confirmDialog.title}
-                message={confirmDialog.message}
-                confirmText={confirmDialog.confirmText}
-                confirmVariant={confirmDialog.confirmVariant}
-            />
+            <ConfirmDialog {...dialogProps} />
         </div>
     );
 };

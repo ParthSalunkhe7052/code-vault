@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
-import { stats, auth, projects } from '../services/api';
+import { Activity, Database, Key, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
+import { stats, projects } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, QuickStatsBar } from '../components/dashboard';
 import UsageStats from '../components/dashboard/UsageStats';
 import OnboardingHero from '../components/dashboard/OnboardingHero';
@@ -9,8 +10,9 @@ import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleto
 import ThemeToggle from '../components/ThemeToggle';
 
 const Dashboard = () => {
+    // user is already available from AuthContext — no need for a second getMe() call
+    const { user: userProfile } = useAuth();
     const [dashboardStats, setDashboardStats] = useState(null);
-    const [userProfile, setUserProfile] = useState(null);
     const [projectList, setProjectList] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -18,13 +20,11 @@ const Dashboard = () => {
         setLoading(true);
         try {
             // Fetch each independently so one failure doesn't break the whole dashboard
-            const [statsResult, userResult, projectsResult] = await Promise.allSettled([
+            const [statsResult, projectsResult] = await Promise.allSettled([
                 stats.getDashboard(),
-                auth.getMe(),
                 projects.list()
             ]);
             if (statsResult.status === 'fulfilled') setDashboardStats(statsResult.value);
-            if (userResult.status === 'fulfilled') setUserProfile(userResult.value);
             if (projectsResult.status === 'fulfilled') setProjectList(projectsResult.value || []);
         } catch (error) {
             console.error('Failed to fetch dashboard data:', error);
@@ -82,10 +82,10 @@ const Dashboard = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-end justify-between border-b border-white/10 pb-6">
+            <div className="flex items-end justify-between border-b border-cv-border pb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
-                    <p className="text-slate-400 text-sm">Overview of your license management</p>
+                    <h1 className="text-2xl font-bold text-cv-text mb-1">Dashboard</h1>
+                    <p className="text-cv-text-muted text-sm">Overview of your license management</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <ThemeToggle />
@@ -165,12 +165,12 @@ const Dashboard = () => {
                 <div className="glass-card p-6 border-amber-500/20 bg-amber-500/5">
                     <div className="flex items-center gap-3 mb-4">
                         <AlertTriangle size={20} className="text-amber-400" />
-                        <h2 className="text-lg font-semibold text-white">Licenses Expiring Soon</h2>
+                        <h2 className="text-lg font-semibold text-cv-text">Licenses Expiring Soon</h2>
                         <span className="px-2 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded-full">
                             {dashboardStats.expiring_soon.length}
                         </span>
                     </div>
-                    <div className="divide-y divide-white/5">
+                    <div className="divide-y divide-cv-border-subtle">
                         {dashboardStats.expiring_soon.map((license, i) => (
                             <ExpiringLicense key={license.id || i} license={license} />
                         ))}
@@ -188,20 +188,20 @@ const Dashboard = () => {
                 <div className="glass-card p-6">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
-                            <Activity size={20} className="text-indigo-400" />
-                            <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
+                            <Activity size={20} className="text-cv-primary" />
+                            <h2 className="text-lg font-semibold text-cv-text">Recent Activity</h2>
                         </div>
                     </div>
                     {dashboardStats?.recent_activity?.length > 0 ? (
-                        <div className="divide-y divide-white/5">
+                        <div className="divide-y divide-cv-border-subtle">
                             {dashboardStats.recent_activity.slice(0, 6).map((activity, i) => (
                                 <ActivityItem key={i} activity={activity} />
                             ))}
                         </div>
                     ) : (
                         <div className="p-4 text-center">
-                            <p className="text-slate-500 text-sm">No license validations yet.</p>
-                            <p className="text-slate-600 text-xs mt-1">Activity will appear here when clients validate licenses.</p>
+                            <p className="text-cv-text-dim text-sm">No license validations yet.</p>
+                            <p className="text-cv-text-dim text-xs mt-1">Activity will appear here when clients validate licenses.</p>
                         </div>
                     )}
                 </div>
