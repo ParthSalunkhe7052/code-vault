@@ -298,7 +298,7 @@ echo "[Cloud Build] Cache restore complete"
             "id": "restore-cache",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": ["-"],
+            "wait_for": ["-"],
         }
 
     def _create_download_source_step(
@@ -325,7 +325,7 @@ fi
             "id": "download-source",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": ["restore-cache"],
+            "wait_for": ["restore-cache"],
         }
 
     def _create_extract_source_step(self) -> Dict[str, Any]:
@@ -351,7 +351,7 @@ echo "[Cloud Build] Source prepared"
             "id": "extract-source",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": ["download-source"],
+            "wait_for": ["download-source"],
         }
 
     def _create_download_config_step(
@@ -380,7 +380,7 @@ fi
             "id": "download-config",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": ["extract-source"],
+            "wait_for": ["extract-source"],
         }
 
     def _create_python_build_steps(
@@ -488,14 +488,14 @@ if [ -d "$$HOME/.cache/Nuitka" ]; then
 fi
 """
 
-        # Linux and Windows build steps run in PARALLEL (both waitFor download-config)
+        # Linux and Windows build steps run in PARALLEL (both wait_for download-config)
         steps.append(
             {
                 "name": "gcr.io/cloudbuild-486309/codevault-builder:latest",
                 "id": "build-linux",
                 "args": ["-c", linux_build_script],
                 "entrypoint": "bash",
-                "waitFor": ["download-config"],
+                "wait_for": ["download-config"],
             }
         )
 
@@ -538,7 +538,7 @@ fi
                 "id": "upload-linux",
                 "args": ["-c", linux_upload_script],
                 "entrypoint": "bash",
-                "waitFor": ["build-linux"],
+                "wait_for": ["build-linux"],
             }
         )
 
@@ -695,7 +695,7 @@ fi
                 "id": "build-windows",
                 "args": ["-c", windows_build_script],
                 "entrypoint": "bash",
-                "waitFor": ["download-config"],
+                "wait_for": ["download-config"],
             }
         )
 
@@ -738,7 +738,7 @@ fi
                 "id": "upload-windows",
                 "args": ["-c", windows_upload_script],
                 "entrypoint": "bash",
-                "waitFor": ["build-windows"],
+                "wait_for": ["build-windows"],
             }
         )
 
@@ -868,7 +868,7 @@ echo "[Cloud Build] Node.js build step complete"
                 "id": "build-nodejs",
                 "args": ["-c", build_script],
                 "entrypoint": "bash",
-                "waitFor": ["download-config"],
+                "wait_for": ["download-config"],
             }
         )
 
@@ -892,7 +892,7 @@ gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/w
                 "id": "upload-nodejs",
                 "args": ["-c", windows_upload_script],
                 "entrypoint": "bash",
-                "waitFor": ["build-nodejs"],
+                "wait_for": ["build-nodejs"],
             }
         )
 
@@ -916,7 +916,7 @@ gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/lin
                 "id": "upload-nodejs-linux",
                 "args": ["-c", linux_upload_script],
                 "entrypoint": "bash",
-                "waitFor": ["build-nodejs"],
+                "wait_for": ["build-nodejs"],
             }
         )
 
@@ -973,7 +973,7 @@ echo "[Cloud Build] Cache save complete"
             "id": "save-cache",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": wait_for,
+            "wait_for": wait_for,
         }
 
     def _create_webhook_step(
@@ -1086,7 +1086,7 @@ echo "[Cloud Build] Webhook completed"
             "id": "webhook-callback",
             "args": ["-c", script],
             "entrypoint": "bash",
-            "waitFor": ["save-cache"],
+            "wait_for": ["save-cache"],
         }
 
     def get_build_status(self, gcp_build_id: str) -> Dict[str, Any]:
