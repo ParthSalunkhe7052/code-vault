@@ -496,11 +496,25 @@ if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
     exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
     echo "[Cloud Build] EXE size: $exe_size"
 
-    # Create ZIP of standalone build
+    # Create ZIP of standalone build - try apt-get zip first, fallback to Python
     mkdir -p /workspace/artifacts
     parent_dir=$(dirname "$dist_dir")
     cd "$parent_dir"
-    zip -r "/workspace/artifacts/${{output_name}}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
+    if command -v zip &> /dev/null; then
+      zip -r "/workspace/artifacts/${{output_name}}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
+    else
+      python3 -c "
+import zipfile, os, sys
+dn, on = '$dist_name', '${{output_name}}'
+zf = zipfile.ZipFile(f'/workspace/artifacts/{on}.zip', 'w', zipfile.ZIP_DEFLATED)
+for r, ds, fs in os.walk(dn):
+  ds[:] = [d for d in ds if d != '__pycache__']
+  for f in fs:
+    if f.endswith('.pyc'): continue
+    zf.write(os.path.join(r, f), os.path.relpath(os.path.join(r, f), '.'))
+zf.close()
+"
+    fi
     zip_size=$(ls -lh "/workspace/artifacts/${{output_name}}.zip" | awk '{{print $5}}')
     echo "[Cloud Build] Created standalone ZIP: $zip_size"
 

@@ -535,11 +535,24 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   ls -la "$$dist_dir/" 2>/dev/null || true
   
   # Zip the entire .dist folder with all dependencies (including python311.dll)
-  # Use zip for Windows (tar.gz is not natively supported on Windows)
+  # Use Python zipfile (more reliable than apt-get install zip)
   parent_dir=$$(dirname "$$dist_dir")
   cd "$$parent_dir"
-  apt-get install -y -qq zip 2>/dev/null || true
-  zip -r -q "/workspace/{output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
+  if command -v zip &> /dev/null; then
+    zip -r -q "/workspace/{output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
+  else
+    python3 -c "
+import zipfile, os
+dn, on = '$$dist_name', '{output_name}'
+zf = zipfile.ZipFile(f'/workspace/{on}.zip', 'w', zipfile.ZIP_DEFLATED)
+for r, ds, fs in os.walk(dn):
+  ds[:] = [d for d in ds if d != '__pycache__']
+  for f in fs:
+    if f.endswith('.pyc'): continue
+    zf.write(os.path.join(r, f), os.path.relpath(os.path.join(r, f), '.'))
+zf.close()
+"
+  fi
   cd /workspace
 
   if [ -f "/workspace/{output_name}.zip" ]; then
