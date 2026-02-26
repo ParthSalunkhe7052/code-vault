@@ -235,8 +235,8 @@ class CloudBuildClient:
                 )
             )
 
-        # Save cache
-        steps.append(self._create_save_cache_step(gcs_bucket))
+        # Save cache - waitFor depends on which upload steps were created for this language
+        steps.append(self._create_save_cache_step(gcs_bucket, language))
 
         # Webhook callback
         steps.append(
@@ -274,13 +274,31 @@ else
   echo "[Cloud Build] ccache not found"
 fi
 
+# Restore MinGW cache (Windows cross-compilation toolchain - avoids ~300MB re-download each build)
+if gsutil -q stat "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" 2>/dev/null; then
+  mingw_size=$$(gsutil du "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" 2>/dev/null | awk '{{print $$1}}' | cut -d'.' -f1)
+  if [ -n "$$mingw_size" ] && [ "$$mingw_size" -gt 524288000 ]; then
+    echo "[Cloud Build] Skipping MinGW cache (too large: $$mingw_size bytes)"
+  else
+    echo "[Cloud Build] Restoring MinGW cache..."
+    gsutil cp "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz" /tmp/mingw-cache.tar.gz
+    mkdir -p /workspace/.mingw-cache
+    tar -xzf /tmp/mingw-cache.tar.gz -C /workspace/.mingw-cache 2>/dev/null || true
+    echo "[Cloud Build] MinGW cache restored"
+  fi
+else
+  echo "[Cloud Build] MinGW cache not found (first build or cache expired)"
+fi
+
 echo "[Cloud Build] Cache restore complete"
 """
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
+            "id": "restore-cache",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": ["-"],
         }
 
     def _create_download_source_step(
@@ -304,8 +322,10 @@ fi
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
+            "id": "download-source",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": ["restore-cache"],
         }
 
     def _create_extract_source_step(self) -> Dict[str, Any]:
@@ -328,8 +348,10 @@ echo "[Cloud Build] Source prepared"
 
         return {
             "name": "ubuntu",
+            "id": "extract-source",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": ["download-source"],
         }
 
     def _create_download_config_step(
@@ -355,8 +377,10 @@ fi
 
         return {
             "name": "gcr.io/cloud-builders/gsutil",
+            "id": "download-config",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": ["extract-source"],
         }
 
     def _create_python_build_steps(
@@ -374,7 +398,9 @@ if [[ "{target_platforms}" != *"linux"* ]]; then
 fi
 
 echo "[Cloud Build] ===== Building for Linux ====="
-pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
+# Skip pip install if Nuitka 2.4.8 is already pre-installed in the builder image
+python3 -c "import nuitka; v=nuitka.__version__; assert v=='2.4.8', 'version mismatch: '+v" 2>/dev/null || \
+  pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   echo "cloud_runner.py not found" > ./project/source/error_message.txt
@@ -385,6 +411,9 @@ fi
 decoded_config=$$(cat /workspace/config.json)
 export NUITKA_JOBS=6
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
+# Point ccache at the restored workspace directory so Nuitka's C compilation is cached
+export CCACHE_DIR=/workspace/.ccache
+export CCACHE_COMPRESS=1
 mkdir -p $$NUITKA_CACHE_DIR
 
 if [ -d /workspace/.nuitka-cache ]; then
@@ -459,15 +488,18 @@ if [ -d "$$HOME/.cache/Nuitka" ]; then
 fi
 """
 
+        # Linux and Windows build steps run in PARALLEL (both waitFor download-config)
         steps.append(
             {
                 "name": "gcr.io/cloudbuild-486309/codevault-builder:latest",
+                "id": "build-linux",
                 "args": ["-c", linux_build_script],
                 "entrypoint": "bash",
+                "waitFor": ["download-config"],
             }
         )
 
-        # Linux upload step
+        # Linux upload step (with 3-retry logic)
         linux_upload_script = f"""linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
 if [[ "$$linux_status" != "completed" ]]; then
   echo "[Cloud Build] Skipping Linux upload (status: $$linux_status)"
@@ -477,15 +509,36 @@ linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
 if [ -z "$$linux_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Linux: $$linux_artifact"
-gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact"
+
+max_retries=3
+retry_count=0
+upload_success=false
+while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
+  if [ $$retry_count -gt 0 ]; then
+    echo "[Cloud Build] Retrying Linux upload (attempt $$((retry_count+1))/$$max_retries)..."
+    sleep 2
+  fi
+  echo "[Cloud Build] Uploading Linux: $$linux_artifact"
+  if gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact" 2>/dev/null; then
+    upload_success=true
+    echo "[Cloud Build] Linux upload successful"
+  else
+    retry_count=$$((retry_count+1))
+  fi
+done
+if [ "$$upload_success" != "true" ]; then
+  echo "[Cloud Build] Linux upload failed after $$max_retries attempts"
+  exit 1
+fi
 """
 
         steps.append(
             {
                 "name": "gcr.io/cloud-builders/gsutil",
+                "id": "upload-linux",
                 "args": ["-c", linux_upload_script],
                 "entrypoint": "bash",
+                "waitFor": ["build-linux"],
             }
         )
 
@@ -501,7 +554,15 @@ echo "[Cloud Build] ===== Building for Windows ====="
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 mkdir -p $$NUITKA_CACHE_DIR
 
-wine python -m pip install --upgrade --quiet --disable-pip-version-check nuitka ordered-set zstandard requests cryptography pefile
+# Restore MinGW cache (avoids re-downloading ~300MB toolchain each build)
+if [ -d /workspace/.mingw-cache ]; then
+  echo "[Cloud Build] Restoring MinGW cache..."
+  mkdir -p /root/.cache/Nuitka/downloads
+  cp -r /workspace/.mingw-cache/. /root/.cache/Nuitka/downloads/ 2>/dev/null || true
+  echo "[Cloud Build] MinGW cache restored"
+fi
+
+wine python -m pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography pefile
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   echo "cloud_runner.py not found" > ./project/source/error_message.txt
@@ -517,7 +578,17 @@ if [ -n "$$nuitka_depends_py" ]; then
 fi
 
 decoded_config=$$(cat /workspace/config.json)
-wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))"
+
+echo "[Cloud Build] Running cloud_runner.py for Windows build..."
+set +e
+wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))" 2>&1
+runner_exit_code=$$?
+set -e
+
+if [ $$runner_exit_code -ne 0 ]; then
+  echo "[Cloud Build] ERROR: cloud_runner.py exited with code $$runner_exit_code"
+  echo "Build runner failed with exit code $$runner_exit_code" > ./project/source/error_message.txt
+fi
 
 windows_artifacts=""
 windows_status="failed"
@@ -602,17 +673,33 @@ fi
 echo "$$windows_status" > /workspace/build_status_windows
 echo "$$windows_artifacts" > /workspace/windows_artifacts
 echo "$$windows_error" > /workspace/windows_error
+
+# Save MinGW cache for faster future Windows builds (10MB < size < 600MB)
+if [ -d /root/.cache/Nuitka/downloads ]; then
+  mingw_cache_size=$$(du -s /root/.cache/Nuitka/downloads 2>/dev/null | cut -f1)
+  if [ -n "$$mingw_cache_size" ] && [ "$$mingw_cache_size" -gt 10000 ] && [ "$$mingw_cache_size" -lt 600000 ]; then
+    echo "[Cloud Build] Saving MinGW cache ($$mingw_cache_size KB)..."
+    mkdir -p /workspace/.mingw-cache
+    cp -r /root/.cache/Nuitka/downloads/. /workspace/.mingw-cache/ 2>/dev/null || true
+    echo "[Cloud Build] MinGW cache staged"
+  else
+    echo "[Cloud Build] Skipping MinGW cache (size: $$mingw_cache_size KB, limit: 600MB)"
+  fi
+fi
 """
 
+        # Windows build step also waits for download-config (runs PARALLEL to Linux)
         steps.append(
             {
                 "name": "docker.io/tobix/pywine:3.11",
+                "id": "build-windows",
                 "args": ["-c", windows_build_script],
                 "entrypoint": "bash",
+                "waitFor": ["download-config"],
             }
         )
 
-        # Windows upload step
+        # Windows upload step (with 3-retry logic)
         windows_upload_script = f"""windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
 if [[ "$$windows_status" != "completed" ]]; then
   echo "[Cloud Build] Skipping Windows upload (status: $$windows_status)"
@@ -622,15 +709,36 @@ windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
 if [ -z "$$windows_artifact" ]; then
   exit 0
 fi
-echo "[Cloud Build] Uploading Windows: $$windows_artifact"
-gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact"
+
+max_retries=3
+retry_count=0
+upload_success=false
+while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
+  if [ $$retry_count -gt 0 ]; then
+    echo "[Cloud Build] Retrying Windows upload (attempt $$((retry_count+1))/$$max_retries)..."
+    sleep 2
+  fi
+  echo "[Cloud Build] Uploading Windows: $$windows_artifact"
+  if gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact" 2>/dev/null; then
+    upload_success=true
+    echo "[Cloud Build] Windows upload successful"
+  else
+    retry_count=$$((retry_count+1))
+  fi
+done
+if [ "$$upload_success" != "true" ]; then
+  echo "[Cloud Build] Windows upload failed after $$max_retries attempts"
+  exit 1
+fi
 """
 
         steps.append(
             {
                 "name": "gcr.io/cloud-builders/gsutil",
+                "id": "upload-windows",
                 "args": ["-c", windows_upload_script],
                 "entrypoint": "bash",
+                "waitFor": ["build-windows"],
             }
         )
 
@@ -757,8 +865,10 @@ echo "[Cloud Build] Node.js build step complete"
         steps.append(
             {
                 "name": "node:20-slim",
+                "id": "build-nodejs",
                 "args": ["-c", build_script],
                 "entrypoint": "bash",
+                "waitFor": ["download-config"],
             }
         )
 
@@ -779,8 +889,10 @@ gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/w
         steps.append(
             {
                 "name": "gcr.io/cloud-builders/gsutil",
+                "id": "upload-nodejs",
                 "args": ["-c", windows_upload_script],
                 "entrypoint": "bash",
+                "waitFor": ["build-nodejs"],
             }
         )
 
@@ -801,14 +913,16 @@ gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/lin
         steps.append(
             {
                 "name": "gcr.io/cloud-builders/gsutil",
+                "id": "upload-nodejs-linux",
                 "args": ["-c", linux_upload_script],
                 "entrypoint": "bash",
+                "waitFor": ["build-nodejs"],
             }
         )
 
         return steps
 
-    def _create_save_cache_step(self, gcs_bucket: str) -> Dict[str, Any]:
+    def _create_save_cache_step(self, gcs_bucket: str, language: str = "python") -> Dict[str, Any]:
         """Create cache save step."""
         script = f"""set +e
 echo "[Cloud Build] Saving cache..."
@@ -831,14 +945,35 @@ if [ -d /workspace/.ccache ]; then
   fi
 fi
 
+# Save MinGW cache (staged by Windows build step; 10MB < size < 600MB)
+if [ -d /workspace/.mingw-cache ]; then
+  mingw_cache_size=$$(du -s /workspace/.mingw-cache 2>/dev/null | cut -f1)
+  if [ -n "$$mingw_cache_size" ] && [ "$$mingw_cache_size" -gt 10000 ] && [ "$$mingw_cache_size" -lt 600000 ]; then
+    echo "[Cloud Build] Saving MinGW cache ($$mingw_cache_size KB)..."
+    tar -czf /tmp/mingw-cache.tar.gz -C /workspace/.mingw-cache . 2>/dev/null
+    gsutil cp /tmp/mingw-cache.tar.gz "gs://{gcs_bucket}/cache/mingw-cache-default.tar.gz"
+    echo "[Cloud Build] Saved MinGW cache"
+  else
+    echo "[Cloud Build] Skipping MinGW cache save (size: $$mingw_cache_size KB, limit: 600MB)"
+  fi
+fi
+
 echo "[Cloud Build] Skipping Nuitka cache save (disabled)"
 echo "[Cloud Build] Cache save complete"
 """
 
+        # waitFor must only reference step IDs that exist for this language
+        if language == "nodejs":
+            wait_for = ["upload-nodejs", "upload-nodejs-linux"]
+        else:
+            wait_for = ["upload-linux", "upload-windows"]
+
         return {
             "name": "gcr.io/cloud-builders/gsutil",
+            "id": "save-cache",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": wait_for,
         }
 
     def _create_webhook_step(
@@ -948,8 +1083,10 @@ echo "[Cloud Build] Webhook completed"
 
         return {
             "name": "gcr.io/cloud-builders/curl",
+            "id": "webhook-callback",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "waitFor": ["save-cache"],
         }
 
     def get_build_status(self, gcp_build_id: str) -> Dict[str, Any]:
