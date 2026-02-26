@@ -63,13 +63,32 @@ const api = axios.create({
     },
 });
 
+// Fixed stable app-instance secret stored in sessionStorage (not localStorage).
+// Generated fresh on each browser session and never persisted across tabs.
+// This is NOT a substitute for a proper per-user key, but it prevents
+// offline extraction of tokens from localStorage by attackers who only have
+// disk access (not an active session).
+function _getSessionSecret(): string {
+    const SESSION_SECRET_KEY = '__cv_ss';
+    let secret = sessionStorage.getItem(SESSION_SECRET_KEY);
+    if (!secret) {
+        // Generate a cryptographically random 32-byte hex string per browser session
+        const bytes = new Uint8Array(32);
+        crypto.getRandomValues(bytes);
+        secret = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+        sessionStorage.setItem(SESSION_SECRET_KEY, secret);
+    }
+    return secret;
+}
+
 /**
  * Initialize auth from encrypted storage.
  * Call this on app startup to populate the token cache.
  */
 export async function initializeAuth(): Promise<string | null> {
     try {
-        cachedToken = await secureLocalStorage.getItem(TOKEN_KEY);
+        const secret = _getSessionSecret();
+        cachedToken = await secureLocalStorage.getItem(TOKEN_KEY, secret);
     } catch (error) {
         console.error('Failed to initialize auth:', error);
         cachedToken = null;
@@ -97,8 +116,8 @@ api.interceptors.response.use(
             // Clear cached token and encrypted storage
             cachedToken = null;
             try {
-                await secureLocalStorage.removeItem(TOKEN_KEY);
-                await secureLocalStorage.removeItem(USER_KEY);
+                secureLocalStorage.removeItem(TOKEN_KEY);
+                secureLocalStorage.removeItem(USER_KEY);
             } catch (cleanupError) {
                 console.error('Failed to clean up auth storage:', cleanupError);
             }
@@ -114,9 +133,10 @@ export const auth = {
     login: async (email: string, password: string): Promise<User> => {
         const response = await api.post<AuthResponse>('/auth/login', { email, password });
         const { access_token, user } = response.data;
-        // Store encrypted token and user data
-        await secureLocalStorage.setItem(TOKEN_KEY, access_token);
-        await secureLocalStorage.setItem(USER_KEY, user);
+        // Store encrypted token and user data using per-session key
+        const secret = _getSessionSecret();
+        await secureLocalStorage.setItem(TOKEN_KEY, access_token, secret);
+        await secureLocalStorage.setItem(USER_KEY, user, secret);
         // Update cached token for immediate use
         cachedToken = access_token;
         return user;
@@ -124,30 +144,33 @@ export const auth = {
     register: async (email: string, password: string, name: string): Promise<User> => {
         const response = await api.post<AuthResponse>('/auth/register', { email, password, name });
         const { access_token, user } = response.data;
-        // Store encrypted token and user data
-        await secureLocalStorage.setItem(TOKEN_KEY, access_token);
-        await secureLocalStorage.setItem(USER_KEY, user);
+        // Store encrypted token and user data using per-session key
+        const secret = _getSessionSecret();
+        await secureLocalStorage.setItem(TOKEN_KEY, access_token, secret);
+        await secureLocalStorage.setItem(USER_KEY, user, secret);
         // Update cached token for immediate use
         cachedToken = access_token;
         return user;
     },
     logout: async (): Promise<void> => {
         cachedToken = null;
-        await secureLocalStorage.removeItem(TOKEN_KEY);
-        await secureLocalStorage.removeItem(USER_KEY);
+        secureLocalStorage.removeItem(TOKEN_KEY);
+        secureLocalStorage.removeItem(USER_KEY);
     },
     isAuthenticated: (): boolean => {
         return !!cachedToken;
     },
     getUser: async (): Promise<User | null> => {
-        const user = await secureLocalStorage.getItem(USER_KEY, true);
+        const secret = _getSessionSecret();
+        const user = await secureLocalStorage.getItem(USER_KEY, secret, true);
         return user || null;
     },
     getMe: (): Promise<User> => api.get<User>('/auth/me').then(res => res.data),
     refreshUser: async (): Promise<User> => {
         const response = await api.get<User>('/auth/me');
         const user = response.data;
-        await secureLocalStorage.setItem(USER_KEY, user);
+        const secret = _getSessionSecret();
+        await secureLocalStorage.setItem(USER_KEY, user, secret);
         return user;
     },
     regenerateApiKey: (): Promise<{ api_key: string }> => api.post('/auth/regenerate-api-key').then(res => res.data),

@@ -26,7 +26,7 @@ async def check_limit(metric: str, user: dict = Depends(get_current_user)):
 
         # Check usage counters for metered metrics
         current = await conn.fetchval(
-            "SELECT current_value FROM usage_counters WHERE user_id = $1 AND metric_name = $2",
+            "SELECT counter_value FROM usage_counters WHERE user_id = $1 AND counter_type = $2",
             user["id"], metric
         )
         
@@ -61,10 +61,10 @@ async def increment_usage(user_id: str, metric: str):
     conn = await get_db()
     try:
         await conn.execute(
-            """INSERT INTO usage_counters (user_id, metric_name, current_value)
+            """INSERT INTO usage_counters (user_id, counter_type, counter_value)
                VALUES ($1, $2, 1)
-               ON CONFLICT (user_id, metric_name) DO UPDATE SET 
-               current_value = usage_counters.current_value + 1""",
+               ON CONFLICT (user_id, counter_type) DO UPDATE SET 
+               counter_value = usage_counters.counter_value + 1""",
             user_id, metric
         )
     finally:

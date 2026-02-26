@@ -336,9 +336,20 @@ def _cv_get_lease_path():
     return _cv_os.path.join(lease_dir, "license.lease")
 
 def _cv_get_machine_secret():
-    """Generate a machine-specific secret for encryption."""
+    """Generate a machine-and-application-specific secret for lease encryption.
+
+    The secret is derived from a combination of:
+    - Machine-observable hardware identifiers (platform node/machine/processor)
+    - The Ed25519 public key embedded at compile time (_CV_PUBLIC_KEY)
+
+    Binding the lease encryption key to _CV_PUBLIC_KEY ensures that even if an
+    attacker knows the machine's hostname/CPU string, they cannot reconstruct the
+    key without also knowing the application-specific public key — which varies
+    per project on the CodeVault server.
+    """
     try:
-        info = f"{_cv_platform.node()}|{_cv_platform.machine()}|{_cv_platform.processor()}|CV_SALT_2026"
+        app_binding = _cv_hashlib.sha256(_CV_PUBLIC_KEY.encode()).hexdigest()[:32] if _CV_PUBLIC_KEY else "no-key"
+        info = f"{_cv_platform.node()}|{_cv_platform.machine()}|{_cv_platform.processor()}|{app_binding}"
         return _cv_hashlib.sha256(info.encode()).digest()
     except Exception:
         return _cv_hashlib.sha256(b"fallback_secret").digest()
@@ -531,14 +542,10 @@ def _cv_prompt_license():
 
 def _cv_license_check():
     """Main license validation with offline lease support."""
-    if _CV_LICENSE_KEY == "DEMO":
-        print("[CodeVault] Running in DEMO mode")
-        return True
-
     hwid = _cv_get_hwid()
     key_file = _cv_get_license_key_path()
 
-    if _CV_LICENSE_KEY in ("GENERIC_BUILD", "generic", "", None):
+    if _CV_LICENSE_KEY == "GENERIC_BUILD":
         saved_key = None
         if _cv_os.path.exists(key_file):
             try:
