@@ -2,23 +2,66 @@ import React from 'react';
 import { Shield, Menu, X, ArrowRight } from 'lucide-react';
 import { APP_URL } from '../lib/config';
 
+const NAV_LINKS = [
+  { label: 'Features', href: '#features' },
+  { label: 'How it works', href: '#how-it-works' },
+  { label: 'Pricing', href: '#pricing' },
+] as const;
+
 const Navbar: React.FC = () => {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [activeSection, setActiveSection] = React.useState<string>('');
   const menuId = 'mobile-nav-menu';
+
+  // Track which section is currently in view
+  React.useEffect(() => {
+    const sectionIds = NAV_LINKS.map(link => link.href.slice(1)); // strip '#'
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Find the entry that is most prominently in view
+        const visible = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+
+        if (visible.length > 0) {
+          setActiveSection(visible[0].target.id);
+        }
+      },
+      {
+        // Trigger when the section occupies at least 20% of the viewport,
+        // with a top offset to account for the fixed 64px navbar.
+        rootMargin: '-64px 0px -40% 0px',
+        threshold: [0, 0.1, 0.2],
+      }
+    );
+
+    sectionIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   // Close mobile menu on Escape key
   React.useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsOpen(false);
-      }
+      if (e.key === 'Escape') setIsOpen(false);
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
+
+  const linkClass = (href: string) => {
+    const isActive = activeSection === href.slice(1);
+    return `text-sm font-medium transition-colors ${
+      isActive ? 'text-white' : 'text-slate-400 hover:text-white'
+    }`;
+  };
 
   return (
     <nav aria-label="Main navigation" className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#0a0f1a]/60 backdrop-blur-xl transition-all duration-300">
@@ -28,20 +71,22 @@ const Navbar: React.FC = () => {
             <Shield className="w-5 h-5 text-white" aria-hidden="true" />
           </div>
           <span className="font-bold text-lg tracking-tight text-white">CodeVault</span>
-          
+
           {/* Operational Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 ml-2">
-             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-             <span className="text-[10px] font-medium text-emerald-400">OPERATIONAL</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-[10px] font-medium text-emerald-400">OPERATIONAL</span>
           </div>
         </div>
 
         {/* Desktop Menu */}
         <div className="hidden md:flex items-center gap-8">
-          <a href="#features" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">Features</a>
-          <a href="#how-it-works" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">How it works</a>
-          <a href="#pricing" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">Pricing</a>
-          
+          {NAV_LINKS.map(({ label, href }) => (
+            <a key={href} href={href} className={linkClass(href)}>
+              {label}
+            </a>
+          ))}
+
           <div className="flex items-center gap-3 ml-2">
             <a href={`${APP_URL}/login`} className="text-sm font-medium text-white hover:text-indigo-300 transition-colors">
               Log in
@@ -73,9 +118,16 @@ const Navbar: React.FC = () => {
           aria-label="Mobile navigation"
           className="md:hidden absolute top-16 left-0 right-0 bg-[#0a0f1a] border-b border-white/10 p-6 flex flex-col gap-4 animate-fade-in shadow-2xl"
         >
-          <a href="#features" className="text-gray-400 hover:text-white font-medium" onClick={() => setIsOpen(false)}>Features</a>
-          <a href="#how-it-works" className="text-gray-400 hover:text-white font-medium" onClick={() => setIsOpen(false)}>How it works</a>
-          <a href="#pricing" className="text-gray-400 hover:text-white font-medium" onClick={() => setIsOpen(false)}>Pricing</a>
+          {NAV_LINKS.map(({ label, href }) => (
+            <a
+              key={href}
+              href={href}
+              className={`font-medium ${activeSection === href.slice(1) ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+              onClick={() => setIsOpen(false)}
+            >
+              {label}
+            </a>
+          ))}
           <hr className="border-white/10 my-2" />
           <a href={`${APP_URL}/login`} className="text-white font-medium">Log in</a>
           <a href={`${APP_URL}/signup`} className="bg-white text-black text-center py-3 rounded-lg font-bold">Get API Keys</a>
