@@ -56,77 +56,7 @@ def normalize_datetime_for_db(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
-# GeoIP functions (import from geoip module when created, for now inline)
-_geoip_warned = False  # Module-level flag to avoid log spam
-
-
-def get_geo_from_ip(ip_address: str) -> dict:
-    """Get geolocation data from IP address.
-
-    For localhost/private IPs, returns a "Dev Location" (New York) so the
-    Mission Control map works during local development.
-    """
-    global _geoip_warned
-
-    # Default result
-    result = {"city": None, "country": None, "latitude": None, "longitude": None}
-
-    # For localhost/dev, return a sample location so the map works
-    if ip_address in ("127.0.0.1", "::1", "localhost", "unknown"):
-        return {
-            "city": "New York",
-            "country": "US",
-            "latitude": 40.7128,
-            "longitude": -74.0060,
-        }
-
-    try:
-        import ipaddress
-
-        ip = ipaddress.ip_address(ip_address)
-        if ip.is_private or ip.is_loopback or ip.is_reserved:
-            # Return dev location for private IPs too
-            return {
-                "city": "Local Network",
-                "country": "XX",
-                "latitude": 40.7128,
-                "longitude": -74.0060,
-            }
-    except ValueError:
-        return result
-
-    # Try GeoIP lookup
-    reader = None
-    try:
-        import geoip2.database
-        import geoip2.errors
-        from pathlib import Path
-
-        geoip_path = Path(__file__).parent.parent / "data" / "GeoLite2-City.mmdb"
-        if geoip_path.exists():
-            reader = geoip2.database.Reader(str(geoip_path))
-            response = reader.city(ip_address)
-            result["city"] = response.city.name
-            result["country"] = response.country.iso_code
-            result["latitude"] = response.location.latitude
-            result["longitude"] = response.location.longitude
-        else:
-            if not _geoip_warned:
-                logging.warning(
-                    f"[GeoIP] Database not found at {geoip_path}. "
-                    "Map data will be unavailable. Download GeoLite2-City.mmdb from MaxMind."
-                )
-                _geoip_warned = True
-    except geoip2.errors.AddressNotFoundError:
-        # IP not in database, this is normal for some IPs
-        pass
-    except Exception as e:
-        logging.warning(f"[GeoIP] Lookup failed for {ip_address}: {e}")
-    finally:
-        if reader:
-            reader.close()
-
-    return result
+# GeoIP has been removed. Geo fields are no longer attached to validation logs.
 
 
 async def _push_validation_log_to_redis(log_data: dict):
@@ -237,17 +167,12 @@ async def validate_license(
                     message = "License has expired"
 
             # Prepare log data for Redis
-            geo = get_geo_from_ip(client_ip)
             log_data = {
                 "license_id": license_row["id"] if license_row else None,
                 "project_id": license_row["project_id"] if license_row else None,
                 "license_key": data.license_key,
                 "hwid": data.hwid,
                 "ip_address": client_ip,
-                "country": geo.get("country"),
-                "city": geo.get("city"),
-                "latitude": geo.get("latitude"),
-                "longitude": geo.get("longitude"),
                 "result": result_status,
                 "response_time_ms": response_time,
                 "machine_name": data.machine_name,
@@ -273,8 +198,6 @@ async def validate_license(
                                 "hwid": data.hwid,
                                 "ip_address": client_ip,
                                 "machine_name": data.machine_name,
-                                "country": geo.get("country"),
-                                "city": geo.get("city"),
                                 "timestamp": utc_now().isoformat(),
                             },
                         )
@@ -311,8 +234,6 @@ async def validate_license(
                                 "hwid": data.hwid,
                                 "ip_address": client_ip,
                                 "machine_name": data.machine_name,
-                                "country": geo.get("country"),
-                                "city": geo.get("city"),
                                 "timestamp": utc_now().isoformat(),
                             },
                         )
@@ -326,27 +247,6 @@ async def validate_license(
 
             # Check HWID binding
             license_id = license_row["id"]
-
-            # SEC3: HWID heuristics
-            from utils import analyze_hwid
-
-            flag_reason = analyze_hwid(data.hwid)
-            if flag_reason:
-                from routes.webhook_routes import trigger_webhook
-
-                asyncio.create_task(
-                    trigger_webhook(
-                        license_row["user_id"],
-                        "hwid.suspicious",
-                        {
-                            "license_key": data.license_key,
-                            "hwid": data.hwid,
-                            "reason": flag_reason,
-                            "ip_address": client_ip,
-                            "machine_name": data.machine_name,
-                        },
-                    )
-                )
 
             existing_binding = await conn.fetchrow(
                 "SELECT id, is_active FROM hardware_bindings WHERE license_id = $1 AND hwid = $2",
@@ -379,8 +279,6 @@ async def validate_license(
                                     "hwid": data.hwid,
                                     "ip_address": client_ip,
                                     "machine_name": data.machine_name,
-                                    "country": geo.get("country"),
-                                    "city": geo.get("city"),
                                     "timestamp": utc_now().isoformat(),
                                     "current_machines": machine_count,
                                     "max_machines": license_row["max_machines"],
@@ -397,14 +295,11 @@ async def validate_license(
                 # Update existing binding (reactivate if needed, always update IP)
                 await conn.execute(
                     """UPDATE hardware_bindings 
-                       SET last_seen_at = NOW(), machine_name = $1, ip_address = $2, is_active = TRUE,
-                           is_flagged = $4, flagged_reason = $5, flagged_at = CASE WHEN $4 = TRUE THEN NOW() ELSE flagged_at END
+                       SET last_seen_at = NOW(), machine_name = $1, ip_address = $2, is_active = TRUE
                        WHERE id = $3""",
                     data.machine_name,
                     client_ip,
                     existing_binding["id"],
-                    flag_reason is not None,
-                    flag_reason,
                 )
             else:
                 machine_count = await conn.fetchval(
@@ -429,8 +324,6 @@ async def validate_license(
                                 "hwid": data.hwid,
                                 "ip_address": client_ip,
                                 "machine_name": data.machine_name,
-                                "country": geo.get("country"),
-                                "city": geo.get("city"),
                                 "timestamp": utc_now().isoformat(),
                                 "current_machines": machine_count,
                                 "max_machines": license_row["max_machines"],
@@ -446,17 +339,14 @@ async def validate_license(
 
                 await conn.execute(
                     """
-                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address, is_active, 
-                                                 is_flagged, flagged_reason, flagged_at)
-                    VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, CASE WHEN $6 = TRUE THEN NOW() ELSE NULL END)
+                    INSERT INTO hardware_bindings (id, license_id, hwid, machine_name, ip_address, is_active)
+                    VALUES ($1, $2, $3, $4, $5, TRUE)
                 """,
                     secrets.token_hex(16),
                     license_id,
                     data.hwid,
                     data.machine_name,
                     client_ip,
-                    flag_reason is not None,
-                    flag_reason,
                 )
 
             await conn.execute(
@@ -1704,39 +1594,8 @@ async def validate_trial_build(
         tier = user_data["plan"] or "free"
         tier_limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
 
-        # Check if trial builds are allowed
-        trial_builds_limit = tier_limits.get("trial_builds_per_month", 5)
-
-        # Pro+ tiers have unlimited trial builds
-        if trial_builds_limit == -1:
-            return {
-                "allowed": True,
-                "trial_builds_remaining": -1,
-                "message": "Unlimited trial builds available",
-                "tier": tier,
-            }
-
-        # Get trial builds used this month
-        from datetime import datetime
-
-        month_start = datetime.now().replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-
-        trial_builds_used = await conn.fetchval(
-            """SELECT COUNT(*) FROM trial_builds 
-               WHERE user_id = $1 AND created_at >= $2""",
-            user["id"],
-            month_start,
-        )
-
-        trial_builds_remaining = trial_builds_limit - trial_builds_used
-
-        if trial_builds_remaining <= 0:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Trial build limit reached. You've used {trial_builds_used}/{trial_builds_limit} trial builds this month. Upgrade to Pro for unlimited trial builds.",
-            )
+        # Demo builds are unlimited for all tiers — no monthly cap applied.
+        # The trial_builds_per_month limit has been removed from TIER_LIMITS.
 
         # Generate trial build token (valid for 1 hour)
         import time
@@ -1757,9 +1616,8 @@ async def validate_trial_build(
 
         return {
             "allowed": True,
-            "trial_builds_remaining": trial_builds_remaining - 1,
-            "trial_builds_used": trial_builds_used + 1,
-            "trial_builds_limit": trial_builds_limit,
+            "trial_builds_remaining": -1,
+            "trial_builds_limit": -1,
             "trial_token": trial_token,
             "demo_duration_minutes": request.demo_duration_minutes,
             "tier": tier,
@@ -1826,10 +1684,10 @@ async def record_trial_build(
 
 @router.get("/builds/trial/status")
 async def get_trial_build_status(user: dict = Depends(get_current_user)):
-    """Get user's trial build status for the current month."""
-    from config import TIER_LIMITS
-    from datetime import datetime
+    """Get user's demo build status.
 
+    Demo builds (time-limited binaries) are unlimited for all tiers.
+    """
     conn = await get_db()
     try:
         user_data = await conn.fetchrow(
@@ -1837,28 +1695,12 @@ async def get_trial_build_status(user: dict = Depends(get_current_user)):
         )
 
         tier = user_data["plan"] or "free"
-        tier_limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
-        trial_builds_limit = tier_limits.get("trial_builds_per_month", 5)
-
-        month_start = datetime.now().replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-
-        trial_builds_used = await conn.fetchval(
-            """SELECT COUNT(*) FROM trial_builds 
-               WHERE user_id = $1 AND created_at >= $2""",
-            user["id"],
-            month_start,
-        )
 
         return {
             "tier": tier,
-            "trial_builds_limit": trial_builds_limit,
-            "trial_builds_used": trial_builds_used,
-            "trial_builds_remaining": max(0, trial_builds_limit - trial_builds_used)
-            if trial_builds_limit != -1
-            else -1,
-            "unlimited": trial_builds_limit == -1,
+            "trial_builds_limit": -1,
+            "trial_builds_remaining": -1,
+            "unlimited": True,
         }
     finally:
         await release_db(conn)

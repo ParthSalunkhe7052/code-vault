@@ -37,6 +37,7 @@ from config import (
     BUILD_CALLBACK_SECRET,
     ENVIRONMENT,
     GCP_PROJECT_ID,
+    get_build_credit_cost,
 )
 from middleware.rate_limiter import get_redis_client
 from routes.cloud_build_websocket import (
@@ -915,11 +916,19 @@ async def start_cloud_build(
                 )
 
             # Credit System Enforcement
-            # Business has unlimited builds (no credit deduction)
-            if tier["tier"] != "business":
-                from config import BUILD_COST_STANDARD
+            # All tiers (including Business) consume credits.
+            # Enterprise unlimited tier (-1 credits_per_month) skips deduction.
+            from config import TIER_LIMITS
 
-                cost = BUILD_COST_STANDARD
+            tier_credits_per_month = TIER_LIMITS.get(
+                tier["tier"], {}
+            ).get("credits_per_month", 0)
+
+            if tier_credits_per_month != -1:
+                # Per-platform cost calculation
+                cost = get_build_credit_cost(
+                    request.target_platforms, language
+                )
 
                 # Deduct credits atomically with validation
                 updated_credits = await conn.fetchval(
@@ -935,7 +944,8 @@ async def start_cloud_build(
                 if updated_credits is None:
                     raise HTTPException(
                         403,
-                        "Insufficient build credits. Please upgrade or wait for monthly refill.",
+                        "Insufficient build credits. Please upgrade your plan or wait "
+                        "for your monthly credit refill.",
                     )
                 deducted_credits = cost
 

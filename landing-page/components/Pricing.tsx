@@ -101,7 +101,7 @@ const Pricing: React.FC = () => {
               { text: "1 Project", included: true },
               { text: "50 Licenses Total", included: true },
               { text: "Local Builds Only", included: true },
-              { text: "5 Trial Builds/mo", included: true },
+              { text: "Python Support", included: true },
               { text: "Community Support", included: true },
               { text: "Cloud Builds", included: false },
               { text: "Node.js Support", included: false },
@@ -159,8 +159,8 @@ const Pricing: React.FC = () => {
              <ul className="space-y-4 mb-8 flex-1">
               {[
                 { text: "Unlimited Licenses", included: true },
-                { text: "Unlimited Cloud Builds", included: true },
-                { text: "Unlimited Team Seats", included: true },
+                { text: "Unlimited Cloud Build Credits", included: true },
+                { text: "Dedicated Build Runners", included: true },
                 { text: "Priority Queue Access", included: true },
                 { text: "Custom SLAs", included: true },
                 { text: "Security Audits", included: true },

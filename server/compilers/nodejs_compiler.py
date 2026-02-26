@@ -382,7 +382,7 @@ validateLicense().then(() => {{
             # STEP 6: Packaging with pkg
             await self.log("📦 Packaging application into executable...", log_callback)
 
-            target = options.get("target", "node18-win-x64")
+            target = options.get("target", "node20-win-x64")
 
             # Security: Sanitize output_name to prevent path traversal
             safe_output_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", output_name)

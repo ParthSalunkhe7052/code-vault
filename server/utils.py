@@ -244,40 +244,6 @@ def generate_license_key(prefix: str = "LIC") -> str:
     return "-".join(parts)
 
 
-def analyze_hwid(hwid: str) -> Optional[str]:
-    """Analyze HWID for suspicious patterns.
-    Returns a reason string if suspicious, None if clean.
-    """
-    if not hwid:
-        return "empty"
-
-    if len(hwid) < 12:
-        return "too_short"
-
-    # Check for all zeros or all identical characters
-    if len(set(hwid)) <= 1:
-        return "identical_chars"
-
-    # Check for common generic/VM/test HWIDs
-    generic_patterns = [
-        "00000000",
-        "ffffffff",
-        "12345678",
-        "unknown",
-        "test",
-        "demo",
-        "machine",
-        "none",
-        "null",
-    ]
-    hwid_lower = hwid.lower()
-    for pattern in generic_patterns:
-        if pattern in hwid_lower:
-            return "generic_pattern"
-
-    return None
-
-
 def generate_api_key() -> str:
     """Generate an API key for user authentication."""
     return f"lw_{secrets.token_hex(24)}"

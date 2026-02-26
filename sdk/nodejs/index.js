@@ -18,6 +18,71 @@ class CodeVaultClient {
     }
 
     _getHwid() {
+        /**
+         * Multi-factor HWID matching the compiled binary wrapper (nodejs_tpl.py).
+         * Factors: mac, cpu, host, mem, plat, disk (Windows), mb (Windows).
+         * Falls back to a simple 5-factor hash if no components collected.
+         */
+        const components = [];
+
+        // MAC address — first non-internal, non-zero interface
+        try {
+            const ifaces = os.networkInterfaces();
+            outer: for (const name of Object.keys(ifaces)) {
+                for (const iface of ifaces[name]) {
+                    if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                        components.push('mac:' + iface.mac);
+                        break outer;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // CPU model
+        try {
+            const cpus = os.cpus();
+            if (cpus && cpus.length > 0 && cpus[0].model) {
+                components.push('cpu:' + cpus[0].model.substring(0, 32));
+            }
+        } catch (e) {}
+
+        // Hostname
+        try { components.push('host:' + os.hostname()); } catch (e) {}
+
+        // Total memory
+        try { components.push('mem:' + os.totalmem()); } catch (e) {}
+
+        // Platform + arch
+        try { components.push('plat:' + os.platform() + '|' + os.arch()); } catch (e) {}
+
+        // Windows-only: disk serial + motherboard serial via wmic
+        if (process.platform === 'win32') {
+            try {
+                const { execSync } = require('child_process');
+                try {
+                    const diskOut = execSync('wmic diskdrive get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                    const lines = diskOut.trim().split('\n');
+                    if (lines.length > 1) {
+                        const serial = lines[1].trim();
+                        if (serial && serial !== 'SerialNumber') components.push('disk:' + serial);
+                    }
+                } catch (e) {}
+                try {
+                    const mbOut = execSync('wmic baseboard get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                    const lines = mbOut.trim().split('\n');
+                    if (lines.length > 1) {
+                        const serial = lines[1].trim();
+                        if (serial && serial !== 'SerialNumber') components.push('mb:' + serial);
+                    }
+                } catch (e) {}
+            } catch (e) {}
+        }
+
+        if (components.length > 0) {
+            return crypto.createHash('sha256').update(components.join('|')).digest('hex').substring(0, 32);
+        }
+
+        // Fallback — matches compiled wrapper fallback
         const cpus = os.cpus();
         const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
         const info = `${os.hostname()}|${os.platform()}|${os.arch()}|${os.totalmem()}|${cpuModel}`;

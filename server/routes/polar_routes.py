@@ -720,7 +720,8 @@ async def handle_subscription_created(event_data: dict, conn):
         await sync_user_tier(user_id, tier, conn)
 
         # Credit System: Grant build credits for new subscription
-        credits = TIER_LIMITS.get(tier, {}).get("cloud_builds_per_month", 0)
+        # Use credits_per_month (per-platform credit budget); -1 = enterprise unlimited
+        credits = TIER_LIMITS.get(tier, {}).get("credits_per_month", 0)
         if credits > 0:
             await conn.execute(
                 "UPDATE users SET build_credits = $1 WHERE id = $2",
@@ -849,7 +850,8 @@ async def handle_order_paid(event_data: dict, conn):
     )
     if sub:
         tier = sub["plan_tier"]
-        credits = TIER_LIMITS.get(tier, {}).get("cloud_builds_per_month", 0)
+        # Use credits_per_month (per-platform credit budget); -1 = enterprise unlimited
+        credits = TIER_LIMITS.get(tier, {}).get("credits_per_month", 0)
         if credits > 0:
             await conn.execute(
                 "UPDATE users SET build_credits = $1 WHERE id = $2",

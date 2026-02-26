@@ -247,7 +247,47 @@ if ENVIRONMENT != "production":
         )
 
 # Build Credit Costs
+# Credits are consumed per cloud build. Cost varies by platform and language.
+# Linux builds are cheapest (native); Windows builds use Wine cross-compilation (heavier).
+BUILD_COST_LINUX_PYTHON = 1       # Linux native Nuitka build
+BUILD_COST_LINUX_NODE = 1         # Linux native yao-pkg build
+BUILD_COST_WINDOWS_PYTHON = 2     # Windows cross-compile via Wine (heavier)
+BUILD_COST_WINDOWS_NODE = 2       # Windows cross-compile via Wine (heavier)
+BUILD_COST_DUAL_PLATFORM = 3      # Windows + Linux in a single job
+
+# Legacy constant — kept for backward-compat references; prefer per-platform constants above
 BUILD_COST_STANDARD = 1
+
+
+def get_build_credit_cost(target_platforms: list, language: str) -> int:
+    """Calculate credit cost for a cloud build job.
+
+    Args:
+        target_platforms: List of platforms, e.g. ['windows'], ['linux'], ['windows', 'linux']
+        language: 'python' or 'nodejs'
+
+    Returns:
+        Integer credit cost for this build job.
+    """
+    platforms = [p.lower() for p in (target_platforms or [])]
+    lang = (language or "python").lower()
+
+    has_windows = "windows" in platforms
+    has_linux = "linux" in platforms
+
+    # Dual-platform: flat rate regardless of language
+    if has_windows and has_linux:
+        return BUILD_COST_DUAL_PLATFORM
+
+    if has_windows:
+        return BUILD_COST_WINDOWS_NODE if lang == "nodejs" else BUILD_COST_WINDOWS_PYTHON
+
+    if has_linux:
+        return BUILD_COST_LINUX_NODE if lang == "nodejs" else BUILD_COST_LINUX_PYTHON
+
+    # Fallback: single credit
+    return BUILD_COST_STANDARD
+
 
 # Subscription Tier Limits
 # -1 means unlimited
@@ -260,11 +300,10 @@ TIER_LIMITS = {
         "can_sell_licenses": False,
         "cloud_compilation": False,
         "cloud_builds_per_month": 0,
+        "credits_per_month": 0,
         "cloud_platforms": ["windows"],
         "webhooks": False,
-        "team_seats": 1,
         "node_support": False,
-        "trial_builds_per_month": 5,
     },
     "pro": {
         "_tier_name": "Pro",
@@ -274,11 +313,10 @@ TIER_LIMITS = {
         "can_sell_licenses": True,
         "cloud_compilation": True,
         "cloud_builds_per_month": 25,
+        "credits_per_month": 25,
         "cloud_platforms": ["windows", "linux"],
         "webhooks": True,
-        "team_seats": 1,
         "node_support": True,
-        "trial_builds_per_month": -1,
     },
     "business": {
         "_tier_name": "Business",
@@ -288,12 +326,11 @@ TIER_LIMITS = {
         "can_sell_licenses": True,
         "cloud_compilation": True,
         "cloud_builds_per_month": 100,
+        "credits_per_month": 100,
         "cloud_platforms": ["windows", "linux"],
         "webhooks": True,
-        "team_seats": 10,
         "white_label_branding": True,
         "node_support": True,
-        "trial_builds_per_month": -1,
     },
     "enterprise": {
         "_tier_name": "Enterprise",
@@ -303,12 +340,11 @@ TIER_LIMITS = {
         "can_sell_licenses": True,
         "cloud_compilation": True,
         "cloud_builds_per_month": -1,
+        "credits_per_month": -1,
         "cloud_platforms": ["windows", "linux"],
         "webhooks": True,
-        "team_seats": -1,
         "white_label_branding": True,
         "node_support": True,
-        "trial_builds_per_month": -1,
     },
 }
 
@@ -322,7 +358,7 @@ PRICING_CONFIG = {
             "1 Project",
             "50 Licenses Total",
             "Local Compilation Only",
-            "5 Trial Builds/mo",
+            "Python Support",
         ],
     },
     "pro": {
@@ -333,9 +369,10 @@ PRICING_CONFIG = {
         "features": [
             "Unlimited Projects",
             "500 Licenses",
-            "25 Cloud Builds/mo",
-            "Offline Leases",
+            "25 Cloud Build Credits/mo",
+            "Windows & Linux Cloud Builds",
             "Node.js Support",
+            "Offline Leases",
             "No Branding / Splash Screen",
         ],
     },
@@ -346,8 +383,8 @@ PRICING_CONFIG = {
         "product_id": POLAR_PRODUCT_BUSINESS,
         "features": [
             "5,000 Licenses",
-            "100 Cloud Builds/mo",
-            "10 Team Seats (RBAC)",
+            "100 Cloud Build Credits/mo",
+            "Priority Build Queue",
             "White Label Branding",
             "Priority Support",
         ],
@@ -358,11 +395,11 @@ PRICING_CONFIG = {
         "currency": "USD",
         "features": [
             "Unlimited Licenses",
-            "Unlimited Cloud Builds",
-            "Unlimited Team Seats",
+            "Unlimited Cloud Build Credits",
+            "Dedicated Build Runners",
+            "White Label Branding",
             "Dedicated Support",
             "Custom SLAs",
-            "Dedicated Build Runners",
             "Security Reviews",
         ],
     },

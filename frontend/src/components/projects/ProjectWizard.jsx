@@ -71,7 +71,7 @@ const ProjectWizard = ({
     const [demoMode, setDemoMode] = useState(settings.defaultDemoEnabled || false);
     const [demoDuration, setDemoDuration] = useState(settings.defaultDemoDuration || 60); // minutes
 
-    const [nodeTarget, setNodeTarget] = useState('node18-win-x64');
+    const [nodeTarget, setNodeTarget] = useState('node20-win-x64');
     const [enableObfuscation, setEnableObfuscation] = useState(false); // Obfuscation off by default for faster builds
     const [enableLease, setEnableLease] = useState(false); // Offline lease OFF by default
     const [fastBuild, setFastBuild] = useState(false); // Fast build OFF by default (produces onefile exe)

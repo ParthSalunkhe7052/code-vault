@@ -120,9 +120,11 @@ require('./{entry_file.replace("\\", "/")}');
 
             if progress_callback:
                 progress_callback(20, "Running pkg...")
-            target = self.config.get("platform", "node18-win-x64")
+            target = self.config.get("platform", "node20-win-x64")
             if target == "windows":
-                target = "node18-win-x64"
+                target = "node20-win-x64"
+            elif target == "linux":
+                target = "node20-linux-x64"
 
             cmd = [
                 "npx.cmd",
