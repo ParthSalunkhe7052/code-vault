@@ -17,20 +17,9 @@ const MachinesList = ({ machines }) => {
                     ))}
                 </div>
             ) : (
-                <div className="p-4 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 rounded-xl border border-emerald-500/10">
-                    <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
-                            <Cpu size={18} />
-                        </div>
-                        <div className="text-sm">
-                            <p className="text-slate-300 font-medium mb-2">How Machine Binding Works</p>
-                            <ul className="text-slate-400 space-y-1 text-xs">
-                                <li>• When a client runs your protected app, their machine is bound to the license</li>
-                                <li>• Each license can be limited to a set number of machines</li>
-                                <li>• Active machines appear here after their first validation</li>
-                            </ul>
-                        </div>
-                    </div>
+                <div className="p-4 text-center">
+                    <p className="text-slate-500 text-sm">No active machines.</p>
+                    <p className="text-slate-600 text-xs mt-1">Machines will appear here when clients validate licenses.</p>
                 </div>
             )}
         </div>

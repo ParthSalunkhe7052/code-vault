@@ -9,13 +9,36 @@ import time
 import shutil
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any, Callable
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TimeElapsedColumn,
+)
 
-from cli.compilers.python import PythonCompiler
-from cli.compilers.node import NodeJSCompiler
+# Add parent directory to path for cli.* imports
+_cli_dir = Path(__file__).resolve().parent.parent
+if str(_cli_dir) not in sys.path:
+    sys.path.insert(0, str(_cli_dir))
+
+try:
+    from cli.compilers.python import PythonCompiler
+    from cli.compilers.node import NodeJSCompiler
+except ImportError:
+    # Fallback: try relative import
+    from pathlib import Path
+
+    _parent = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(_parent.parent))
+    from cli.compilers.python import PythonCompiler
+    from cli.compilers.node import NodeJSCompiler
+
 from codevault_cli.console import get_console, print_error, print_header
 
 console = get_console()
+
 
 class BuildRunner:
     """
@@ -26,8 +49,11 @@ class BuildRunner:
         self.project_name = project_name
         self.config = config
         self.lang = config.get("language", "python")
-        self.compiler = (PythonCompiler(Path.cwd(), config) if self.lang == "python" 
-                         else NodeJSCompiler(Path.cwd(), config))
+        self.compiler = (
+            PythonCompiler(Path.cwd(), config)
+            if self.lang == "python"
+            else NodeJSCompiler(Path.cwd(), config)
+        )
 
     async def run_build(self) -> Tuple[bool, Optional[Path], str]:
         """Run the full build lifecycle with Rich Progress."""
@@ -41,11 +67,14 @@ class BuildRunner:
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            
             # Phase 1: Pre-flight
             task_pre = progress.add_task("[cyan]Pre-flight checks...", total=100)
             if not await self.compiler.pre_flight():
-                return False, None, "Environment pre-flight checks failed. Run 'codevault system check'."
+                return (
+                    False,
+                    None,
+                    "Environment pre-flight checks failed. Run 'codevault system check'.",
+                )
             progress.update(task_pre, completed=100)
 
             # Phase 2: Inject Wrapper
@@ -55,30 +84,46 @@ class BuildRunner:
             progress.update(task_inj, completed=100)
 
             # Phase 3: Compile
-            task_comp = progress.add_task(f"[green]Compiling ({self.lang})...", total=100)
-            
-            def progress_callback(percent, status):
-                progress.update(task_comp, completed=percent, description=f"[green]{status}... ({percent}%)")
+            task_comp = progress.add_task(
+                f"[green]Compiling ({self.lang})...", total=100
+            )
 
-            success, build_dir = await self.compiler.compile(progress_callback=progress_callback)
-            
+            def progress_callback(percent, status):
+                progress.update(
+                    task_comp,
+                    completed=percent,
+                    description=f"[green]{status}... ({percent}%)",
+                )
+
+            success, build_dir = await self.compiler.compile(
+                progress_callback=progress_callback
+            )
+
             if not success:
                 return False, None, "Compilation failed. Check output for details."
-            progress.update(task_comp, completed=100, description="[green]Compilation complete!")
+            progress.update(
+                task_comp, completed=100, description="[green]Compilation complete!"
+            )
 
             # Phase 4: Packaging
             task_pkg = progress.add_task("[yellow]Packaging...", total=100)
             # Find output exe
             output_name = self.config.get("output_name") or "output"
             exe_path = Path.cwd() / f"{output_name}.exe"
-            
+
             if exe_path.exists():
                 progress.update(task_pkg, completed=100)
                 return True, exe_path, ""
             else:
                 return False, None, "Could not find output executable."
 
-async def run_local_build(entry_path: Path, config: Dict[str, Any], dashboard=None) -> Tuple[bool, Optional[Path], str]:
+
+async def run_local_build(
+    entry_path: Path, config: Dict[str, Any], dashboard=None
+) -> Tuple[bool, Optional[Path], str]:
     """Entry point for local builds."""
-    runner = BuildRunner(config.get("project_name", entry_path.name), {**config, "entry_file": str(entry_path)})
+    runner = BuildRunner(
+        config.get("project_name", entry_path.name),
+        {**config, "entry_file": str(entry_path)},
+    )
     return await runner.run_build()

@@ -14,6 +14,8 @@ from utils import (
     generate_api_key,
     hash_api_key,
     create_jwt_token,
+    verify_jwt_token,
+    blacklist_jwt,
     get_current_user,
     get_current_admin_user,
     utc_now,
@@ -24,6 +26,7 @@ from middleware.rate_limiter import (
     register_rate_limit,
     api_key_regen_rate_limit,
     password_reset_rate_limit,
+    check_rate_limit,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,23 @@ async def login(
 ):
     # Normalize email to lowercase for case-insensitive comparison
     data.email = data.email.lower().strip()
+
+    # Per-account lockout: 10 failed attempts per email in 15 minutes (across all IPs)
+    import hashlib
+
+    email_hash = hashlib.sha256(data.email.encode()).hexdigest()[:16]
+    account_allowed, _, account_retry = await check_rate_limit(
+        f"auth:login:account:{email_hash}",
+        max_requests=10,
+        window_seconds=900,
+    )
+    if not account_allowed:
+        logger.warning(f"[Login] Account locked out due to too many failed attempts: {data.email[:3]}***")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed login attempts. Please try again in {account_retry} seconds.",
+            headers={"Retry-After": str(account_retry)},
+        )
 
     conn = await get_db()
     try:
@@ -190,6 +210,29 @@ async def get_me(user: dict = Depends(get_current_user)):
         }
     finally:
         await release_db(conn)
+
+
+@router.post("/logout")
+async def logout(request: Request, user: dict = Depends(get_current_user)):
+    """Logout by blacklisting the current JWT token."""
+    from fastapi.security import HTTPBearer
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return {"message": "Logged out"}
+
+    token = auth_header[7:]
+    payload = verify_jwt_token(token)
+    if payload and payload.get("jti"):
+        # Calculate remaining TTL for the token
+        import time
+
+        exp = payload.get("exp", 0)
+        ttl = max(int(exp - time.time()), 0)
+        if ttl > 0:
+            await blacklist_jwt(payload["jti"], ttl)
+
+    return {"message": "Logged out"}
 
 
 @router.post("/regenerate-api-key")
@@ -338,6 +381,6 @@ async def admin_reset_password(
             f"[Admin] Password reset for user ID: {user['id'][:8]}... "
             f"(by admin: {admin_user['id'][:8]}...)"
         )
-        return {"message": f"Password reset successfully for {email}"}
+        return {"message": "Password reset successfully"}
     finally:
         await release_db(conn)

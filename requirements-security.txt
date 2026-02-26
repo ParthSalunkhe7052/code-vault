@@ -1,0 +1,9 @@
+# CodeVault Security Tools
+# Audit Phase 1 Requirements
+
+trufflehog3
+detect-secrets
+bandit
+safety
+pip-audit
+pre-commit

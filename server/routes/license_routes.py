@@ -37,7 +37,7 @@ from utils import (
 from database import get_db, release_db
 from config import SECRET_KEY
 from email_service import notify_license_created
-from middleware.rate_limiter import license_validate_rate_limit
+from middleware.rate_limiter import license_validate_rate_limit, RateLimitDependency
 
 router = APIRouter(prefix="/api/v1", tags=["Licenses"])
 
@@ -596,6 +596,11 @@ async def validate_license(
 async def license_heartbeat(
     request: Request,
     data: LicenseValidationRequest,
+    _rate_limit: None = Depends(
+        RateLimitDependency(
+            max_requests=60, window_seconds=300, prefix="license:heartbeat"
+        )
+    ),
 ):
     """Update heartbeat for an active license session (SEC4).
 
@@ -927,6 +932,14 @@ async def convert_license(
     user: dict = Depends(get_current_user),
 ):
     """Convert a trial license to perpetual or subscription (MON1)."""
+    # Validate new_type against allowed values
+    VALID_LICENSE_TYPES = {"perpetual", "subscription"}
+    if new_type not in VALID_LICENSE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid license type. Must be one of: {VALID_LICENSE_TYPES}",
+        )
+
     conn = await get_db()
     try:
         # Verify ownership and current type
@@ -1442,17 +1455,35 @@ async def delete_license_variable(
 
 
 @router.get("/projects/{project_id}/update-manifest")
-async def get_update_manifest(project_id: str):
+async def get_update_manifest(
+    project_id: str,
+    license_key: Optional[str] = None,
+    _rate_limit: None = Depends(
+        RateLimitDependency(max_requests=30, window_seconds=60, prefix="public:manifest")
+    ),
+):
     """Public endpoint to get auto-update manifest for a project.
 
     Returns a signed manifest that clients can use to check for updates.
-    This allows software vendors to push updates to their customers.
+    Requires a valid license_key query parameter for authentication.
     """
     import hashlib
     import base64
 
     conn = await get_db()
     try:
+        # Lightweight auth: verify license_key belongs to this project
+        if not license_key:
+            raise HTTPException(status_code=401, detail="license_key query parameter required")
+
+        license_check = await conn.fetchval(
+            "SELECT 1 FROM licenses l JOIN projects p ON l.project_id = p.id WHERE l.license_key = $1 AND p.id = $2",
+            license_key,
+            project_id,
+        )
+        if not license_check:
+            raise HTTPException(status_code=403, detail="Invalid license key for this project")
+
         project = await conn.fetchrow(
             "SELECT id, name, signing_private_key, signing_secret FROM projects WHERE id = $1",
             project_id,
@@ -1510,16 +1541,34 @@ class KillSwitchPolicy(BaseModel):
 
 
 @router.get("/projects/{project_id}/kill-switch")
-async def get_kill_switch(project_id: str):
+async def get_kill_switch(
+    project_id: str,
+    license_key: Optional[str] = None,
+    _rate_limit: None = Depends(
+        RateLimitDependency(max_requests=30, window_seconds=60, prefix="public:killswitch")
+    ),
+):
     """Public endpoint to check kill-switch policy for a project.
 
     Returns whether the application should be terminated and optional redirect.
-    Used for emergency shutdown of compromised or pirated software.
+    Requires a valid license_key query parameter for authentication.
     """
     import hashlib
 
     conn = await get_db()
     try:
+        # Lightweight auth: verify license_key belongs to this project
+        if not license_key:
+            raise HTTPException(status_code=401, detail="license_key query parameter required")
+
+        license_check = await conn.fetchval(
+            "SELECT 1 FROM licenses l JOIN projects p ON l.project_id = p.id WHERE l.license_key = $1 AND p.id = $2",
+            license_key,
+            project_id,
+        )
+        if not license_check:
+            raise HTTPException(status_code=403, detail="Invalid license key for this project")
+
         project = await conn.fetchrow(
             "SELECT id, signing_private_key, signing_secret FROM projects WHERE id = $1",
             project_id,

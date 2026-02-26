@@ -17,6 +17,7 @@ from typing import Optional
 try:
     import keyring
     from keyring.errors import KeyringError
+
     KEYRING_AVAILABLE = True
 except ImportError:
     KEYRING_AVAILABLE = False
@@ -27,7 +28,20 @@ SCRIPT_DIR = Path(__file__).parent
 # Store config in user's home directory for better portability and permissions
 CONFIG_DIR = Path.home() / ".codevault"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-DEFAULT_API_BASE = "http://localhost:8000/api/v1"
+
+# Production API base URL (default for CLI builds)
+# This is the actual deployed server on Heroku
+DEFAULT_API_BASE = "https://api.codevault.parth7.me/api/v1"
+
+# License server URL for compiled binaries (used in license wrapper)
+# This is the URL that will be embedded in compiled applications for license validation
+LICENSE_SERVER_URL = os.getenv(
+    "CODEVAULT_SERVER_URL", "https://api.codevault.parth7.me"
+)
+
+# Development fallback - used when CODEVAULT_DEV_MODE=true
+DEV_API_BASE = "http://localhost:8000/api/v1"
+DEV_LICENSE_SERVER_URL = "http://localhost:8000"
 
 # Keyring service name for CodeVault CLI
 KEYRING_SERVICE = "codevault-cli"
@@ -38,13 +52,14 @@ logger = logging.getLogger(__name__)
 
 class SecureConfigError(Exception):
     """Error in secure configuration operations."""
+
     pass
 
 
 def _set_restrictive_permissions(file_path: Path) -> None:
     """Set file permissions to owner-only (0600) on Unix systems."""
     try:
-        if os.name != 'nt':  # Unix-like systems
+        if os.name != "nt":  # Unix-like systems
             os.chmod(file_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError as e:
         logger.warning(f"Could not set restrictive permissions on {file_path}: {e}")
@@ -139,7 +154,7 @@ def _save_config_file(config: dict) -> None:
     """Save non-sensitive configuration to file."""
     # Ensure config directory exists
     _ensure_config_dir()
-    
+
     # Remove all sensitive keys (api_key and obfuscated variant) before saving
     # Tokens should only be stored via keyring or _save_config_file_with_token()
     sensitive_keys = {"api_key", "_obf_api_key"}
@@ -154,6 +169,7 @@ def _migrate_legacy_config() -> None:
     if old_config.exists() and not CONFIG_FILE.exists():
         try:
             import shutil
+
             _ensure_config_dir()
             shutil.copy2(old_config, CONFIG_FILE)
             logger.info(f"Migrated config from {old_config} to {CONFIG_FILE}")
@@ -171,7 +187,7 @@ def load_config() -> dict:
     """
     # Migrate old config if needed
     _migrate_legacy_config()
-    
+
     config = _load_config_file()
 
     # Try keyring first for the token
@@ -256,9 +272,71 @@ def _save_config_file_with_token(config: dict) -> None:
 
 
 def get_api_base() -> str:
-    """Get API base URL from config or environment."""
-    config = _load_config_file()  # Don't need token for this
-    return config.get("api_url", os.getenv("LW_API_URL", DEFAULT_API_BASE))
+    """Get API base URL from config or environment.
+
+    Priority:
+    1. CODEVAULT_API_URL environment variable
+    2. Saved config api_url
+    3. Development mode: localhost
+    4. Production default
+    """
+    config = _load_config_file()
+
+    # Check for explicit environment variable first
+    env_url = os.getenv("CODEVAULT_API_URL")
+    if env_url:
+        return env_url
+
+    # Check for saved config
+    saved_url = config.get("api_url")
+    if saved_url:
+        return saved_url
+
+    # Check for development mode
+    if os.getenv("CODEVAULT_DEV_MODE", "").lower() == "true":
+        return DEV_API_BASE
+
+    # Production default
+    return DEFAULT_API_BASE
+
+
+def get_license_server_url() -> str:
+    """Get the license server URL for embedding in compiled binaries.
+
+    This is the URL that compiled applications will use to validate licenses.
+    It should point to your production license server.
+
+    Priority:
+    1. CODEVAULT_SERVER_URL environment variable
+    2. Saved config license_server_url
+    3. Development mode: localhost
+    4. Production default
+    """
+    config = _load_config_file()
+
+    # Check for explicit environment variable
+    env_url = os.getenv("CODEVAULT_SERVER_URL")
+    if env_url:
+        return env_url
+
+    # Check for saved config
+    saved_url = config.get("license_server_url")
+    if saved_url:
+        return saved_url
+
+    # Check for development mode
+    if os.getenv("CODEVAULT_DEV_MODE", "").lower() == "true":
+        return DEV_LICENSE_SERVER_URL
+
+    # Production default
+    return LICENSE_SERVER_URL
+
+
+def set_license_server_url(url: str) -> None:
+    """Save the license server URL to config."""
+    config = _load_config_file()
+    config["license_server_url"] = url
+    _save_config_file(config)
 
 
 def get_headers() -> Optional[dict]:
@@ -326,7 +404,7 @@ def check_token_expiry() -> Optional[dict]:
         if exp and exp < time.time():
             return {
                 "error": "token_expired",
-                "message": "Your session has expired. Please log in again."
+                "message": "Your session has expired. Please log in again.",
             }
 
         return None
@@ -353,12 +431,12 @@ def get_storage_info() -> dict:
             "method": "keyring",
             "backend": backend,
             "secure": True,
-            "message": f"Credentials stored securely using {backend}"
+            "message": f"Credentials stored securely using {backend}",
         }
     else:
         return {
             "method": "file",
             "backend": "config.json",
             "secure": False,
-            "message": "Credentials stored in config file. Install 'keyring' for secure storage."
+            "message": "Credentials stored in config file. Install 'keyring' for secure storage.",
         }

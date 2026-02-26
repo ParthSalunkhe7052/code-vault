@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, Database, Key, CheckCircle, RefreshCw, AlertTriangle, ArrowRight, CloudLightning } from 'lucide-react';
 import { stats, auth, projects } from '../services/api';
-import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList } from '../components/dashboard';
+import { StatCard, ActivityItem, ExpiringLicense, ValidationChart, MachinesList, QuickStatsBar } from '../components/dashboard';
 import UsageStats from '../components/dashboard/UsageStats';
 import OnboardingHero from '../components/dashboard/OnboardingHero';
 import { SkeletonCard, SkeletonList, SkeletonChart } from '../components/Skeleton';
@@ -17,14 +17,15 @@ const Dashboard = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [statsData, userData, projectsData] = await Promise.all([
+            // Fetch each independently so one failure doesn't break the whole dashboard
+            const [statsResult, userResult, projectsResult] = await Promise.allSettled([
                 stats.getDashboard(),
                 auth.getMe(),
                 projects.list()
             ]);
-            setDashboardStats(statsData);
-            setUserProfile(userData);
-            setProjectList(projectsData || []);
+            if (statsResult.status === 'fulfilled') setDashboardStats(statsResult.value);
+            if (userResult.status === 'fulfilled') setUserProfile(userResult.value);
+            if (projectsResult.status === 'fulfilled') setProjectList(projectsResult.value || []);
         } catch (error) {
             console.error('Failed to fetch dashboard data:', error);
         } finally {
@@ -75,7 +76,8 @@ const Dashboard = () => {
         ? Math.round((dashboardStats.validations.last_24h.successful / dashboardStats.validations.last_24h.total) * 100)
         : 100;
 
-    const hasNoProjects = projectList.length === 0;
+    const projectCount = projectList.length || dashboardStats?.projects || 0;
+    const hasNoProjects = projectCount === 0;
 
     return (
         <div className="space-y-6">
@@ -97,8 +99,16 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Onboarding Hero for new users */}
-            {hasNoProjects && <OnboardingHero />}
+            {/* Onboarding Hero for new users OR Quick Stats for returning users */}
+            {hasNoProjects ? (
+                <OnboardingHero />
+            ) : (
+                <QuickStatsBar
+                    projectCount={projectCount}
+                    licenseStats={dashboardStats?.licenses}
+                    validationStats={dashboardStats?.validations}
+                />
+            )}
 
             {/* Stats Grid - Hidden for new users to prioritize onboarding */}
             {!hasNoProjects && (
@@ -189,20 +199,9 @@ const Dashboard = () => {
                             ))}
                         </div>
                     ) : (
-                        <div className="p-4 bg-gradient-to-br from-indigo-500/5 to-violet-500/5 rounded-xl border border-indigo-500/10">
-                            <p className="text-slate-300 font-medium text-sm mb-3">🚀 Get Started</p>
-                            <div className="space-y-2">
-                                <div className={`flex items-center gap-2 text-xs ${dashboardStats?.projects > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                                    {dashboardStats?.projects > 0 ? '✓' : '○'} Create your first project
-                                </div>
-                                <div className={`flex items-center gap-2 text-xs ${dashboardStats?.licenses?.total > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                                    {dashboardStats?.licenses?.total > 0 ? '✓' : '○'} Issue a license key
-                                </div>
-                                <div className={`flex items-center gap-2 text-xs ${dashboardStats?.validations?.last_24h?.total > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                                    {dashboardStats?.validations?.last_24h?.total > 0 ? '✓' : '○'} Validate a license from your app
-                                </div>
-                            </div>
-                            <p className="text-slate-500 text-xs mt-3">Activity will appear here as you use the system.</p>
+                        <div className="p-4 text-center">
+                            <p className="text-slate-500 text-sm">No license validations yet.</p>
+                            <p className="text-slate-600 text-xs mt-1">Activity will appear here when clients validate licenses.</p>
                         </div>
                     )}
                 </div>
@@ -214,36 +213,6 @@ const Dashboard = () => {
             {/* Validation Stats Chart */}
             <ValidationChart history={dashboardStats?.validations?.history} />
 
-            {/* Quick Actions */}
-            <div className="glass-card p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Link to="/projects" className="btn-secondary justify-center">
-                        <Database size={18} />
-                        Create Project
-                    </Link>
-                    <Link to="/licenses" className="btn-secondary justify-center">
-                        <Key size={18} />
-                        Issue License
-                    </Link>
-                    <Link to="/settings" className="btn-secondary justify-center">
-                        <Activity size={18} />
-                        View API Key
-                    </Link>
-                </div>
-            </div>
-
-            {/* Getting Started */}
-            <div className="glass-card p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">Getting Started</h2>
-                <div className="space-y-3 text-sm text-slate-400">
-                    <p>1. <strong className="text-white">Create a Project</strong> - Group your licenses by application</p>
-                    <p>2. <strong className="text-white">Upload Files</strong> - Add your Python scripts to the project</p>
-                    <p>3. <strong className="text-white">Generate Licenses</strong> - Create license keys for your clients</p>
-                    <p>4. <strong className="text-white">Compile</strong> - Build protected executables with Nuitka</p>
-                    <p>5. <strong className="text-white">Distribute</strong> - Share the compiled binary with your clients</p>
-                </div>
-            </div>
         </div>
     );
 };

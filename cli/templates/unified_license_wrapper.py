@@ -411,27 +411,62 @@ class _CV_LicenseDialog:
 
 def _cv_get_hwid():
     """
-    Generate robust hardware ID for license validation.
-    Uses MAC address and system info for stability.
+    Generate robust multi-factor hardware ID for license validation.
+    Uses MAC address, disk serial, CPU ID, and motherboard serial.
+    Gracefully falls back if any factor fails.
     """
+    components = []
+    
     try:
-        # Get MAC address
         mac = ":".join(_cv_re.findall("..", "%012x" % _cv_uuid.getnode()))
-        
-        # Combine system info
-        info = f"""{_cv_platform.node()}|
-                   {_cv_platform.system()}|
-                   {_cv_platform.machine()}|
-                   {_cv_platform.processor()}|
-                   {mac}"""
-        return _cv_hash.sha256(info.encode()).hexdigest()[:32]
-    except Exception as e:
-        # Fallback to basic info
+        components.append(f"mac:{mac}")
+    except Exception:
+        pass
+    
+    if _cv_platform.system() == "Windows":
         try:
-            info = f"{_cv_platform.node()}|{_cv_platform.system()}|{_cv_platform.machine()}"
-            return _cv_hash.sha256(info.encode()).hexdigest()[:32]
-        except:
-            return "unknown-hwid"
+            import subprocess as _cv_subprocess
+            result = _cv_subprocess.run(
+                ["wmic", "diskdrive", "get", "serialnumber"],
+                capture_output=True, text=True, timeout=5
+            )
+            lines = result.stdout.strip().split("\n")
+            if len(lines) > 1:
+                disk_serial = lines[1].strip()
+                if disk_serial and disk_serial != "SerialNumber":
+                    components.append(f"disk:{disk_serial}")
+        except Exception:
+            pass
+        
+        try:
+            import subprocess as _cv_subprocess
+            result = _cv_subprocess.run(
+                ["wmic", "baseboard", "get", "serialnumber"],
+                capture_output=True, text=True, timeout=5
+            )
+            lines = result.stdout.strip().split("\n")
+            if len(lines) > 1:
+                mb_serial = lines[1].strip()
+                if mb_serial and mb_serial != "SerialNumber":
+                    components.append(f"mb:{mb_serial}")
+        except Exception:
+            pass
+    
+    try:
+        cpu_id = _cv_platform.processor()
+        if cpu_id:
+            components.append(f"cpu:{cpu_id[:32]}")
+    except Exception:
+        pass
+    
+    if components:
+        return _cv_hash.sha256("|".join(components).encode()).hexdigest()[:32]
+    
+    try:
+        info = f"{_cv_platform.node()}|{_cv_platform.system()}|{_cv_platform.machine()}"
+        return _cv_hash.sha256(info.encode()).hexdigest()[:32]
+    except Exception:
+        return "unknown-hwid"
 
 def _cv_get_binary_hash():
     """Calculate SHA-256 hash of current executable for integrity checking."""
@@ -766,14 +801,61 @@ def _cv_validate_signature(result):
                       f"The response may be tampered. Error: {e}")
         return False
 
+
+def _cv_load_demo_start_time():
+    """Load demo start time from cache file."""
+    try:
+        cache_dir = _cv_os.path.join(_cv_os.path.expanduser("~"), ".codevault")
+        cache_file = _cv_os.path.join(cache_dir, "demo_start.time")
+        if _cv_os.path.exists(cache_file):
+            with open(cache_file, "r") as f:
+                return int(f.read().strip())
+    except Exception:
+        pass
+    return None
+
+
+def _cv_save_demo_start_time(start_time):
+    """Save demo start time to cache file."""
+    try:
+        cache_dir = _cv_os.path.join(_cv_os.path.expanduser("~"), ".codevault")
+        _cv_os.makedirs(cache_dir, exist_ok=True)
+        cache_file = _cv_os.path.join(cache_dir, "demo_start.time")
+        with open(cache_file, "w") as f:
+            f.write(str(start_time))
+    except Exception:
+        pass
+
+
 def _cv_validate_license():
     """Main license validation function."""
     global _CV_SESSION_TOKEN
     
-    # Handle DEMO mode - NOT allowed in production builds
+    # Handle DEMO mode - provide time-limited trial (24 hours)
     if _CV_LICENSE_KEY == "DEMO":
-        print("[CodeVault] DEMO mode not allowed in production builds")
-        _cv_sys.exit(1)
+        import time as _cv_demo_time
+        demo_start = _cv_load_demo_start_time()
+        if demo_start is None:
+            demo_start = int(_cv_demo_time.time())
+            _cv_save_demo_start_time(demo_start)
+        
+        demo_duration = 24 * 60 * 60  # 24 hours in seconds
+        elapsed = int(_cv_demo_time.time()) - demo_start
+        
+        if elapsed >= demo_duration:
+            _cv_show_error(
+                "DEMO EXPIRED",
+                "Your demo period has expired.",
+                "Please purchase a license to continue using this application."
+            )
+            return False
+        
+        remaining_hours = (demo_duration - elapsed) // 3600
+        remaining_minutes = ((demo_duration - elapsed) % 3600) // 60
+        print(f"[CodeVault] DEMO MODE - {remaining_hours}h {remaining_minutes}m remaining")
+        
+        _CV_SESSION_TOKEN = "demo_session"
+        return True
     
     # Handle GENERIC_BUILD mode (runtime prompt)
     license_key = _CV_LICENSE_KEY

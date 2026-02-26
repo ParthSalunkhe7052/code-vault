@@ -377,18 +377,101 @@ def create_jwt_token(user_id: str, email: str) -> str:
     payload = {
         "sub": user_id,
         "email": email,
+        "jti": secrets.token_hex(16),
         "exp": utc_now() + timedelta(hours=JWT_EXPIRATION_HOURS),
         "iat": utc_now(),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+async def _is_jwt_blacklisted(jti: str) -> bool:
+    """Check if a JWT's jti is in the Redis blacklist."""
+    from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, REDIS_URL
+
+    if not jti:
+        return False
+
+    # Try Upstash REST API first
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import Redis
+            r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+            result = await r.get(f"jwt_blacklist:{jti}")
+            return result is not None
+        except Exception:
+            pass
+
+    # Fallback to standard Redis
+    if REDIS_URL:
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(REDIS_URL)
+            result = await r.get(f"jwt_blacklist:{jti}")
+            await r.close()
+            return result is not None
+        except Exception:
+            pass
+
+    return False
+
+
+async def blacklist_jwt(jti: str, ttl_seconds: int) -> bool:
+    """Add a JWT's jti to the Redis blacklist with TTL."""
+    from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, REDIS_URL
+    import logging
+
+    if not jti or ttl_seconds <= 0:
+        return False
+
+    # Try Upstash REST API first
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            from upstash_redis.asyncio import Redis
+            r = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+            await r.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)
+            return True
+        except Exception as e:
+            logging.warning(f"[JWT Blacklist] Upstash error: {e}")
+
+    # Fallback to standard Redis
+    if REDIS_URL:
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(REDIS_URL)
+            await r.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)
+            await r.close()
+            return True
+        except Exception as e:
+            logging.warning(f"[JWT Blacklist] Redis error: {e}")
+
+    return False
+
+
 def verify_jwt_token(token: str) -> Optional[dict]:
-    """Verify a JWT token and return the payload."""
+    """Verify a JWT token and return the payload.
+
+    Note: This is synchronous for backwards compatibility.
+    For blacklist checking, use verify_jwt_token_async() instead.
+    """
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.exceptions.PyJWTError:
         return None
+
+
+async def verify_jwt_token_async(token: str) -> Optional[dict]:
+    """Verify a JWT token with blacklist check and return the payload."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.exceptions.PyJWTError:
+        return None
+
+    # Check if the token's jti is blacklisted (logged out)
+    jti = payload.get("jti")
+    if jti and await _is_jwt_blacklisted(jti):
+        return None
+
+    return payload
 
 
 def hash_password(password: str) -> str:
@@ -415,7 +498,7 @@ async def get_current_user(
     conn = await get_db()
     try:
         if credentials:
-            payload = verify_jwt_token(credentials.credentials)
+            payload = await verify_jwt_token_async(credentials.credentials)
             if payload:
                 user = await conn.fetchrow(
                     "SELECT id, email, name, plan, role, api_key FROM users WHERE id = $1",

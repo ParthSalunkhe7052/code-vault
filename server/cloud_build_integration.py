@@ -535,20 +535,21 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   ls -la "$$dist_dir/" 2>/dev/null || true
   
   # Zip the entire .dist folder with all dependencies (including python311.dll)
-  # Use the actual .dist folder name, not {output_name}
+  # Use zip for Windows (tar.gz is not natively supported on Windows)
   parent_dir=$$(dirname "$$dist_dir")
   cd "$$parent_dir"
-  tar -czf "/workspace/{output_name}.tar.gz" "$$dist_name"
+  apt-get install -y -qq zip 2>/dev/null || true
+  zip -r -q "/workspace/{output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
   cd /workspace
-  
-  if [ -f "/workspace/{output_name}.tar.gz" ]; then
-    archive_size=$$(ls -lh "/workspace/{output_name}.tar.gz" | awk '{{print $$5}}')
+
+  if [ -f "/workspace/{output_name}.zip" ]; then
+    archive_size=$$(ls -lh "/workspace/{output_name}.zip" | awk '{{print $$5}}')
     echo "[Cloud Build] Archive size: $$archive_size"
-    windows_artifacts="{output_name}.tar.gz"
+    windows_artifacts="{output_name}.zip"
     windows_status="completed"
     echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (standalone folder with dependencies)"
   else
-    windows_error="Failed to create tar.gz from .dist folder"
+    windows_error="Failed to create zip from .dist folder"
   fi
 else
   # Fallback: Check for onefile mode (single EXE)

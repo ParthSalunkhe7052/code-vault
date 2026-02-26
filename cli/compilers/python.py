@@ -48,6 +48,21 @@ PYTHON_BLACKLIST = [
     "idlelib",
     "tkinter",
     "curses",
+    "numpy.tests",
+    "pandas.tests",
+    "matplotlib.tests",
+    "scipy.tests",
+    "PIL.tests",
+    "sklearn.tests",
+    "torch.test",
+    "tensorflow.python.tools",
+    "sympy.testing",
+    "IPython.testing",
+    "jupyter_client.tests",
+    "nbconvert.tests",
+    "_pytest",
+    "hypothesis",
+    "faker",
 ]
 
 # Heavy encodings and miscellaneous modules excluded in Turbo Mode
@@ -155,6 +170,10 @@ class PythonCompiler(BaseCompiler):
             "--remove-output",
             "--assume-yes-for-downloads",
             "--no-prefer-source-code",
+            "--ccache",
+            "--python-flag=no_site",
+            "--python-flag=no_warnings",
+            "--follow-stdlib=no",
         ]
 
         for module in PYTHON_BLACKLIST:

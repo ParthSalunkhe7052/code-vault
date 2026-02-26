@@ -269,6 +269,7 @@ def _generate_python_linux_build_step(
         "name": "gcr.io/cloudbuild-486309/codevault-builder:latest",
         "id": "build-linux",
         "entrypoint": "bash",
+        "env": ["NUITKA_JOBS=4"],
         "args": [
             "-c",
             f"""set -e
@@ -296,7 +297,7 @@ decoded_config=$(cat /workspace/config.json)
 use_onefile=$(echo "$decoded_config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('use_onefile', False))" 2>/dev/null || echo "False")
 echo "[Cloud Build] Build mode: use_onefile=$use_onefile"
 
-export NUITKA_JOBS=6
+export NUITKA_JOBS=4
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 mkdir -p $NUITKA_CACHE_DIR
 
@@ -362,7 +363,10 @@ fi
 """,
         ],
         "waitFor": ["download-config"],
-        "volumes": [{"name": "artifacts", "path": "/workspace/artifacts"}],
+        "volumes": [
+            {"name": "ccache", "path": "/workspace/.ccache"},
+            {"name": "artifacts", "path": "/workspace/artifacts"},
+        ],
     }
 
 
@@ -423,6 +427,7 @@ def _generate_python_windows_build_step(
         "name": "docker.io/tobix/pywine:3.11",
         "id": "build-windows",
         "entrypoint": "bash",
+        "env": ["NUITKA_JOBS=4"],
         "args": [
             "-c",
             f"""set -e
@@ -435,6 +440,7 @@ fi
 
 echo "[Cloud Build] ===== Building for Windows ====="
 
+export NUITKA_JOBS=4
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
 mkdir -p $NUITKA_CACHE_DIR
 
@@ -472,28 +478,32 @@ output_name="{output_name}"
 echo "[Cloud Build] Looking for Windows build output..."
 
 found_exe=""
-dist_dir="./project/source/build_output_windows_wine/${{output_name}}.dist"
+# Look for ANY .dist folder (Nuitka names it after entry file, not output name)
+# e.g., main.py -> main.dist, not ${{output_name}}.dist
+dist_dir=$(find ./project/source/build_output_windows_wine -type d -name "*.dist" 2>/dev/null | head -1)
 
 # Check for standalone build first (directory with EXE + DLLs)
-if [ -d "$dist_dir" ]; then
-  echo "[Cloud Build] Found standalone build directory: $dist_dir"
+if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
+  dist_name=$(basename "$dist_dir")
+  echo "[Cloud Build] Found standalone build directory: $dist_dir (name: $dist_name)"
   if [ -f "$dist_dir/${{output_name}}.exe" ]; then
     found_exe="$dist_dir/${{output_name}}.exe"
   else
     found_exe=$(find "$dist_dir" -type f -name "*.exe" 2>/dev/null | head -1)
   fi
-  
+
   if [ -n "$found_exe" ]; then
     exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
     echo "[Cloud Build] EXE size: $exe_size"
-    
+
     # Create ZIP of standalone build
     mkdir -p /workspace/artifacts
-    cd "$dist_dir/.."
-    zip -r "/workspace/artifacts/${{output_name}}.zip" "${{output_name}}.dist" -x "*.pyc" -x "__pycache__/*"
+    parent_dir=$(dirname "$dist_dir")
+    cd "$parent_dir"
+    zip -r "/workspace/artifacts/${{output_name}}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
     zip_size=$(ls -lh "/workspace/artifacts/${{output_name}}.zip" | awk '{{print $5}}')
     echo "[Cloud Build] Created standalone ZIP: $zip_size"
-    
+
     echo "completed" > /workspace/artifacts/build_status_windows
     echo "${{output_name}}.zip" > /workspace/artifacts/windows_artifacts
     echo "standalone" > /workspace/artifacts/build_mode_windows

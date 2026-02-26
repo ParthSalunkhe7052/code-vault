@@ -11,17 +11,43 @@ import threading
 import queue
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
-from terminal import Colors, color_print, print_progress_bar
-from generators.python_generator import get_python_wrapper
-from generators.nodejs_generator import get_nodejs_wrapper_inline
-from url_utils import normalize_server_url
-from audit import log_build_failure, log_security_event, log_obfuscation_stats
-from compiler_constants import (
-    JAVASCRIPT_OBFUSCATOR_VERSION,
-    OBFUSCATE_TIMEOUT,
-    PARALLEL_WORKERS,
-    COMPILE_TIMEOUT,
-)
+
+try:
+    from terminal import Colors, color_print, print_progress_bar
+except ImportError:
+    from cli.terminal import Colors, color_print, print_progress_bar
+
+try:
+    from generators.python_generator import get_python_wrapper
+    from generators.nodejs_generator import get_nodejs_wrapper_inline
+except ImportError:
+    from cli.generators.python_generator import get_python_wrapper
+    from cli.generators.nodejs_generator import get_nodejs_wrapper_inline
+
+try:
+    from url_utils import normalize_server_url
+except ImportError:
+    from cli.url_utils import normalize_server_url
+
+try:
+    from audit import log_build_failure, log_security_event, log_obfuscation_stats
+except ImportError:
+    from cli.audit import log_build_failure, log_security_event, log_obfuscation_stats
+
+try:
+    from compiler_constants import (
+        JAVASCRIPT_OBFUSCATOR_VERSION,
+        OBFUSCATE_TIMEOUT,
+        PARALLEL_WORKERS,
+        COMPILE_TIMEOUT,
+    )
+except ImportError:
+    from cli.compiler_constants import (
+        JAVASCRIPT_OBFUSCATOR_VERSION,
+        OBFUSCATE_TIMEOUT,
+        PARALLEL_WORKERS,
+        COMPILE_TIMEOUT,
+    )
 
 
 def _read_output_thread(pipe, output_queue):
@@ -348,7 +374,6 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
     entry_file_path = config.get("entry_file", "")
     license_key = config.get("license_key", "DEMO")
 
-    # Validate entry file path for security
     try:
         entry_file = validate_entry_file(entry_file_path, project_dir)
     except PathTraversalError as e:
@@ -374,19 +399,26 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         server_url = config.get("server_url", "http://localhost:8000")
         server_url = normalize_server_url(server_url)
         lease_enabled = config.get("lease_enabled", False)
-        # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
 
-        # Log branding status for debugging
         branding_status = (
             "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
         )
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
-        # Prefer Ed25519 public key (asymmetric, secure) over HMAC secret (legacy)
         public_key = config.get("signing_public_key") or ""
         secret_key = config.get("signing_secret") or "dev-secret-key"
         heartbeat_interval = config.get("heartbeat_interval", 300)
+
+        app_name = (
+            config.get("app_name")
+            or config.get("project_name")
+            or "Protected Application"
+        )
+        brand_name = config.get("brand_name", "CodeVault")
+        brand_url = config.get("brand_url", "https://codevault.dev")
+        brand_primary_color = config.get("brand_primary_color", "#6366f1")
+        binary_hash = config.get("binary_hash", "skip")
 
         wrapper = get_python_wrapper(
             license_key,
@@ -396,6 +428,11 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
             show_branding,
             public_key=public_key,
             heartbeat_interval=heartbeat_interval,
+            app_name=app_name,
+            brand_name=brand_name,
+            brand_url=brand_url,
+            brand_primary_color=brand_primary_color,
+            binary_hash=binary_hash,
         )
         entry_file.write_text(wrapper + original_code, encoding="utf-8")
         print(f"[BUILD] Injected wrapper into: {entry_file.name}", flush=True)
@@ -434,16 +471,13 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
         server_url = config.get("server_url", "http://localhost:8000")
         server_url = normalize_server_url(server_url)
         lease_enabled = config.get("lease_enabled", False)
-        # White-label branding: show_branding is True for free tier (default)
         show_branding = config.get("show_branding", True)
 
-        # Log branding status for debugging
         branding_status = (
             "ENABLED (Free tier)" if show_branding else "DISABLED (Pro/Enterprise)"
         )
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
-        # Strip shebang if present
         shebang = ""
         if original_code.startswith("#!"):
             first_newline = original_code.find("\n")
@@ -454,6 +488,12 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
 
         public_key = config.get("signing_public_key") or ""
         heartbeat_interval = config.get("heartbeat_interval", 300)
+        app_name = (
+            config.get("app_name")
+            or config.get("project_name")
+            or "Protected Application"
+        )
+        binary_hash = config.get("binary_hash", "skip")
 
         prefix, suffix = get_nodejs_wrapper_inline(
             license_key,
@@ -462,6 +502,8 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
             show_branding,
             public_key=public_key,
             heartbeat_interval=heartbeat_interval,
+            app_name=app_name,
+            binary_hash=binary_hash,
         )
         wrapped_code = shebang + prefix + original_code + suffix
         entry_file.write_text(wrapped_code, encoding="utf-8")
@@ -723,7 +765,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         target = f"node20-{platform_code}-x64"
         color_print(f"[T] Target platform: {platform_target} ({target})", Colors.CYAN)
     else:
-        target = compiler_opts.get("target", "node18-win-x64")
+        target = compiler_opts.get("target", "node20-win-x64")
 
     # Validate target format (should be like node18-win-x64)
     if not re.match(r"^node\d+-[a-z]+-[a-z0-9]+$", target):
@@ -887,7 +929,7 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         else:
             print("   [OK] node_modules already exists")
 
-        # Add pkg config for ESM/CJS...
+        # Add pkg config for ESM/CJS and ensure all dependencies are bundled
         try:
             pkg_json_content = json.loads(package_json.read_text(encoding="utf-8"))
             if "pkg" not in pkg_json_content:
@@ -899,13 +941,28 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
                 "assets", []
             )
 
-            for pat in ["node_modules/**/*.cjs", "node_modules/**/*.json"]:
+            # Add all JS files from node_modules (critical for express, axios, etc.)
+            # pkg needs these in assets to bundle them properly
+            asset_patterns = [
+                "node_modules/**/*.js",
+                "node_modules/**/*.cjs",
+                "node_modules/**/*.json",
+                "node_modules/**/*.node",  # Native addons
+            ]
+            for pat in asset_patterns:
                 if pat not in pkg_json_content["pkg"]["assets"]:
                     pkg_json_content["pkg"]["assets"].append(pat)
+
+            # Add all project source files to scripts for bytecode compilation
+            if "build/**/*.js" not in pkg_json_content["pkg"]["scripts"]:
+                pkg_json_content["pkg"]["scripts"].append("build/**/*.js")
+            if "src/**/*.js" not in pkg_json_content["pkg"]["scripts"]:
+                pkg_json_content["pkg"]["scripts"].append("src/**/*.js")
 
             package_json.write_text(
                 json.dumps(pkg_json_content, indent=2), encoding="utf-8"
             )
+            print("   [PKG] Configured package.json for dependency bundling")
         except Exception:
             pass
 
@@ -944,6 +1001,8 @@ def run_pkg(project_dir: Path, config: Dict[str, Any]) -> Tuple[bool, Optional[P
         str(pkg_cwd / output_name),
         "--compress",
         "GZip",  # Optimization: Compress for smaller output
+        "--public-packages",
+        "*",  # Include all public npm packages (express, axios, etc.)
     ]
 
     # Debug mode: show less verbose output for cleaner logs
@@ -1336,12 +1395,24 @@ def run_nuitka(project_dir: Path, config: Dict[str, Any]) -> bool:
         "--assume-yes-for-downloads",
         "--enable-plugin=tk-inter",
         "--no-prefer-source-code",
+        "--python-flag=no_site",
         # Optimization: Skip importing test/doc modules
         "--nofollow-import-to=pytest",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=sphinx",
         "--nofollow-import-to=setuptools",
+        # Performance: Skip heavy data science libraries in import scanning
+        "--nofollow-import-to=numpy",
+        "--nofollow-import-to=pandas",
+        "--nofollow-import-to=PIL",
+        "--nofollow-import-to=matplotlib",
     ]
+
+    # Performance: Use all available CPU cores for parallel compilation
+    import os
+
+    cpu_count = os.cpu_count() or 4
+    base_options.append(f"--jobs={cpu_count}")
 
     # B26: Support platform targeting for cross-compilation
     platform_target = config.get("platform")
@@ -1766,17 +1837,45 @@ def calculate_file_sha256(file_path: Path) -> str:
 def register_binary_hash_with_server(
     project_id: str, binary_path: Path, config: Dict[str, Any]
 ) -> bool:
-    """Register a compiled binary's hash with the server."""
+    """Register a compiled binary's hash with the server.
+
+    This enables binary integrity checking (SEC2) - the client can verify
+    that the running binary matches a known-good hash registered at build time.
+
+    Args:
+        project_id: The project ID
+        binary_path: Path to the compiled binary
+        config: Build configuration (must include api_url, api_key)
+
+    Returns:
+        bool: True if registration successful
+    """
     if not binary_path.exists():
+        print(
+            f"[WARN] Binary not found for hash registration: {binary_path}", flush=True
+        )
+        return False
+
+    if not project_id:
+        print(
+            "[WARN] No project_id provided, skipping binary hash registration",
+            flush=True,
+        )
         return False
 
     binary_hash = calculate_file_sha256(binary_path)
     binary_size = binary_path.stat().st_size
-    server_url = config.get("server_url", "http://localhost:8000")
+
+    api_url = config.get("api_url") or config.get(
+        "server_url", "https://api.codevault.dev"
+    )
     api_key = config.get("api_key")
 
     if not api_key:
-        # Don't warn for demo/local builds without api key
+        print(
+            "[INFO] No API key configured, skipping binary hash registration",
+            flush=True,
+        )
         return False
 
     try:
@@ -1788,20 +1887,47 @@ def register_binary_hash_with_server(
             "platform": config.get("platform", "windows"),
             "build_id": config.get("build_id", ""),
         }
-        headers = {"X-API-Key": api_key}
-        # Path: /api/v1/projects/{project_id}/binary-hash
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
         resp = requests.post(
-            f"{server_url}/api/v1/projects/{project_id}/binary-hash",
+            f"{api_url}/api/v1/projects/{project_id}/binary-hash",
             json=payload,
             headers=headers,
-            timeout=10,
+            timeout=15,
         )
+
         if resp.status_code == 200:
-            print(f"   [SEC] Binary integrity hash registered: {binary_hash[:12]}...")
+            print(
+                f"[OK] Binary integrity hash registered: {binary_hash[:16]}...",
+                flush=True,
+            )
             return True
-        else:
+        elif resp.status_code == 401:
+            print(
+                "[WARN] Authentication failed for binary hash registration", flush=True
+            )
             return False
-    except Exception:
+        else:
+            try:
+                error = resp.json().get("detail", f"HTTP {resp.status_code}")
+            except:
+                error = f"HTTP {resp.status_code}"
+            print(f"[WARN] Binary hash registration failed: {error}", flush=True)
+            return False
+
+    except requests.exceptions.Timeout:
+        print("[WARN] Binary hash registration timed out", flush=True)
+        return False
+    except requests.exceptions.ConnectionError as e:
+        print(
+            f"[WARN] Could not connect to server for hash registration: {e}", flush=True
+        )
+        return False
+    except Exception as e:
+        print(f"[WARN] Binary hash registration error: {e}", flush=True)
         return False
 
 

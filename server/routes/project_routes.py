@@ -4,7 +4,7 @@ import shutil
 import zipfile
 import logging
 
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
@@ -26,6 +26,7 @@ from storage_service import (
     validate_file_size,
 )
 from models import ProjectCreateRequest, ProjectConfigRequest, ProjectBrandingRequest
+from pydantic import BaseModel, Field as PydanticField
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from routes.cloud_build_utils import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
@@ -195,14 +196,11 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
 
         import os
 
-        # Get server URL for license validation API
         server_url = os.getenv("PUBLIC_API_URL", "http://127.0.0.1:8000")
         api_url = f"{server_url}/api/v1/license/validate"
 
-        # Get selected license if stored in settings
         selected_license_id = settings.get("selected_license_id")
 
-        # Get user tier info for white-label branding
         tier_info = await get_user_tier(user["id"], conn)
 
         return {
@@ -215,20 +213,15 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             "pkg_options": settings.get("pkg_options", {}),
             "compiler_options": compiler_opts,
             "language": language,
-            "signing_secret": signing_secret,
             "signing_public_key": project.get("signing_public_key"),
             "api_url": api_url,
             "server_url": server_url,
             "selected_license_id": selected_license_id,
-            # Build options
             "skip_obfuscation": settings.get("skip_obfuscation", True),
             "enable_lease": settings.get("enable_lease", False),
-            # Build mode options
             "use_onefile": settings.get("use_onefile", False),
             "is_gui_app": settings.get("is_gui_app", False),
-            # Security options
             "enable_binary_hash": settings.get("enable_binary_hash", False),
-            # White-label branding tier info
             "tier": tier_info["tier"],
             "is_pro": tier_info["is_pro"],
             "can_remove_branding": tier_info["can_remove_branding"],
@@ -244,6 +237,75 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
                 }
                 for f in files
             ],
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.get("/{project_id}/build-config")
+async def get_build_config(
+    project_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Get configuration needed for CLI builds.
+
+    Returns all settings required to embed in compiled binaries:
+    - server_url: License validation server URL (production)
+    - signing_public_key: Ed25519 public key for signature verification
+    - heartbeat_interval: Background heartbeat interval
+    - branding settings based on user tier
+
+    This endpoint is called by the CLI before building to ensure
+    the compiled binary connects to the correct license server.
+    """
+    import os
+
+    conn = await get_db()
+    try:
+        project = await conn.fetchrow(
+            """SELECT id, name, settings, language, 
+                      signing_public_key, signing_private_key,
+                      brand_name, brand_url, brand_primary_color
+               FROM projects WHERE id = $1 AND user_id = $2""",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        settings = project["settings"] or {}
+        if isinstance(settings, str):
+            settings = json.loads(settings) if settings else {}
+
+        tier_info = await get_user_tier(user["id"], conn)
+
+        license_server_url = os.getenv("PUBLIC_API_URL", "https://api.codevault.dev")
+
+        heartbeat_interval = settings.get("heartbeat_interval", 300)
+
+        show_branding = not tier_info.get("can_remove_branding", False)
+        if settings.get("show_branding") is not None:
+            show_branding = settings.get("show_branding", True)
+
+        return {
+            "project_id": project_id,
+            "project_name": project["name"],
+            "language": project.get("language", "python"),
+            "server_url": license_server_url,
+            "signing_public_key": project.get("signing_public_key") or "",
+            "heartbeat_interval": heartbeat_interval,
+            "entry_file": settings.get("entry_file"),
+            "output_name": settings.get("output_name"),
+            "enable_lease": settings.get("enable_lease", False),
+            "enable_binary_hash": settings.get("enable_binary_hash", False),
+            "show_branding": show_branding,
+            "brand_name": project.get("brand_name") or "CodeVault",
+            "brand_url": project.get("brand_url") or "https://codevault.dev",
+            "brand_primary_color": project.get("brand_primary_color") or "#6366f1",
+            "nuitka_options": settings.get("nuitka_options", {}),
+            "compiler_options": {},
+            "tier": tier_info["tier"],
         }
     finally:
         await release_db(conn)
@@ -595,10 +657,21 @@ async def upload_project_zip(
 # =============================================================================
 
 
+class BinaryHashRequest(BaseModel):
+    """Validated request for registering a binary hash."""
+
+    binary_hash: str = PydanticField(
+        ..., min_length=64, max_length=64, pattern="^[a-f0-9]{64}$"
+    )
+    binary_size: Optional[int] = PydanticField(None, ge=0)
+    platform: Optional[str] = PydanticField(None, pattern="^(windows|linux|macos)$")
+    build_id: Optional[str] = PydanticField(None, max_length=100)
+
+
 @router.post("/{project_id}/binary-hash")
 async def register_binary_hash(
     project_id: str,
-    data: dict,
+    data: BinaryHashRequest,
     user: dict = Depends(get_current_user),
 ):
     """Register a compiled binary's SHA-256 hash for integrity verification.
@@ -617,13 +690,6 @@ async def register_binary_hash(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        binary_hash = data.get("binary_hash", "")
-        if not binary_hash or len(binary_hash) != 64:
-            raise HTTPException(
-                status_code=400,
-                detail="binary_hash must be a 64-char SHA-256 hex string",
-            )
-
         hash_id = secrets.token_hex(16)
         await conn.execute(
             """
@@ -633,13 +699,13 @@ async def register_binary_hash(
             """,
             hash_id,
             project_id,
-            binary_hash,
-            data.get("binary_size"),
-            data.get("platform"),
-            data.get("build_id"),
+            data.binary_hash,
+            data.binary_size,
+            data.platform,
+            data.build_id,
         )
 
-        return {"status": "registered", "binary_hash": binary_hash}
+        return {"status": "registered", "binary_hash": data.binary_hash}
     finally:
         await release_db(conn)
 

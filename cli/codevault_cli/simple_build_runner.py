@@ -13,14 +13,13 @@ import time
 import shutil
 import subprocess
 import tempfile
+import hashlib
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any, Callable
 from datetime import timedelta
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import compiler logic
 from compiler_logic import (
     inject_license_wrapper,
     inject_js_wrapper,
@@ -32,12 +31,148 @@ from compiler_logic import (
 )
 from compiler_constants import COMPILE_TIMEOUT
 
-# Import new components
 from codevault_cli.simple_build_display import (
     create_display,
     BuildPhase,
 )
 from codevault_cli.build_logger import create_logger, get_logger
+
+try:
+    from cli_config import get_license_server_url
+except ImportError:
+
+    def get_license_server_url():
+        return os.getenv("CODEVAULT_SERVER_URL", "https://api.codevault.dev")
+
+
+def check_server_connectivity(
+    server_url: str,
+    timeout: int = 5,
+) -> Tuple[bool, str]:
+    """
+    Check if the license server is reachable before building.
+
+    This helps catch configuration issues early - if the server URL
+    is wrong or the server is down, the user will know before waiting
+    for a long compilation.
+
+    Args:
+        server_url: The server URL to check
+        timeout: Timeout in seconds
+
+    Returns:
+        Tuple of (is_reachable, message)
+    """
+    import requests
+
+    try:
+        health_url = server_url.rstrip("/")
+        resp = requests.get(
+            f"{health_url}/api/v1/health",
+            timeout=timeout,
+        )
+
+        if resp.status_code == 200:
+            return True, "License server is reachable"
+        else:
+            return False, f"Server returned HTTP {resp.status_code}"
+
+    except requests.exceptions.Timeout:
+        return False, f"Connection timed out after {timeout}s"
+    except requests.exceptions.ConnectionError as e:
+        return False, f"Cannot connect to server: {str(e)[:50]}"
+    except Exception as e:
+        return False, f"Server check failed: {str(e)[:50]}"
+
+
+def fetch_build_config_from_server(
+    project_id: str,
+    headers: Dict[str, str],
+    api_url: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch build configuration from the server.
+
+    This ensures the compiled binary uses the correct:
+    - License server URL (production)
+    - Ed25519 public key for signature verification
+    - Heartbeat interval
+    - Branding settings
+
+    Returns None if fetch fails (uses defaults).
+    """
+    import requests
+
+    try:
+        resp = requests.get(
+            f"{api_url}/projects/{project_id}/build-config",
+            headers=headers,
+            timeout=15,
+        )
+
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            return None
+    except Exception:
+        return None
+
+
+def merge_build_config(
+    config: Dict[str, Any],
+    server_config: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Merge server build config into local config.
+
+    Server config takes precedence for:
+    - server_url (license validation URL)
+    - signing_public_key
+    - heartbeat_interval
+    - branding settings
+    """
+    if not server_config:
+        config.setdefault("server_url", get_license_server_url())
+        return config
+
+    merged = config.copy()
+
+    if server_config.get("server_url"):
+        merged["server_url"] = server_config["server_url"]
+
+    if server_config.get("signing_public_key"):
+        merged["signing_public_key"] = server_config["signing_public_key"]
+
+    if server_config.get("heartbeat_interval"):
+        merged["heartbeat_interval"] = server_config["heartbeat_interval"]
+
+    if server_config.get("entry_file"):
+        merged["entry_file"] = server_config["entry_file"]
+
+    if server_config.get("output_name"):
+        merged["output_name"] = server_config["output_name"]
+
+    if "enable_lease" in server_config:
+        merged["lease_enabled"] = server_config["enable_lease"]
+
+    if "show_branding" in server_config:
+        merged["show_branding"] = server_config["show_branding"]
+
+    if server_config.get("brand_name"):
+        merged["brand_name"] = server_config["brand_name"]
+
+    if server_config.get("brand_url"):
+        merged["brand_url"] = server_config["brand_url"]
+
+    if server_config.get("brand_primary_color"):
+        merged["brand_primary_color"] = server_config["brand_primary_color"]
+
+    if server_config.get("language"):
+        merged["language"] = server_config["language"]
+
+    merged.setdefault("server_url", get_license_server_url())
+
+    return merged
 
 
 class SimpleBuildRunner:
@@ -269,36 +404,46 @@ class SimpleBuildRunner:
 
             self._log("INFO", "Extraction complete")
 
-            # Phase 4: Inject license
-            if self.display:
-                self.display.update_phase(
-                    BuildPhase.INJECT, 0, "Injecting license wrapper..."
-                )
+            # Phase 4: Inject license (skip for open builds)
+            open_build = config.get("open_build", False)
 
-            self._log("INFO", "Starting license injection")
-
-            try:
-                lang = config.get("language", "python")
-                if lang == "nodejs":
-                    success = inject_js_wrapper(entry_file, config)
-                else:
-                    success = inject_license_wrapper(project_dir, config)
-
-                if not success:
-                    error_msg = "License wrapper injection failed"
-                    self._log("ERROR", error_msg)
-                    return False, None, error_msg
-
+            if open_build:
+                # Skip license injection for open builds
+                self._log("INFO", "Open build - skipping license wrapper injection")
                 if self.display:
                     self.display.update_phase(
-                        BuildPhase.INJECT, 100, "License protection added"
+                        BuildPhase.INJECT, 100, "Skipped (open build)"
+                    )
+            else:
+                if self.display:
+                    self.display.update_phase(
+                        BuildPhase.INJECT, 0, "Injecting license wrapper..."
                     )
 
-                self._log("INFO", "License injection complete")
-            except Exception as e:
-                error_msg = f"License injection failed: {e}"
-                self._log("ERROR", error_msg, {"exception": str(e)})
-                return False, None, error_msg
+                self._log("INFO", "Starting license injection")
+
+                try:
+                    lang = config.get("language", "python")
+                    if lang == "nodejs":
+                        success = inject_js_wrapper(entry_file, config)
+                    else:
+                        success = inject_license_wrapper(project_dir, config)
+
+                    if not success:
+                        error_msg = "License wrapper injection failed"
+                        self._log("ERROR", error_msg)
+                        return False, None, error_msg
+
+                    if self.display:
+                        self.display.update_phase(
+                            BuildPhase.INJECT, 100, "License protection added"
+                        )
+
+                    self._log("INFO", "License injection complete")
+                except Exception as e:
+                    error_msg = f"License injection failed: {e}"
+                    self._log("ERROR", error_msg, {"exception": str(e)})
+                    return False, None, error_msg
 
             # Phase 5: Compile
             if self.display:
@@ -347,12 +492,19 @@ class SimpleBuildRunner:
                 output_path = self._copy_output(project_dir, config, build_dir)
 
                 # Register binary integrity hash with server (SEC2)
-                if output_path and output_path.exists():
+                if output_path and output_path.exists() and config.get("project_id"):
                     try:
                         from cli.compiler_logic import register_binary_hash_with_server
-                        register_binary_hash_with_server(config["project_id"], output_path, config)
-                    except Exception:
-                        pass # Silent fail for simple runner
+
+                        register_binary_hash_with_server(
+                            config["project_id"], output_path, config
+                        )
+                    except Exception as e:
+                        self._log("WARN", f"Binary hash registration failed: {e}")
+                elif output_path and output_path.exists():
+                    self._log(
+                        "INFO", "Skipping binary hash registration (no project_id)"
+                    )
 
                 if self.display:
                     self.display.update_phase(
@@ -398,13 +550,18 @@ class SimpleBuildRunner:
 
         # Fallback: if entry file doesn't exist at resolved path, search recursively
         if not entry_path.exists():
-            self._log("WARN", f"Entry file not found at {entry_path}, searching recursively...")
+            self._log(
+                "WARN",
+                f"Entry file not found at {entry_path}, searching recursively...",
+            )
             found = False
             for f in project_dir.rglob("*.py"):
                 if f.name == entry_file or f.name == "main.py":
                     entry_path = f
                     found = True
-                    self._log("INFO", f"Found entry file at: {f.relative_to(project_dir)}")
+                    self._log(
+                        "INFO", f"Found entry file at: {f.relative_to(project_dir)}"
+                    )
                     break
             if not found:
                 self._log("ERROR", f"Entry file not found: {entry_file}")
@@ -479,6 +636,30 @@ class SimpleBuildRunner:
         pkg_cwd = entry_path.parent
         entry_path_rel = entry_path.relative_to(pkg_cwd)
 
+        npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
+        npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+        pkg_cwd = entry_path.parent
+        entry_path_rel = entry_path.relative_to(pkg_cwd)
+
+        # Check for package.json and install dependencies if needed
+        package_json = pkg_cwd / "package.json"
+        node_modules = pkg_cwd / "node_modules"
+
+        if package_json.exists() and not node_modules.exists():
+            self._log("INFO", "Installing npm dependencies...")
+            install_cmd = [
+                npm_cmd,
+                "install",
+                "--production",
+                "--no-audit",
+                "--no-fund",
+            ]
+            install_success = self._run_subprocess_with_monitoring(
+                install_cmd, pkg_cwd, "npm install", is_build_phase=False
+            )
+            if not install_success:
+                self._log("WARN", "npm install had issues, continuing...")
+
         cmd = [
             npx_cmd,
             "-y",
@@ -490,6 +671,8 @@ class SimpleBuildRunner:
             str(pkg_cwd / output_name),
             "--compress",
             "GZip",
+            "--public-packages",
+            "*",  # Include all public npm packages
         ]
 
         self._log("INFO", f"pkg command: {' '.join(cmd)}")
@@ -564,11 +747,17 @@ class SimpleBuildRunner:
                     return False
 
                 # Heartbeat: show periodic progress during silent compilation phases
-                if is_build_phase and (time.time() - last_heartbeat_time) > HEARTBEAT_INTERVAL:
+                if (
+                    is_build_phase
+                    and (time.time() - last_heartbeat_time) > HEARTBEAT_INTERVAL
+                ):
                     last_heartbeat_time = time.time()
                     mins_elapsed = int(elapsed) // 60
                     secs_elapsed = int(elapsed) % 60
-                    self._log("INFO", f"Compiling... ({mins_elapsed}m {secs_elapsed}s elapsed, CPU active)")
+                    self._log(
+                        "INFO",
+                        f"Compiling... ({mins_elapsed}m {secs_elapsed}s elapsed, CPU active)",
+                    )
                     if self.display:
                         phase_label = f"Compiling... {mins_elapsed}m {secs_elapsed}s"
                         self.display.update_phase(
@@ -611,12 +800,18 @@ class SimpleBuildRunner:
 
                             # Show concise filtered Nuitka progress lines
                             if self._is_notable_nuitka_line(line):
-                                self._log("INFO", f"{name}: {self._summarize_nuitka_line(line)}")
+                                self._log(
+                                    "INFO",
+                                    f"{name}: {self._summarize_nuitka_line(line)}",
+                                )
                             else:
                                 self._log("DEBUG", f"{name}: {line}")
                         else:
                             # Non-Nuitka: log errors, debug everything else
-                            if "error" in line.lower() and "no errors" not in line.lower():
+                            if (
+                                "error" in line.lower()
+                                and "no errors" not in line.lower()
+                            ):
                                 self._log("ERROR", f"{name}: {line}")
                             else:
                                 self._log("DEBUG", f"{name}: {line}")
@@ -629,9 +824,16 @@ class SimpleBuildRunner:
             try:
                 if process.stdout and not process.stdout.closed:
                     for raw_line in process.stdout:
-                        line = raw_line.decode("utf-8", errors="replace").strip() if isinstance(raw_line, bytes) else str(raw_line).strip()
+                        line = (
+                            raw_line.decode("utf-8", errors="replace").strip()
+                            if isinstance(raw_line, bytes)
+                            else str(raw_line).strip()
+                        )
                         if line:
-                            if "error" in line.lower() and "no errors" not in line.lower():
+                            if (
+                                "error" in line.lower()
+                                and "no errors" not in line.lower()
+                            ):
                                 self._log("ERROR", f"{name}: {line}")
                             else:
                                 self._log("DEBUG", f"{name}: {line}")
@@ -675,10 +877,21 @@ class SimpleBuildRunner:
         lower = line.lower()
         # Show phase transitions, warnings, errors, and progress milestones
         notable_keywords = [
-            "nuitka-scons:", "scons:", "linking", "onefile",
-            "backend c", "generating", "completed", "optimiz",
-            "warning:", "error:", "fatal:", "creating",
-            "including", "module", "data composer",
+            "nuitka-scons:",
+            "scons:",
+            "linking",
+            "onefile",
+            "backend c",
+            "generating",
+            "completed",
+            "optimiz",
+            "warning:",
+            "error:",
+            "fatal:",
+            "creating",
+            "including",
+            "module",
+            "data composer",
         ]
         # Show lines with percentage progress
         if "%" in line:
@@ -688,7 +901,7 @@ class SimpleBuildRunner:
     def _summarize_nuitka_line(self, line: str) -> str:
         """Create a concise summary of a Nuitka output line."""
         # Strip ANSI codes
-        clean = re.sub(r'\x1b\[[0-9;]*m', '', line).strip()
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
         # Truncate very long lines (e.g. AST dumps)
         if len(clean) > 120:
             clean = clean[:117] + "..."
@@ -699,7 +912,10 @@ class SimpleBuildRunner:
     ) -> Path:
         """Copy output to final location (Desktop by default)."""
         output_name = (
-            config.get("output_name") or config.get("project_name") or self.project_name or "output"
+            config.get("output_name")
+            or config.get("project_name")
+            or self.project_name
+            or "output"
         )
         output_name = validate_output_name(output_name)
 
@@ -807,18 +1023,14 @@ def run_local_build_simple(
     if not entry_path.exists():
         return False, None, f"File not found: {entry_path}"
 
-    # Create logger
     logger = create_logger(project_name)
     logger.info(f"Starting local build: {entry_path}")
 
-    # Create display
     display = create_display(project_name, config, use_rich=False)
     display.start()
 
-    # Create runner
     runner = SimpleBuildRunner(display, project_name)
 
-    # Use temp directory for build - don't use context manager to avoid cleanup issues
     tmpdir = tempfile.mkdtemp(prefix="codevault_build_")
     final_output_path = None
     success = False
@@ -828,7 +1040,6 @@ def run_local_build_simple(
         tmp_project_dir = Path(tmpdir) / "project"
         tmp_project_dir.mkdir()
 
-        # Copy source
         def ignore_patterns(path, names):
             return {
                 "__pycache__",
@@ -847,25 +1058,27 @@ def run_local_build_simple(
             dirs_exist_ok=True,
         )
 
-        # Update config with temp paths
         build_config = config.copy()
         build_config["entry_file"] = entry_path.name
 
-        # Run build
+        if not build_config.get("server_url"):
+            build_config["server_url"] = get_license_server_url()
+            logger.info(f"Using license server: {build_config['server_url']}")
+
+        if not build_config.get("license_key"):
+            build_config["license_key"] = "GENERIC_BUILD"
+
         success, output_path, error = runner.run_build(tmp_project_dir, build_config)
 
-        # Copy output to final location BEFORE attempting temp cleanup
         if success and output_path and output_path.exists():
             final_output_path = output_path
 
-        # Get output size
         output_size = 0
         if final_output_path and final_output_path.exists():
             output_size = final_output_path.stat().st_size
 
         duration = timedelta(seconds=int(time.time() - runner.start_time))
 
-        # Complete display
         display.complete(
             success,
             str(final_output_path) if final_output_path else None,
@@ -873,7 +1086,6 @@ def run_local_build_simple(
             duration,
         )
 
-        # Log completion
         logger.build_complete(success, error)
 
         if not success and logger:
@@ -888,15 +1100,12 @@ def run_local_build_simple(
         display.set_error(f"Unexpected error: {e}")
         display.complete(False)
     finally:
-        # Cleanup temp directory - ignore errors on Windows (file locking)
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
-            if success:  # Only log cleanup success if build succeeded
+            if success:
                 logger.info(f"Cleaned up temp directory: {tmpdir}")
         except Exception as e:
-            # Log cleanup error but don't fail the build
             logger.warn(f"Could not clean up temp directory {tmpdir}: {e}")
-            # Don't fail the build just because cleanup failed
             pass
 
     return success, final_output_path, error
@@ -913,20 +1122,49 @@ def run_remote_build_simple(
 ) -> Tuple[bool, Optional[Path], str]:
     """
     Run a remote project build with simplified display.
+
+    Fetches build configuration from the server to ensure:
+    - Correct license server URL is embedded
+    - Ed25519 public key for signature verification
+    - Proper branding settings
     """
     import requests
     import zipfile
 
-    # Create logger
     logger = create_logger(project_name)
     logger.info(f"Starting remote build: {project_id}")
 
-    # Create display
     display = create_display(project_name, config, use_rich=False)
     display.start()
 
-    # Create runner
     runner = SimpleBuildRunner(display, project_name)
+
+    server_url = config.get("server_url") or get_license_server_url()
+    connectivity_ok, connectivity_msg = check_server_connectivity(server_url)
+    if connectivity_ok:
+        logger.info(f"Server connectivity check passed: {server_url}")
+        display.log(f"[INFO] License server reachable: {server_url}")
+    else:
+        logger.warn(f"Server connectivity check failed: {connectivity_msg}")
+        display.log(f"[WARN] Server connectivity: {connectivity_msg}")
+        display.log("[WARN] Build will proceed, but license validation may fail")
+
+    logger.info("Fetching build configuration from server...")
+    server_build_config = fetch_build_config_from_server(project_id, headers, api_url)
+
+    if server_build_config:
+        logger.info(
+            f"Build config received: server_url={server_build_config.get('server_url')}"
+        )
+        display.log(
+            f"[INFO] License server: {server_build_config.get('server_url', 'default')}"
+        )
+    else:
+        logger.warn("Could not fetch build config from server, using defaults")
+        display.log("[WARN] Could not fetch build config, using defaults")
+
+    config = merge_build_config(config, server_build_config)
+    config["project_id"] = project_id
 
     last_error = None
     final_output_path = None
@@ -934,7 +1172,6 @@ def run_remote_build_simple(
 
     # Build loop - ask user before retrying
     while True:
-
         # Use temp directory - don't use context manager to avoid cleanup issues on Windows
         tmpdir = tempfile.mkdtemp(prefix="codevault_build_")
 
@@ -1065,7 +1302,11 @@ def run_remote_build_simple(
 
                 # Ask user if they want to retry
                 try:
-                    retry_input = input("\nBuild failed. Would you like to retry? (Y/N): ").strip().lower()
+                    retry_input = (
+                        input("\nBuild failed. Would you like to retry? (Y/N): ")
+                        .strip()
+                        .lower()
+                    )
                     if retry_input not in ("y", "yes"):
                         logger.info("User chose not to retry")
                         return False, None, last_error
@@ -1093,7 +1334,11 @@ def run_remote_build_simple(
 
             # Ask user if they want to retry
             try:
-                retry_input = input("\nBuild failed. Would you like to retry? (Y/N): ").strip().lower()
+                retry_input = (
+                    input("\nBuild failed. Would you like to retry? (Y/N): ")
+                    .strip()
+                    .lower()
+                )
                 if retry_input not in ("y", "yes"):
                     return False, None, last_error
                 print()

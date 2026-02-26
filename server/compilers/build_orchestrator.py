@@ -86,7 +86,7 @@ def get_build_cache_key(source_dir: Path, config: "BuildConfig") -> str:
     Returns:
         Cache key (hex string)
     """
-    m = hashlib.md5()
+    m = hashlib.sha256()
     # Include config in cache key
     m.update(str(config).encode())
 
@@ -125,9 +125,20 @@ def check_cache(cache_dir: Path, cache_key: str) -> Optional[Path]:
     cached_exe = cache_dir / f"{cache_key}.exe"
     if cached_exe.exists():
         age_days = (time.time() - cached_exe.stat().st_mtime) / 86400
-        if age_days < 7:  # Cache valid for 7 days
+        if age_days < 14:
             return cached_exe
     return None
+
+
+CACHE_LIMITS = {
+    "pip": 1024 * 1024 * 500,
+    "ccache": 1024 * 1024 * 1024,
+    "mingw": 1024 * 1024 * 800,
+    "nuitka": 1024 * 1024 * 200,
+}
+
+CACHE_TTL_DAYS = 14
+CACHE_EVICTION_THRESHOLD = 0.9
 
 
 def save_to_cache(cache_dir: Path, cache_key: str, exe_path: Path) -> None:

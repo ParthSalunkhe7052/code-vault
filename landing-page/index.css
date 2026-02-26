@@ -31,6 +31,20 @@ body {
   @apply bg-white/20;
 }
 
+/* Perspective for 3D Cards */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+/* Custom Animations */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 12s linear infinite;
+}
+
 /* Reduced Motion - Respect user preferences */
 @media (prefers-reduced-motion: reduce) {
   *,

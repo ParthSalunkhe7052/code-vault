@@ -210,6 +210,10 @@ class PythonCompiler:
             "--show-progress",
             f"--output-filename={output_exe_name}",
             f"--output-dir={output_dir}",
+            "--ccache",
+            "--python-flag=no_site",
+            "--python-flag=no_warnings",
+            "--follow-stdlib=no",
         ]
 
         if options.get("use_onefile", False):
@@ -233,7 +237,6 @@ class PythonCompiler:
         # Blacklist: Exclude known-heavy modules that bloat builds
         # These are rarely needed by end-user applications
         blacklist_modules = [
-            # Testing/debugging modules
             "test",
             "unittest",
             "pytest",
@@ -244,23 +247,19 @@ class PythonCompiler:
             "pstats",
             "profile",
             "cProfile",
-            # Network protocols rarely used in desktop apps
             "imaplib",
             "poplib",
             "smtplib",
             "nntplib",
             "ftplib",
             "telnetlib",
-            # CGI/web serving (use requests instead)
             "cgi",
             "cgitb",
             "wsgiref",
             "http.server",
-            # XML-RPC (legacy protocol)
             "xmlrpc",
             "xmlrpc.client",
             "xmlrpc.server",
-            # Misc unused stdlib
             "pydoc",
             "webbrowser",
             "turtle",
@@ -268,6 +267,21 @@ class PythonCompiler:
             "idlelib",
             "tkinter",
             "curses",
+            "numpy.tests",
+            "pandas.tests",
+            "matplotlib.tests",
+            "scipy.tests",
+            "PIL.tests",
+            "sklearn.tests",
+            "torch.test",
+            "tensorflow.python.tools",
+            "sympy.testing",
+            "IPython.testing",
+            "jupyter_client.tests",
+            "nbconvert.tests",
+            "_pytest",
+            "hypothesis",
+            "faker",
         ]
 
         for module in blacklist_modules:

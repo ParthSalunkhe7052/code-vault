@@ -453,7 +453,7 @@ async def ban_user(
                 user_id,
             )
 
-        return {"message": f"User {user['email']} has been banned"}
+        return {"message": "User has been banned", "user_id": user_id}
     finally:
         await release_db(conn)
 

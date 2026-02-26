@@ -163,7 +163,13 @@ async def check_rate_limit(
         Tuple of (allowed: bool, remaining: int, retry_after: int)
     """
     if not _redis_client:
-        # Rate limiting disabled - allow all requests
+        # Fail closed for security-critical auth endpoints when Redis is down
+        if key.startswith(("auth:login", "auth:register", "auth:reset")):
+            logger.warning(
+                f"[RateLimiter] Redis unavailable - blocking auth request for key: {key[:20]}..."
+            )
+            return (False, 0, 60)
+        # Allow non-auth traffic when Redis is down (degraded mode)
         return (True, max_requests, 0)
 
     try:

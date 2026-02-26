@@ -1,7 +1,7 @@
 # ============ LICENSE WRAPPER TEMPLATE - DO NOT REMOVE ============
 # This template is used by the server's Python compiler.
 # Variables are substituted using .replace() - NOT f-strings.
-# Placeholders: {license_key}, {server_url}
+# Placeholders: {license_key}, {server_url}, {public_key}, {app_name}
 
 PYTHON_WRAPPER_TEMPLATE = r'''# === CodeVault License Protection ===
 import os as _cv_os
@@ -14,9 +14,15 @@ from urllib.request import Request as _cv_Request, urlopen as _cv_urlopen
 from urllib.error import URLError as _cv_URLError
 import base64 as _cv_base64
 
+# Configuration
+_CV_LICENSE_KEY = "{license_key}"
+_CV_SERVER_URL = "{server_url}"
+_CV_PUBLIC_KEY = """{public_key}"""
+_CV_APP_NAME = "{app_name}"
+
 # Lease configuration
-_CV_LEASE_DURATION = 24 * 60 * 60  # 24 hours
-_CV_CLOCK_DRIFT_MAX = 60 * 60  # 1 hour max drift
+_CV_LEASE_DURATION = 24 * 60 * 60
+_CV_CLOCK_DRIFT_MAX = 60 * 60
 
 def _cv_show_error(title, message, details=None):
     """Show error with formatting and wait for user."""
@@ -34,6 +40,53 @@ def _cv_show_error(title, message, details=None):
     except Exception:
         pass
     _cv_sys.exit(1)
+
+def _cv_build_signature_message(result):
+    """Build canonical message for signature verification."""
+    features_json = _cv_json.dumps(sorted(result.get("features", [])), sort_keys=True)
+    variables_json = _cv_json.dumps(result.get("variables", {}), sort_keys=True)
+    msg = "|".join(str(v) for v in [
+        result.get("status", ""),
+        result.get("expires_at", "") or "",
+        features_json,
+        variables_json,
+        result.get("client_nonce", "") or result.get("nonce", ""),
+        result.get("server_nonce", ""),
+        result.get("timestamp", "") or "",
+        result.get("server_time", "") or ""
+    ])
+    return msg
+
+def _cv_verify_signature(result):
+    """Verify Ed25519 signature from server response."""
+    server_sig = result.get("signature")
+    if not server_sig:
+        _cv_show_error("SECURITY ERROR", 
+                      "Server response is unsigned.",
+                      "Response missing digital signature.")
+        return False
+    
+    if not _CV_PUBLIC_KEY or not _CV_PUBLIC_KEY.strip():
+        _cv_show_error("SECURITY ERROR",
+                      "No public key configured.",
+                      "Cannot verify server response without a public key.")
+        return False
+    
+    msg = _cv_build_signature_message(result)
+    
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
+        
+        pub_key = load_pem_public_key(_CV_PUBLIC_KEY.encode())
+        sig_bytes = _cv_base64.b64decode(server_sig)
+        pub_key.verify(sig_bytes, msg.encode())
+        return True
+    except Exception as e:
+        _cv_show_error("SECURITY ERROR",
+                      "Server signature verification failed.",
+                      f"The response may be tampered. Error: {e}")
+        return False
 
 def _cv_check_gui_available():
     """Check if tkinter GUI is available."""
@@ -70,11 +123,10 @@ class _CV_LicenseDialog:
             return None
 
         self.root = self.tk.Tk()
-        self.root.title("License Activation")
+        self.root.title(f"{_CV_APP_NAME} - License Activation")
         self.root.geometry("450x320")
         self.root.resizable(False, False)
 
-        # Center window
         self.root.update_idletasks()
         try:
             x = (self.root.winfo_screenwidth() // 2) - (450 // 2)
@@ -83,7 +135,6 @@ class _CV_LicenseDialog:
         except Exception:
             pass
 
-        # Style
         self.root.configure(bg="#1a1a2e")
 
         style = self.ttk.Style()
@@ -95,27 +146,22 @@ class _CV_LicenseDialog:
         style.configure("Status.TLabel", font=("Segoe UI", 9),
                        foreground="#888888", background="#1a1a2e")
 
-        # Main frame
         main_frame = self.tk.Frame(self.root, bg="#1a1a2e", padx=30, pady=25)
         main_frame.pack(fill=self.tk.BOTH, expand=True)
 
-        # Branding
         branding_label = self.ttk.Label(main_frame, text="Protected by CodeVault",
                                   style="Status.TLabel")
         branding_label.pack(pady=(0, 10))
 
-        # Title
         title_label = self.ttk.Label(main_frame, text="License Activation",
                                style="Title.TLabel")
         title_label.pack(pady=(0, 5))
 
-        # Subtitle
         subtitle_label = self.ttk.Label(main_frame,
                                   text="Enter your license key to activate this application",
                                   style="Subtitle.TLabel")
         subtitle_label.pack(pady=(0, 25))
 
-        # License key entry
         entry_frame = self.tk.Frame(main_frame, bg="#16213e", padx=3, pady=3)
         entry_frame.pack(fill=self.tk.X, pady=(0, 15))
 
@@ -128,7 +174,6 @@ class _CV_LicenseDialog:
 
         self.license_entry.bind("<Return>", lambda e: self.activate())
 
-        # Activate button
         self.activate_btn = self.tk.Button(main_frame, text="Activate License",
                                      font=("Segoe UI", 11, "bold"),
                                      bg="#e94560", fg="white",
@@ -145,7 +190,7 @@ class _CV_LicenseDialog:
         try:
             self.root.mainloop()
         except KeyboardInterrupt:
-            self.on_close()
+            self.on_close
 
         return self.result
 
@@ -169,7 +214,6 @@ class _CV_LicenseDialog:
             self.activate_btn.configure(state=self.tk.DISABLED, text="Validating...")
             self.set_status("Connecting to server...", "#4a90d9")
 
-            # Close dialog and return key for validation by caller
             self.result = license_key
             self.root.destroy()
         except Exception:
@@ -184,68 +228,112 @@ class _CV_LicenseDialog:
                 pass
 
 def _cv_get_hwid():
-    """Generate hardware ID for license validation."""
+    """Generate multi-factor hardware ID for license validation."""
+    components = []
+    
     try:
-        info = f"{_cv_platform.node()}|{_cv_platform.system()}|{_cv_platform.machine()}|{_cv_platform.processor()}"
-        return _cv_hashlib.sha256(info.encode()).hexdigest()
+        import uuid as _cv_uuid
+        import re as _cv_re
+        mac = ":".join(_cv_re.findall("..", "%012x" % _cv_uuid.getnode()))
+        components.append(f"mac:{mac}")
+    except Exception:
+        pass
+    
+    if _cv_platform.system() == "Windows":
+        try:
+            import subprocess as _cv_subprocess
+            result = _cv_subprocess.run(
+                ["wmic", "diskdrive", "get", "serialnumber"],
+                capture_output=True, text=True, timeout=5
+            )
+            lines = result.stdout.strip().split("\n")
+            if len(lines) > 1:
+                disk_serial = lines[1].strip()
+                if disk_serial and disk_serial != "SerialNumber":
+                    components.append(f"disk:{disk_serial}")
+        except Exception:
+            pass
+        
+        try:
+            import subprocess as _cv_subprocess
+            result = _cv_subprocess.run(
+                ["wmic", "baseboard", "get", "serialnumber"],
+                capture_output=True, text=True, timeout=5
+            )
+            lines = result.stdout.strip().split("\n")
+            if len(lines) > 1:
+                mb_serial = lines[1].strip()
+                if mb_serial and mb_serial != "SerialNumber":
+                    components.append(f"mb:{mb_serial}")
+        except Exception:
+            pass
+    
+    try:
+        cpu_id = _cv_platform.processor()
+        if cpu_id:
+            components.append(f"cpu:{cpu_id[:32]}")
+    except Exception:
+        pass
+    
+    if components:
+        return _cv_hashlib.sha256("|".join(components).encode()).hexdigest()[:32]
+    
+    try:
+        info = f"{_cv_platform.node()}|{_cv_platform.system()}|{_cv_platform.machine()}"
+        return _cv_hashlib.sha256(info.encode()).hexdigest()[:32]
     except Exception:
         return "unknown-hwid"
+
+def _cv_get_binary_hash():
+    """Calculate SHA-256 hash of current executable for integrity checking."""
+    try:
+        if getattr(_cv_sys, 'frozen', False):
+            path = _cv_sys.executable
+        else:
+            path = _cv_sys.argv[0]
+        
+        sha256 = _cv_hashlib.sha256()
+        with open(path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256.update(byte_block)
+        return sha256.hexdigest()
+    except Exception:
+        return None
 
 def _cv_get_license_key_path():
     """Get path to license.key file next to the executable."""
     try:
         if getattr(_cv_sys, 'frozen', False):
-            # Running as compiled exe (Nuitka/PyInstaller)
             exe_dir = _cv_os.path.dirname(_cv_sys.executable)
         else:
-            # Running as script
             exe_dir = _cv_os.path.dirname(_cv_os.path.abspath(__file__))
         
-        # Try executable directory first
         key_path = _cv_os.path.join(exe_dir, "license.key")
         
-        # Test if we can write to this location
         try:
             test_file = _cv_os.path.join(exe_dir, ".cv_write_test")
             with open(test_file, 'w') as f:
                 f.write("test")
             _cv_os.remove(test_file)
-            print(f"[CodeVault] License will be saved to: {key_path}")
             return key_path
-        except Exception as write_err:
-            # Fall back to user's home directory if exe dir is not writable
-            print(f"[CodeVault] Cannot write to exe directory: {exe_dir}")
-            print(f"[CodeVault] Reason: {write_err}")
+        except Exception:
             home_dir = _cv_os.path.expanduser("~")
             app_data_dir = _cv_os.path.join(home_dir, ".codevault")
             try:
                 _cv_os.makedirs(app_data_dir, exist_ok=True)
             except Exception:
                 pass
-            fallback_path = _cv_os.path.join(app_data_dir, "license.key")
-            print(f"[CodeVault] Using fallback path: {fallback_path}")
-            return fallback_path
+            return _cv_os.path.join(app_data_dir, "license.key")
             
-    except Exception as e:
-        # Final fallback
-        print(f"[CodeVault] Error determining license path: {e}")
+    except Exception:
         home_dir = _cv_os.path.expanduser("~")
         return _cv_os.path.join(home_dir, "license.key")
 
 def _cv_get_lease_path():
-    """Get path to license.lease file next to the executable."""
-    try:
-        # Use same directory as license.key file for consistency
-        key_path = _cv_get_license_key_path()
-        lease_dir = _cv_os.path.dirname(key_path)
-        lease_path = _cv_os.path.join(lease_dir, "license.lease")
-        return lease_path
-            
-    except Exception as e:
-        # Final fallback
-        print(f"[CodeVault] Error determining lease path: {e}")
-        home_dir = _cv_os.path.expanduser("~")
-        return _cv_os.path.join(home_dir, "license.lease")
+    """Get path to license.lease file."""
+    key_path = _cv_get_license_key_path()
+    lease_dir = _cv_os.path.dirname(key_path)
+    return _cv_os.path.join(lease_dir, "license.lease")
 
 def _cv_get_machine_secret():
     """Generate a machine-specific secret for encryption."""
@@ -255,21 +343,12 @@ def _cv_get_machine_secret():
     except Exception:
         return _cv_hashlib.sha256(b"fallback_secret").digest()
 
-def _cv_xor_encrypt(data, key):
-    """XOR encryption (fallback only)."""
-    result = bytearray()
-    key_bytes = key if isinstance(key, bytes) else key.encode()
-    for i, b in enumerate(data):
-        result.append(b ^ key_bytes[i % len(key_bytes)])
-    return bytes(result)
-
 def _cv_encrypt_lease(lease_data):
-    """Encrypt lease with AES-256-GCM (or XOR fallback)."""
+    """Encrypt lease with AES-256-GCM."""
     try:
         secret = _cv_get_machine_secret()
         data_json = _cv_json.dumps(lease_data).encode('utf-8')
 
-        # Try AES-256-GCM first (secure)
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             import secrets as _secrets
@@ -278,18 +357,16 @@ def _cv_encrypt_lease(lease_data):
             ciphertext = aesgcm.encrypt(nonce, data_json, None)
             return _cv_base64.b64encode(b"AES:" + nonce + ciphertext).decode()
         except ImportError:
-            # Cryptography not available - fail securely
             return None
     except Exception:
         return None
 
 def _cv_decrypt_lease(encrypted_data):
-    """Decrypt lease (supports both AES and XOR)."""
+    """Decrypt lease data (AES-256-GCM)."""
     try:
         secret = _cv_get_machine_secret()
         raw = _cv_base64.b64decode(encrypted_data)
 
-        # Check encryption method
         if raw.startswith(b"AES:"):
             try:
                 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -316,12 +393,11 @@ def _cv_create_lease(license_key, hwid, server_time, duration=_CV_LEASE_DURATION
     }
 
 def _cv_save_lease(lease_data):
-    """Save encrypted lease to file using atomic write."""
+    """Save encrypted lease to file."""
     try:
         lease_path = _cv_get_lease_path()
         encrypted = _cv_encrypt_lease(lease_data)
         if encrypted:
-            # Atomic write: temp file + rename to prevent corruption
             import tempfile
             lease_dir = _cv_os.path.dirname(lease_path)
             fd, temp_path = tempfile.mkstemp(dir=lease_dir, prefix='.tmp_', text=True)
@@ -375,7 +451,7 @@ def _cv_validate_lease(license_key, hwid):
     return True, "Valid"
 
 def _cv_validate_license(key, hwid, api_url):
-    """Validate license key with the server. Returns (success, server_time)"""
+    """Validate license key with the server. Returns (success, server_time, result)"""
     print(f"[CodeVault] Validating license with server...")
     timestamp = int(_cv_time.time())
     try:
@@ -390,7 +466,8 @@ def _cv_validate_license(key, hwid, api_url):
         "hwid": hwid,
         "machine_name": _cv_platform.node(),
         "timestamp": timestamp,
-        "nonce": nonce
+        "nonce": nonce,
+        "binary_hash": _cv_get_binary_hash()
     }).encode()
 
     req = _cv_Request(api_url, data=data, headers={"Content-Type": "application/json"})
@@ -398,19 +475,43 @@ def _cv_validate_license(key, hwid, api_url):
         with _cv_urlopen(req, timeout=15) as resp:
             body = resp.read().decode()
             result = _cv_json.loads(body)
+            
+            # Verify Ed25519 signature
+            if not _cv_verify_signature(result):
+                return False, 0, None
+            
+            # Protocol v2: Verify response freshness
+            issued_at = result.get("issued_at")
+            if issued_at:
+                current_time = int(_cv_time.time())
+                response_age = current_time - issued_at
+                if response_age > 300:
+                    _cv_show_error("SECURITY ERROR", "Response expired.",
+                                  f"Server response is too old ({response_age}s). Possible replay attack.")
+                    return False, 0, None
+                if response_age < -60:
+                    _cv_show_error("SECURITY ERROR", "Response from future.",
+                                  "Clock skew detected. Please correct your system time.")
+                    return False, 0, None
+            
+            # Protocol v2: Require jti for replay protection
+            if not result.get("jti"):
+                _cv_show_error("SECURITY ERROR", "Missing replay protection.",
+                              "Server response missing jti (replay protection ID).")
+                return False, 0, None
+            
             server_time = result.get("server_time", result.get("timestamp", timestamp))
-            return result.get("status") == "valid", server_time
+            return result.get("status") == "valid", server_time, result
     except _cv_URLError as e:
         reason = getattr(e, 'reason', str(e))
         print(f"[CodeVault] Connection error: {reason}")
-        return None, 0  # None = connection error (allows offline fallback)
+        return None, 0, None  # None = connection error
     except Exception as e:
         print(f"[CodeVault] Validation error: {type(e).__name__}: {e}")
-        return False, 0
+        return False, 0, None
 
 def _cv_prompt_license():
     """Prompt user for license key using GUI or console fallback."""
-    # Check GUI availability first
     if _cv_check_gui_available():
         try:
             dialog = _CV_LicenseDialog()
@@ -420,7 +521,6 @@ def _cv_prompt_license():
         except Exception as e:
             print(f"[CodeVault] GUI prompt failed: {e}")
 
-    # Fallback to console
     print("=" * 50)
     print("  License Required")
     print("=" * 50)
@@ -431,20 +531,14 @@ def _cv_prompt_license():
 
 def _cv_license_check():
     """Main license validation with offline lease support."""
-    LICENSE_KEY = "{license_key}"
-    API_URL = "{server_url}"
-
-    # DEMO mode - skip validation
-    if LICENSE_KEY == "DEMO":
+    if _CV_LICENSE_KEY == "DEMO":
         print("[CodeVault] Running in DEMO mode")
         return True
 
     hwid = _cv_get_hwid()
     key_file = _cv_get_license_key_path()
 
-    # Check if we need to prompt for license (generic build)
-    if LICENSE_KEY in ("GENERIC_BUILD", "generic", "", None):
-        # Try saved key first
+    if _CV_LICENSE_KEY in ("GENERIC_BUILD", "generic", "", None):
         saved_key = None
         if _cv_os.path.exists(key_file):
             try:
@@ -455,10 +549,9 @@ def _cv_license_check():
 
         if saved_key:
             print(f"[CodeVault] Found saved license, validating...")
-            success, server_time = _cv_validate_license(saved_key, hwid, API_URL)
+            success, server_time, result = _cv_validate_license(saved_key, hwid, _CV_SERVER_URL)
 
             if success is True:
-                # Online validation succeeded - create/update lease
                 local_time = int(_cv_time.time())
                 drift = abs(local_time - server_time)
                 if drift <= _CV_CLOCK_DRIFT_MAX:
@@ -469,7 +562,6 @@ def _cv_license_check():
                 print("[CodeVault] License verified!")
                 return True
             elif success is None:
-                # Connection error - try offline lease
                 print("[CodeVault] Server unreachable, checking offline lease...")
                 valid, msg = _cv_validate_lease(saved_key, hwid)
                 if valid:
@@ -478,7 +570,6 @@ def _cv_license_check():
                 else:
                     print(f"[CodeVault] Offline lease invalid: {msg}")
             else:
-                # License rejected
                 print("[CodeVault] Saved license is invalid or expired.")
                 try:
                     _cv_os.remove(key_file)
@@ -488,23 +579,19 @@ def _cv_license_check():
                 except Exception:
                     pass
 
-        # Prompt for new license
         key = _cv_prompt_license()
         if not key:
             _cv_show_error("NO LICENSE KEY", "No license key was provided.", "Please run the application again and enter a valid license key.")
             return False
 
-        # Validate the entered key
-        success, server_time = _cv_validate_license(key, hwid, API_URL)
+        success, server_time, result = _cv_validate_license(key, hwid, _CV_SERVER_URL)
 
         if success is True:
-            # Save license key to the same directory as the executable (atomic write)
             try:
                 key_dir = _cv_os.path.dirname(key_file)
                 if key_dir and not _cv_os.path.exists(key_dir):
                     _cv_os.makedirs(key_dir, exist_ok=True)
 
-                # Atomic write to prevent corruption
                 import tempfile
                 fd, temp_path = tempfile.mkstemp(dir=key_dir, prefix='.tmp_', text=True)
                 try:
@@ -522,7 +609,6 @@ def _cv_license_check():
             except Exception as e:
                 print(f"[CodeVault] Warning: Could not save license: {e}")
 
-            # Create lease for offline use
             local_time = int(_cv_time.time())
             drift = abs(local_time - server_time)
             if drift <= _CV_CLOCK_DRIFT_MAX:
@@ -541,22 +627,19 @@ def _cv_license_check():
             _cv_show_error("INVALID LICENSE", "The license key was rejected.", "Please check your license key and try again.")
 
     else:
-        # Fixed license key mode
-        success, server_time = _cv_validate_license(LICENSE_KEY, hwid, API_URL)
+        success, server_time, result = _cv_validate_license(_CV_LICENSE_KEY, hwid, _CV_SERVER_URL)
 
         if success is True:
-            # Create lease for offline use
             local_time = int(_cv_time.time())
             drift = abs(local_time - server_time)
             if drift <= _CV_CLOCK_DRIFT_MAX:
-                lease = _cv_create_lease(LICENSE_KEY, hwid, server_time)
+                lease = _cv_create_lease(_CV_LICENSE_KEY, hwid, server_time)
                 _cv_save_lease(lease)
             print("[CodeVault] License verified!")
             return True
         elif success is None:
-            # Connection error - try offline lease
             print("[CodeVault] Server unreachable, checking offline lease...")
-            valid, msg = _cv_validate_lease(LICENSE_KEY, hwid)
+            valid, msg = _cv_validate_lease(_CV_LICENSE_KEY, hwid)
             if valid:
                 print("[CodeVault] Running with offline lease")
                 return True
@@ -575,7 +658,6 @@ _cv_license_check()
 '''
 
 
-# Demo mode wrapper
 PYTHON_DEMO_WRAPPER = r'''# === CodeVault License Protection (Demo Mode) ===
 import time as _cv_time
 import sys as _cv_sys
@@ -596,7 +678,6 @@ def _cv_check_demo_expired():
             pass
         _cv_sys.exit(1)
 
-# Check periodically (import this check into your main loop if needed)
 _cv_check_demo_expired()
 # === End CodeVault License Protection ===
 '''

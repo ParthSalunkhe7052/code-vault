@@ -159,16 +159,16 @@ def save_preset(
         "", "--description", "-d", help="Preset description"
     ),
     onefile: bool = typer.Option(
-        True, "--onefile/--directory", help="Build as single file"
+        True, "--onefile", is_flag=True, help="Build as single file"
     ),
     console_app: bool = typer.Option(
-        True, "--console/--windowed", help="Console or windowed app"
+        True, "--console", is_flag=True, help="Console or windowed app"
     ),
     lto: bool = typer.Option(
-        True, "--lto/--no-lto", help="Enable link-time optimization"
+        True, "--lto", is_flag=True, help="Enable link-time optimization"
     ),
     enable_lease: bool = typer.Option(
-        True, "--lease/--no-lease", help="Enable offline leases"
+        True, "--lease", is_flag=True, help="Enable offline leases"
     ),
     lease_hours: int = typer.Option(
         24, "--lease-hours", help="Lease duration in hours"
@@ -333,7 +333,7 @@ def export_presets(
 def import_presets(
     input_file: Path = typer.Argument(..., help="Input JSON file"),
     merge: bool = typer.Option(
-        True, "--merge/--replace", help="Merge with existing or replace"
+        True, "--merge", is_flag=True, help="Merge with existing or replace"
     ),
 ) -> None:
     """

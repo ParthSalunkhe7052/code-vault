@@ -116,9 +116,10 @@ def find_artifact_in_gcs(build_id: str, platform: str) -> Optional[Tuple[str, st
         blobs = list(bucket.list_blobs(prefix=prefix, max_results=20))
 
         # Priority order for different artifact types
-        # .tar.gz is preferred for Python builds (contains .dist folder with all DLLs)
+        # .zip is preferred for Windows Python builds (natively supported on Windows)
+        # .tar.gz is preferred for Linux Python builds
         # .exe is for onefile builds or Node.js builds
-        extensions_priority = [".tar.gz", ".exe", ".zip", ""]
+        extensions_priority = [".zip", ".exe", ".tar.gz", ""]
 
         for ext in extensions_priority:
             for blob in blobs:
@@ -164,11 +165,13 @@ def get_artifact_filename_priority(
         if language == "nodejs":
             filenames.append(f"{output_name}.exe")
         else:
-            # Python builds: .tar.gz contains .dist folder with all dependencies (python311.dll, etc.)
-            filenames.append(f"{output_name}.tar.gz")
+            # Python builds: .zip contains .dist folder with all dependencies (python311.dll, etc.)
+            # zip is natively supported on Windows (tar.gz is not)
+            filenames.append(f"{output_name}.zip")
             filenames.append(f"{output_name}.exe")
             filenames.append(f"{output_name}-windows.zip")
-            filenames.append(f"{output_name}.zip")
+            # Legacy: older builds may still have tar.gz
+            filenames.append(f"{output_name}.tar.gz")
     elif platform == "linux":
         if language == "nodejs":
             filenames.append(f"{output_name}")

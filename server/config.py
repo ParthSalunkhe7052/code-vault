@@ -59,7 +59,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 # API Documentation (OpenAPI/Swagger)
 # Set ENABLE_PUBLIC_DOCS=false in production to disable /docs and /redoc
-ENABLE_PUBLIC_DOCS = os.getenv("ENABLE_PUBLIC_DOCS", "true").lower() == "true"
+ENABLE_PUBLIC_DOCS = os.getenv("ENABLE_PUBLIC_DOCS", "false").lower() == "true"
 
 # Redis (Upstash)
 UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")

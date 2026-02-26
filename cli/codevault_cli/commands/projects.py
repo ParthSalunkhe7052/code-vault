@@ -25,10 +25,6 @@ from codevault_cli.build_dashboard import (
     BuildDashboard,
     show_build_summary,
 )
-from codevault_cli.build_runner import (
-    run_local_build,
-    run_remote_build,
-)
 from codevault_cli.simple_build_runner import (
     run_local_build_simple,
     run_remote_build_simple,
@@ -403,27 +399,47 @@ def build(
             raise typer.Exit(0)
     else:
         # Non-interactive mode
-        project_name = (
-            project_id[:20] + "..." if len(project_id or "") > 20 else project_id
-        )
+        # For local file builds, extract a cleaner project name
+        if project_id and Path(project_id).exists():
+            # Use the file stem (without extension) or parent folder name
+            path = Path(project_id)
+            project_name = path.stem or path.parent.name or "output"
+        else:
+            project_name = (
+                project_id[:20] + "..." if len(project_id or "") > 20 else project_id
+            )
         if not license_key and not open_build:
             license_key = "GENERIC_BUILD"
 
     # Get project language for tier enforcement (check before building)
     build_language = language
     if not build_language:
-        try:
-            proj_resp = requests.get(
-                f"{api_url}/projects/{project_id}", headers=headers, timeout=10
-            )
-            if proj_resp.status_code == 200:
-                proj_data = proj_resp.json()
-                build_language = proj_data.get("language", "python")
-        except Exception:
-            build_language = "python"
+        # For local file builds, detect language from file extension
+        is_local_build = Path(project_id).exists() if project_id else False
+        if is_local_build:
+            # Detect from file extension
+            if project_id.endswith(".js"):
+                build_language = "nodejs"
+            elif project_id.endswith(".py"):
+                build_language = "python"
+            else:
+                build_language = "python"  # Default
+        else:
+            # Remote build - get from API
+            try:
+                proj_resp = requests.get(
+                    f"{api_url}/projects/{project_id}", headers=headers, timeout=10
+                )
+                if proj_resp.status_code == 200:
+                    proj_data = proj_resp.json()
+                    build_language = proj_data.get("language", "python")
+            except Exception:
+                build_language = "python"
 
     # Tier enforcement: Check if user can build Node.js
-    if build_language == "nodejs" and not has_node_support:
+    # Skip tier check for local file builds
+    is_local_build = Path(project_id).exists() if project_id else False
+    if build_language == "nodejs" and not has_node_support and not is_local_build:
         console.print()
         print_error("Node.js builds require a Pro plan or higher.")
         console.print(f"[yellow]Your current plan: {user_plan.title()}[/yellow]")
@@ -443,7 +459,7 @@ def build(
         "demo_duration": demo_duration or 60,
         "open_build": open_build,
         "platform": platform,
-        "language": language,
+        "language": build_language,  # Use detected language, not CLI arg
     }
 
     # Show configuration
@@ -565,18 +581,16 @@ def _run_build_with_dashboard(
     project_data: Optional[dict] = None,
 ) -> Tuple[bool, Optional[Path], str]:
     """Run build with live dashboard updates using real compiler."""
-    from codevault_cli.build_runner import BuildRunner
-
-    runner = BuildRunner(dashboard)
+    project_name = config.get("project_name", "Build")
 
     # Check if it's a local file build
     if Path(project_id).exists() or project_id.endswith((".py", ".js")):
         entry_path = Path(project_id).resolve()
-        return run_local_build(entry_path, config, dashboard)
+        return run_local_build_simple(entry_path, config, project_name)
     else:
         # Remote project build (with local file fallback)
-        return run_remote_build(
-            project_id, config, headers, api_url, dashboard, project_data
+        return run_remote_build_simple(
+            project_id, config, headers, api_url, project_data, project_name
         )
 
 
@@ -588,14 +602,16 @@ def _run_build_simple(
     project_data: Optional[dict] = None,
 ) -> Tuple[bool, Optional[Path], str]:
     """Run build with simple progress bar using real compiler."""
+    project_name = config.get("project_name", "Build")
+
     # Check if it's a local file build
     if Path(project_id).exists() or project_id.endswith((".py", ".js")):
         entry_path = Path(project_id).resolve()
-        return run_local_build(entry_path, config, None)
+        return run_local_build_simple(entry_path, config, project_name)
     else:
         # Remote project build (with local file fallback)
-        return run_remote_build(
-            project_id, config, headers, api_url, None, project_data
+        return run_remote_build_simple(
+            project_id, config, headers, api_url, project_data, project_name
         )
 
 

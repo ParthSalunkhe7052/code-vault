@@ -9,8 +9,20 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+// Global session tracking for floating licenses (MON2)
+let _LW_SESSION_TOKEN = null;
+
 // Ed25519 public key for signature verification (embedded at build time)
 const _LW_PUBLIC_KEY_PEM = `{public_key}`;
+
+function _lw_showError(title, message, detail) {
+    console.error('\n' + '='.repeat(50));
+    console.error('  [ERROR] ' + title);
+    console.error('='.repeat(50));
+    if (message) console.error(message);
+    if (detail) console.error(detail);
+    console.error('='.repeat(50));
+}
 
 function _lw_buildSignatureMessage(data) {
     const features = JSON.stringify((data.features || []).slice().sort());
@@ -242,12 +254,123 @@ function _lw_deleteSavedLicense() {
     }
 }
 
+function _lw_getHWID() {
+    const components = [];
+    
+    try {
+        const networkInterfaces = os.networkInterfaces();
+        for (const name of Object.keys(networkInterfaces)) {
+            for (const iface of networkInterfaces[name]) {
+                if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    components.push('mac:' + iface.mac);
+                    break;
+                }
+            }
+            if (components.length > 0) break;
+        }
+    } catch (e) {}
+    
+    try {
+        const cpus = os.cpus();
+        if (cpus && cpus.length > 0 && cpus[0].model) {
+            components.push('cpu:' + cpus[0].model.substring(0, 32));
+        }
+    } catch (e) {}
+    
+    try {
+        components.push('host:' + os.hostname());
+    } catch (e) {}
+    
+    try {
+        components.push('mem:' + os.totalmem());
+    } catch (e) {}
+    
+    try {
+        components.push('plat:' + os.platform() + '|' + os.arch());
+    } catch (e) {}
+    
+    if (process.platform === 'win32') {
+        try {
+            const { execSync } = require('child_process');
+            try {
+                const diskOutput = execSync('wmic diskdrive get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                const lines = diskOutput.trim().split('\n');
+                if (lines.length > 1) {
+                    const diskSerial = lines[1].trim();
+                    if (diskSerial && diskSerial !== 'SerialNumber') {
+                        components.push('disk:' + diskSerial);
+                    }
+                }
+            } catch (e) {}
+            try {
+                const mbOutput = execSync('wmic baseboard get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                const lines = mbOutput.trim().split('\n');
+                if (lines.length > 1) {
+                    const mbSerial = lines[1].trim();
+                    if (mbSerial && mbSerial !== 'SerialNumber') {
+                        components.push('mb:' + mbSerial);
+                    }
+                }
+            } catch (e) {}
+        } catch (e) {}
+    }
+    
+    if (components.length > 0) {
+        return crypto.createHash('sha256').update(components.join('|')).digest('hex').substring(0, 32);
+    }
+    
+    const cpus = os.cpus();
+    const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
+    const info = `${os.hostname()}|${os.platform()}|${os.arch()}|${os.totalmem()}|${cpuModel}`;
+    return crypto.createHash('sha256').update(info).digest('hex').substring(0, 32);
+}
+
 async function _lw_validate() {
     let LICENSE_KEY = "{license_key}";
     const SERVER_URL = "{server_url}";
     
     if (LICENSE_KEY === "DEMO") {
-        console.log("[License Wrapper] Running in DEMO mode");
+        const fs = require('fs');
+        const os = require('os');
+        const path = require('path');
+        
+        // Time-limited trial (24 hours)
+        const cacheDir = path.join(os.homedir(), '.codevault');
+        const demoStartFile = path.join(cacheDir, 'demo_start.time');
+        
+        let demoStart = null;
+        try {
+            if (fs.existsSync(demoStartFile)) {
+                demoStart = parseInt(fs.readFileSync(demoStartFile, 'utf8').trim());
+            }
+        } catch (e) {}
+        
+        if (demoStart === null) {
+            demoStart = Date.now();
+            try {
+                if (!fs.existsSync(cacheDir)) {
+                    fs.mkdirSync(cacheDir, { recursive: true });
+                }
+                fs.writeFileSync(demoStartFile, demoStart.toString());
+            } catch (e) {}
+        }
+        
+        const DEMO_DURATION = 24 * 60 * 60 * 1000; // 24 hours in ms
+        const elapsed = Date.now() - demoStart;
+        
+        if (elapsed >= DEMO_DURATION) {
+            _lw_showError(
+                "DEMO EXPIRED",
+                "Your demo period has expired.",
+                "Please purchase a license to continue using this application."
+            );
+            return false;
+        }
+        
+        const remainingHours = Math.floor((DEMO_DURATION - elapsed) / (60 * 60 * 1000));
+        const remainingMinutes = Math.floor(((DEMO_DURATION - elapsed) % (60 * 60 * 1000)) / (60 * 1000));
+        console.log(`[License Wrapper] DEMO MODE - ${remainingHours}h ${remainingMinutes}m remaining`);
+        
         return true;
     }
     
@@ -256,10 +379,7 @@ async function _lw_validate() {
     }
     
     return new Promise((resolve, reject) => {
-        const cpus = os.cpus();
-        const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
-        const info = `${os.hostname()}|${os.platform()}|${os.arch()}|${os.totalmem()}|${cpuModel}`;
-        const hwid = crypto.createHash('sha256').update(info).digest('hex').substring(0, 32);
+        const hwid = _lw_getHWID();
         
         try {
             const urlObj = new URL(SERVER_URL + "/api/v1/license/validate");
@@ -470,6 +590,10 @@ try {
 // Use stderr for immediate output (stdout might buffer in pkg)
 process.stderr.write('[DEBUG] License wrapper loading...\n');
 
+// ============ APPLICATION CONFIGURATION ============
+const _LW_APP_NAME = "{app_name}";
+const _LW_BINARY_HASH = "{binary_hash}";
+
 // ============ LEASE CONFIGURATION ============
 // This flag controls whether offline lease validation is enabled
 const _LW_LEASE_ENABLED = {lease_enabled};
@@ -615,6 +739,23 @@ function _lw_getBinaryHash() {
         return hash.digest('hex');
     } catch (e) {
         return null;
+    }
+}
+
+function _lw_verifyBinaryIntegrity() {
+    if (!_LW_BINARY_HASH || _LW_BINARY_HASH === 'skip') {
+        return true;
+    }
+    try {
+        const actualHash = _lw_getBinaryHash();
+        if (actualHash && actualHash !== _LW_BINARY_HASH) {
+            _lw_showErrorAndWait('BINARY TAMPERED', new Error('The executable has been modified or corrupted.\n\nThis may indicate tampering. Please re-download the application.'));
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.log('[License Wrapper] Warning: Could not verify binary integrity:', e.message);
+        return true;
     }
 }
 
@@ -1013,12 +1154,123 @@ function _lw_deleteSavedLicense() {
     }
 }
 
+function _lw_getHWID() {
+    const components = [];
+    
+    try {
+        const networkInterfaces = _lw_os.networkInterfaces();
+        for (const name of Object.keys(networkInterfaces)) {
+            for (const iface of networkInterfaces[name]) {
+                if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    components.push('mac:' + iface.mac);
+                    break;
+                }
+            }
+            if (components.length > 0) break;
+        }
+    } catch (e) {}
+    
+    try {
+        const cpus = _lw_os.cpus();
+        if (cpus && cpus.length > 0 && cpus[0].model) {
+            components.push('cpu:' + cpus[0].model.substring(0, 32));
+        }
+    } catch (e) {}
+    
+    try {
+        components.push('host:' + _lw_os.hostname());
+    } catch (e) {}
+    
+    try {
+        components.push('mem:' + _lw_os.totalmem());
+    } catch (e) {}
+    
+    try {
+        components.push('plat:' + _lw_os.platform() + '|' + _lw_os.arch());
+    } catch (e) {}
+    
+    if (process.platform === 'win32') {
+        try {
+            const { execSync } = require('child_process');
+            try {
+                const diskOutput = execSync('wmic diskdrive get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                const lines = diskOutput.trim().split('\n');
+                if (lines.length > 1) {
+                    const diskSerial = lines[1].trim();
+                    if (diskSerial && diskSerial !== 'SerialNumber') {
+                        components.push('disk:' + diskSerial);
+                    }
+                }
+            } catch (e) {}
+            try {
+                const mbOutput = execSync('wmic baseboard get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                const lines = mbOutput.trim().split('\n');
+                if (lines.length > 1) {
+                    const mbSerial = lines[1].trim();
+                    if (mbSerial && mbSerial !== 'SerialNumber') {
+                        components.push('mb:' + mbSerial);
+                    }
+                }
+            } catch (e) {}
+        } catch (e) {}
+    }
+    
+    if (components.length > 0) {
+        return _lw_crypto.createHash('sha256').update(components.join('|')).digest('hex').substring(0, 32);
+    }
+    
+    const cpus = _lw_os.cpus();
+    const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
+    const info = `${_lw_os.hostname()}|${_lw_os.platform()}|${_lw_os.arch()}|${_lw_os.totalmem()}|${cpuModel}`;
+    return _lw_crypto.createHash('sha256').update(info).digest('hex').substring(0, 32);
+}
+
 async function _lw_validate() {
     let LICENSE_KEY = "{license_key}";
     const SERVER_URL = "{server_url}";
     
     if (LICENSE_KEY === "DEMO") {
-        console.log("[License Wrapper] Running in DEMO mode");
+        const fs = _lw_fs;
+        const os = _lw_os;
+        const path = _lw_path;
+        
+        // Time-limited trial (24 hours)
+        const cacheDir = path.join(os.homedir(), '.codevault');
+        const demoStartFile = path.join(cacheDir, 'demo_start.time');
+        
+        let demoStart = null;
+        try {
+            if (fs.existsSync(demoStartFile)) {
+                demoStart = parseInt(fs.readFileSync(demoStartFile, 'utf8').trim());
+            }
+        } catch (e) {}
+        
+        if (demoStart === null) {
+            demoStart = Date.now();
+            try {
+                if (!fs.existsSync(cacheDir)) {
+                    fs.mkdirSync(cacheDir, { recursive: true });
+                }
+                fs.writeFileSync(demoStartFile, demoStart.toString());
+            } catch (e) {}
+        }
+        
+        const DEMO_DURATION = 24 * 60 * 60 * 1000; // 24 hours in ms
+        const elapsed = Date.now() - demoStart;
+        
+        if (elapsed >= DEMO_DURATION) {
+            _lw_showError(
+                "DEMO EXPIRED",
+                "Your demo period has expired.",
+                "Please purchase a license to continue using this application."
+            );
+            return false;
+        }
+        
+        const remainingHours = Math.floor((DEMO_DURATION - elapsed) / (60 * 60 * 1000));
+        const remainingMinutes = Math.floor(((DEMO_DURATION - elapsed) % (60 * 60 * 1000)) / (60 * 1000));
+        console.log(`[License Wrapper] DEMO MODE - ${remainingHours}h ${remainingMinutes}m remaining`);
+        
         return true;
     }
     
@@ -1026,11 +1278,13 @@ async function _lw_validate() {
         LICENSE_KEY = await _lw_loadOrPromptLicense();
     }
     
+    // Verify binary integrity before validation
+    if (!_lw_verifyBinaryIntegrity()) {
+        return false;
+    }
+    
     return new Promise((resolve, reject) => {
-        const cpus = _lw_os.cpus();
-        const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
-        const info = `${_lw_os.hostname()}|${_lw_os.platform()}|${_lw_os.arch()}|${_lw_os.totalmem()}|${cpuModel}`;
-        const hwid = _lw_crypto.createHash('sha256').update(info).digest('hex').substring(0, 32);
+        const hwid = _lw_getHWID();
         
         try {
             const urlObj = new URL(SERVER_URL + "/api/v1/license/validate");

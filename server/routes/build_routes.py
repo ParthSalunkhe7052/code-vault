@@ -92,6 +92,7 @@ async def get_build_prerequisites():
 @router.post("/build/installer")
 async def build_installer(
     data: InstallerBuildRequest,
+    user: dict = Depends(get_current_user),
     _rate_limit: None = Depends(
         RateLimitDependency(
             max_requests=3, window_seconds=300, prefix="build:installer"
@@ -99,6 +100,16 @@ async def build_installer(
     ),
 ):
     """Start a professional Windows installer build job (async)."""
+    # Security: Validate source_dir and output_dir are within allowed directories
+    try:
+        validated_source = safe_join(UPLOAD_DIR, data.source_dir)
+        validated_output = safe_join(UPLOAD_DIR, data.output_dir)
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid source or output directory path")
+
+    # Override user-supplied paths with validated ones
+    data.source_dir = str(validated_source)
+    data.output_dir = str(validated_output)
 
     job_id = secrets.token_hex(16)
 
@@ -190,8 +201,10 @@ async def _run_installer_build_job(job_id: str, data: InstallerBuildRequest):
     except Exception as e:
         logger.error(f"[Build {job_id[:8]}] Build failed with exception", exc_info=True)
         compile_jobs_cache[job_id]["status"] = "failed"
-        # Always expose full error for debugging (logged server-side anyway)
-        compile_jobs_cache[job_id]["error_message"] = str(e)
+        # Store full error server-side for admin debugging
+        compile_jobs_cache[job_id]["_internal_error"] = str(e)
+        # Sanitize error for client - don't expose internal paths/details
+        compile_jobs_cache[job_id]["error_message"] = "Build failed. Please try again or contact support."
         compile_jobs_cache[job_id]["logs"].append(f"❌ Build failed: {str(e)}")
         compile_jobs_cache[job_id]["completed_time"] = time.time()
 
@@ -319,7 +332,6 @@ async def get_compile_config(
             ),
             "license_key": license_key,
             "server_url": server_url,
-            "signing_secret": project.get("signing_secret"),
             "nuitka_options": nuitka_options,
             "files": file_list,
             "is_multi_folder": settings.get("is_multi_folder", False),

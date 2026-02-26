@@ -7,7 +7,9 @@ const child_process = require('child_process');
 
 // Configuration (Injected by compiler)
 const LICENSE_KEY = '{{LICENSE_KEY}}';
-const API_URL = '{{API_URL}}'; // e.g. https://api.codevault.com/api/v1/license/validate
+const API_URL = '{{API_URL}}';
+const PUBLIC_KEY_PEM = `{{PUBLIC_KEY}}`;
+const APP_NAME = '{{APP_NAME}}';
 
 // Track temp files for cleanup
 const tempFiles = new Set();
@@ -23,12 +25,10 @@ process.on('exit', () => {
 // UTILITY FUNCTIONS
 // ============================================================
 
-// Wait for user to press Enter before exiting (so they can read errors)
 function waitForKeypress(message = 'Press Enter to exit...') {
     return new Promise((resolve) => {
         console.log('\n' + message);
 
-        // If we have a TTY, wait for keypress
         if (process.stdin.isTTY) {
             process.stdin.setRawMode(true);
             process.stdin.resume();
@@ -36,32 +36,26 @@ function waitForKeypress(message = 'Press Enter to exit...') {
                 resolve();
             });
         } else {
-            // No TTY - wait a few seconds so user can see the error in the window
             setTimeout(resolve, 5000);
         }
     });
 }
 
-// Sanitize message for safe logging (prevent log injection)
 function sanitizeLogMessage(msg) {
     if (typeof msg !== 'string') return String(msg);
-    // Remove control characters and limit length
     return msg.replace(/[\x00-\x1f\x7f]/g, '').substring(0, 1000);
 }
 
-// Exit with error message (waits for keypress first)
 async function exitWithError(message, code = 1) {
     console.error('\n' + '='.repeat(50));
     console.error('  ❌ ERROR');
     console.error('='.repeat(50));
-    // Security: Sanitize directly in output call (CodeQL-recognized pattern)
     console.error(sanitizeLogMessage(String(message)));
     console.error('='.repeat(50));
     await waitForKeypress();
     process.exit(code);
 }
 
-// Helper to get HWID
 function getHWID() {
     try {
         const cpus = os.cpus();
@@ -73,28 +67,35 @@ function getHWID() {
     }
 }
 
-// Get the directory where the executable is located
+function getBinaryHash() {
+    try {
+        const exePath = process.pkg ? process.execPath : __filename;
+        const hash = crypto.createHash('sha256');
+        const fileBuffer = fs.readFileSync(exePath);
+        hash.update(fileBuffer);
+        return hash.digest('hex');
+    } catch (e) {
+        return null;
+    }
+}
+
 function getExeDir() {
-    // For pkg-compiled executables, process.execPath points to the exe
     if (process.pkg) {
         return path.dirname(process.execPath);
     }
     return __dirname;
 }
 
-// Get the license key file path
 function getLicenseKeyPath() {
     const exeDir = getExeDir();
     const keyPath = path.join(exeDir, 'license.key');
     
-    // Test if we can write to this location
     try {
         const testFile = path.join(exeDir, '.cv_write_test');
         fs.writeFileSync(testFile, 'test');
         fs.unlinkSync(testFile);
         return keyPath;
     } catch (e) {
-        // Fall back to user's home directory if exe dir is not writable
         console.log(`[CodeVault] Warning: Cannot write to ${exeDir}, using home directory`);
         const homeDir = os.homedir();
         const appDataDir = path.join(homeDir, '.codevault');
@@ -104,9 +105,48 @@ function getLicenseKeyPath() {
             }
             return path.join(appDataDir, 'license.key');
         } catch (err) {
-            // Final fallback
             return path.join(homeDir, 'license.key');
         }
+    }
+}
+
+// ============================================================
+// Ed25519 SIGNATURE VERIFICATION
+// ============================================================
+
+function buildSignatureMessage(data) {
+    const features = JSON.stringify((data.features || []).slice().sort());
+    const variables = JSON.stringify(data.variables || {});
+    return [
+        data.status || '',
+        data.expires_at != null ? String(data.expires_at) : '',
+        features,
+        variables,
+        data.client_nonce || data.nonce || '',
+        data.server_nonce || '',
+        data.timestamp != null ? String(data.timestamp) : '',
+        data.server_time != null ? String(data.server_time) : '',
+    ].join('|');
+}
+
+function verifyEd25519Signature(responseData, signatureB64) {
+    if (!PUBLIC_KEY_PEM || PUBLIC_KEY_PEM.trim() === '') {
+        console.error('[CodeVault] SECURITY ERROR: No public key configured, cannot verify server response');
+        return false;
+    }
+    try {
+        const message = buildSignatureMessage(responseData);
+        const signatureBuffer = Buffer.from(signatureB64, 'base64');
+        const isValid = crypto.verify(
+            null,
+            Buffer.from(message, 'utf-8'),
+            { key: PUBLIC_KEY_PEM, format: 'pem', type: 'spki' },
+            signatureBuffer
+        );
+        return isValid;
+    } catch (e) {
+        console.error(`[CodeVault] Signature verification error: ${e.message}`);
+        return false;
     }
 }
 
@@ -114,11 +154,10 @@ function getLicenseKeyPath() {
 // LEASE CONFIGURATION
 // ============================================================
 
-const LEASE_DURATION = 24 * 60 * 60;  // 24 hours
-const CLOCK_DRIFT_MAX = 60 * 60;       // 1 hour
+const LEASE_DURATION = 24 * 60 * 60;
+const CLOCK_DRIFT_MAX = 60 * 60;
 
 function getLeasePath() {
-    // Use same directory as license.key file
     const licensePath = getLicenseKeyPath();
     const leaseDir = path.dirname(licensePath);
     return path.join(leaseDir, 'license.lease');
@@ -134,7 +173,6 @@ function encryptLease(leaseData) {
         const secret = getMachineSecret();
         const dataJson = Buffer.from(JSON.stringify(leaseData), 'utf-8');
 
-        // Use AES-256-GCM
         const nonce = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', secret, nonce);
         const encrypted = Buffer.concat([cipher.update(dataJson), cipher.final()]);
@@ -192,7 +230,6 @@ function saveLease(leaseData) {
             return true;
         }
     } catch (e) {
-        // Ignore
     }
     return false;
 }
@@ -205,7 +242,6 @@ function loadLease() {
             return decryptLease(encrypted);
         }
     } catch (e) {
-        // Ignore
     }
     return null;
 }
@@ -241,10 +277,8 @@ function deleteSavedLicenseAndLease() {
 // LICENSE KEY PROMPTING
 // ============================================================
 
-// Native GUI Prompt using PowerShell (matches Python tkinter style)
 function promptNativeGUI() {
     return new Promise((resolve) => {
-        // PowerShell script to create a native Windows Form dialog matching the Python tkinter style
         const psScript = `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -252,7 +286,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'License Activation'
+$form.Text = '${APP_NAME} - License Activation'
 $form.Size = New-Object System.Drawing.Size(470, 350)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
@@ -261,8 +295,8 @@ $form.MinimizeBox = $false
 $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1a1a2e')
 $form.ForeColor = [System.Drawing.Color]::White
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$form.TopMost = $true
 
-# Branding label
 $brandLabel = New-Object System.Windows.Forms.Label
 $brandLabel.Text = 'Protected by CodeVault'
 $brandLabel.Location = New-Object System.Drawing.Point(0, 20)
@@ -272,7 +306,6 @@ $brandLabel.TextAlign = 'MiddleCenter'
 $brandLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $form.Controls.Add($brandLabel)
 
-# Icon/Lock emoji panel
 $iconLabel = New-Object System.Windows.Forms.Label
 $iconLabel.Text = [char]0x1F512
 $iconLabel.Location = New-Object System.Drawing.Point(0, 45)
@@ -282,7 +315,6 @@ $iconLabel.TextAlign = 'MiddleCenter'
 $iconLabel.Font = New-Object System.Drawing.Font('Segoe UI Emoji', 20)
 $form.Controls.Add($iconLabel)
 
-# Title label
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Text = 'License Activation'
 $titleLabel.Location = New-Object System.Drawing.Point(0, 90)
@@ -292,7 +324,6 @@ $titleLabel.TextAlign = 'MiddleCenter'
 $titleLabel.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.FontStyle]::Bold)
 $form.Controls.Add($titleLabel)
 
-# Subtitle label
 $subtitleLabel = New-Object System.Windows.Forms.Label
 $subtitleLabel.Text = 'Enter your license key to activate this application'
 $subtitleLabel.Location = New-Object System.Drawing.Point(0, 125)
@@ -302,7 +333,6 @@ $subtitleLabel.TextAlign = 'MiddleCenter'
 $subtitleLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $form.Controls.Add($subtitleLabel)
 
-# License key text box with border panel
 $borderPanel = New-Object System.Windows.Forms.Panel
 $borderPanel.Location = New-Object System.Drawing.Point(35, 165)
 $borderPanel.Size = New-Object System.Drawing.Size(380, 42)
@@ -319,7 +349,6 @@ $textBox.BorderStyle = 'None'
 $textBox.CharacterCasing = 'Upper'
 $borderPanel.Controls.Add($textBox)
 
-# Activate button
 $activateButton = New-Object System.Windows.Forms.Button
 $activateButton.Text = [char]0x2714 + ' Activate License'
 $activateButton.Location = New-Object System.Drawing.Point(35, 225)
@@ -341,7 +370,6 @@ $activateButton.Add_Click({
 })
 $form.Controls.Add($activateButton)
 
-# Handle Enter key
 $textBox.Add_KeyDown({
     if ($_.KeyCode -eq 'Enter') {
         $activateButton.PerformClick()
@@ -358,10 +386,9 @@ if ($result -eq 'OK' -and $form.Tag) {
 }
 `;
 
-        // Execute PowerShell script
         const tempDir = os.tmpdir();
         const scriptPath = path.join(tempDir, `cv_license_${crypto.randomBytes(8).toString('hex')}.ps1`);
-        tempFiles.add(scriptPath); // Track temp file
+        tempFiles.add(scriptPath);
 
         try {
             fs.writeFileSync(scriptPath, psScript, 'utf-8');
@@ -388,7 +415,6 @@ if ($result -eq 'OK' -and $form.Tag) {
             });
 
             ps.on('close', (code) => {
-                // Cleanup
                 try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
                 tempFiles.delete(scriptPath);
 
@@ -416,7 +442,6 @@ if ($result -eq 'OK' -and $form.Tag) {
     });
 }
 
-// Console prompt for license key
 function promptConsole() {
     return new Promise((resolve) => {
         try {
@@ -445,15 +470,12 @@ function promptConsole() {
     });
 }
 
-// Main prompt function - ALWAYS use native GUI on Windows for best user experience
 async function promptForLicenseKey() {
-    // On Windows, use native PowerShell GUI dialog (matches Python tkinter style)
     if (os.platform() === 'win32') {
         console.log('[CodeVault] Opening license key dialog...');
         const key = await promptNativeGUI();
         if (key) return key;
 
-        // GUI failed - try console as fallback if we have a TTY
         if (process.stdin.isTTY) {
             console.log('[CodeVault] GUI dialog failed, falling back to console input...');
             return await promptConsole();
@@ -461,17 +483,14 @@ async function promptForLicenseKey() {
         return null;
     }
 
-    // Use console prompt on non-Windows platforms
     return await promptConsole();
 }
 
-// Load license from file or prompt user
 async function loadOrPromptLicense() {
     const licensePath = getLicenseKeyPath();
 
     console.log('[CodeVault] License file path:', licensePath);
 
-    // Try to load from file first
     if (fs.existsSync(licensePath)) {
         try {
             const key = fs.readFileSync(licensePath, 'utf-8').trim();
@@ -484,7 +503,6 @@ async function loadOrPromptLicense() {
         }
     }
 
-    // Prompt for license
     console.log('[CodeVault] No license key found. Please enter your license key.');
     const licenseKey = await promptForLicenseKey();
 
@@ -492,15 +510,12 @@ async function loadOrPromptLicense() {
         await exitWithError('No license key provided.\n\nPlease run the application again and enter a valid license key.');
     }
 
-    // Save license for future runs (atomic write to prevent race conditions)
     console.log('[CodeVault] Saving license key...');
     try {
-        // Ensure directory exists
         const licenseDir = path.dirname(licensePath);
         if (!fs.existsSync(licenseDir)) {
             fs.mkdirSync(licenseDir, { recursive: true });
         }
-        // Write to temp file first, then rename (atomic operation)
         const tempPath = licensePath + '.tmp.' + crypto.randomBytes(8).toString('hex');
         fs.writeFileSync(tempPath, licenseKey, { encoding: 'utf-8', mode: 0o600 });
         fs.renameSync(tempPath, licensePath);
@@ -509,13 +524,11 @@ async function loadOrPromptLicense() {
         const safeError = sanitizeLogMessage(e.message);
         console.error('[CodeVault] ⚠ Could not save license file:', safeError);
         console.error('[CodeVault] You may need to enter the license key again next time.');
-        // Don't exit - continue with validation
     }
 
     return licenseKey;
 }
 
-// Delete saved license file (on validation failure)
 function deleteSavedLicense() {
     try {
         const licensePath = getLicenseKeyPath();
@@ -524,7 +537,6 @@ function deleteSavedLicense() {
             console.log('[CodeVault] License file removed due to validation failure.');
         }
     } catch (e) {
-        // Ignore cleanup errors
     }
 }
 
@@ -535,13 +547,11 @@ function deleteSavedLicense() {
 async function validateLicense() {
     let currentLicenseKey = LICENSE_KEY;
 
-    // DEMO mode - skip all validation
     if (currentLicenseKey === 'DEMO') {
         console.log('[CodeVault] Running in DEMO mode');
         return true;
     }
 
-    // GENERIC_BUILD mode - prompt for license at runtime
     if (currentLicenseKey === 'GENERIC_BUILD') {
         currentLicenseKey = await loadOrPromptLicense();
     }
@@ -554,7 +564,6 @@ async function validateLicense() {
         const nonce = crypto.randomBytes(16).toString('hex');
         const timestamp = Math.floor(Date.now() / 1000);
 
-        // Parse URL
         let urlObj;
         try {
             urlObj = new URL(API_URL);
@@ -567,11 +576,10 @@ async function validateLicense() {
             hwid: hwid,
             nonce: nonce,
             timestamp: timestamp,
-            machine_name: os.hostname()
+            machine_name: os.hostname(),
+            binary_hash: getBinaryHash()
         });
 
-        // CRITICAL: Replace 'localhost' with '127.0.0.1' to force IPv4
-        // Windows DNS resolves 'localhost' to IPv6 (::1) first, causing ECONNREFUSED
         const hostname = urlObj.hostname === 'localhost' ? '127.0.0.1' : urlObj.hostname;
 
         const options = {
@@ -579,8 +587,8 @@ async function validateLicense() {
             port: urlObj.port || (urlObj.protocol === 'http:' ? 80 : 443),
             path: urlObj.pathname,
             method: 'POST',
-            family: 4, // Force IPv4
-            timeout: 15000, // 15 second timeout
+            family: 4,
+            timeout: 15000,
             headers: {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(postData)
@@ -606,10 +614,35 @@ async function validateLicense() {
 
                     const response = JSON.parse(body);
 
+                    // Verify Ed25519 signature
+                    if (response.signature && !verifyEd25519Signature(response, response.signature)) {
+                        await exitWithError('SECURITY ERROR\n\nServer response signature verification failed.\n\nThis may indicate a tampered response or misconfigured server.\nPlease contact the application developer.');
+                        return;
+                    }
+
+                    // Protocol v2: Verify response freshness
+                    if (response.issued_at) {
+                        const currentTime = Math.floor(Date.now() / 1000);
+                        const responseAge = currentTime - response.issued_at;
+                        if (responseAge > 300) {
+                            await exitWithError(`SECURITY ERROR\n\nResponse expired. Server response is too old (${responseAge}s). Possible replay attack.`);
+                            return;
+                        }
+                        if (responseAge < -60) {
+                            await exitWithError('SECURITY ERROR\n\nResponse from future. Clock skew detected. Please correct your system time.');
+                            return;
+                        }
+                    }
+
+                    // Protocol v2: Require jti for replay protection
+                    if (!response.jti) {
+                        await exitWithError('SECURITY ERROR\n\nMissing replay protection. Server response missing jti (replay protection ID).');
+                        return;
+                    }
+
                     if (response.status === 'valid') {
                         console.log('[CodeVault] ✓ License validated successfully!');
 
-                        // Create lease for offline use
                         const serverTime = response.server_time || response.timestamp || Math.floor(Date.now() / 1000);
                         const localTime = Math.floor(Date.now() / 1000);
                         const drift = Math.abs(localTime - serverTime);
@@ -637,14 +670,11 @@ async function validateLicense() {
             });
         });
 
-        // Handle connection errors - try offline lease first
         req.on('error', async (e) => {
-            // Security: Sanitize error message to prevent log injection
             const safeErrorMessage = sanitizeLogMessage(e.message || 'Unknown error');
             console.error('[CodeVault] Connection error:', safeErrorMessage);
             console.log('[CodeVault] Server unreachable, checking offline lease...');
 
-            // Try offline lease validation
             const leaseResult = validateLease(currentLicenseKey, hwid);
             if (leaseResult.valid) {
                 console.log('[CodeVault] ✓ Running with valid offline lease');
@@ -652,7 +682,6 @@ async function validateLicense() {
                 return;
             }
 
-            // No valid lease - show error
             console.log(`[CodeVault] Offline lease invalid: ${leaseResult.message}`);
 
             let helpText = '';
@@ -669,12 +698,10 @@ async function validateLicense() {
             await exitWithError(`Cannot connect to license server.${helpText}\n\nOffline lease: ${leaseResult.message}`);
         });
 
-        // Handle timeout - try offline lease first
         req.on('timeout', async () => {
             req.destroy();
             console.log('[CodeVault] Connection timeout, checking offline lease...');
 
-            // Try offline lease validation
             const leaseResult = validateLease(currentLicenseKey, hwid);
             if (leaseResult.valid) {
                 console.log('[CodeVault] ✓ Running with valid offline lease');
@@ -682,18 +709,14 @@ async function validateLicense() {
                 return;
             }
 
-            // No valid lease - show error
             console.log(`[CodeVault] Offline lease invalid: ${leaseResult.message}`);
             const safeUrl = sanitizeLogMessage(API_URL);
             await exitWithError(`Connection to license server timed out.\n\nThe server at ${safeUrl} is not responding.\nPlease try again later.\n\nOffline lease: ${leaseResult.message}`);
         });
 
-        // lgtm[js/file-access-to-http] - Intentional: license key from file sent for validation
-        // This is the core purpose of the license wrapper - sending the stored key for server validation
         req.write(postData);
         req.end();
     });
 }
 
-// Export validation function
 module.exports = validateLicense;

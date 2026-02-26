@@ -52,6 +52,9 @@ def validate_license_key(license_key: str) -> str:
         raise ValidationError("License key cannot be empty")
 
     license_key = license_key.strip()
+    
+    if not license_key:
+        raise ValidationError("License key cannot be empty")
 
     # Allow only alphanumeric characters, hyphens, and underscores
     # This prevents code injection via special characters like quotes
