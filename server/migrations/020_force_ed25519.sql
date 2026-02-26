@@ -13,7 +13,7 @@ DECLARE
     ed_private_key BYTEA;
     ed_public_key BYTEA;
 BEGIN
-    FOR proj IN SELECT id FROM projects WHERE signing_private_key IS NULL OR signing_public_key LOOP
+    FOR proj IN SELECT id FROM projects WHERE signing_private_key IS NULL OR signing_public_key IS NULL LOOP
         -- Generate Ed25519 key pair using PostgreSQL's pgcrypto
         -- Note: PostgreSQL doesn't natively support Ed25519, so we'll use a server-side approach
         -- The keys will be regenerated on next project access via the application
