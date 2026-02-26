@@ -71,9 +71,16 @@ def is_private_ip(ip_str: str) -> bool:
 async def validate_webhook_url(url: str) -> tuple[bool, str]:
     """Validate webhook URL with immediate IP resolution.
 
+    H2 FIX: socket.getaddrinfo is a blocking syscall. Calling it directly
+    from an async handler stalls the entire event loop for the DNS RTT
+    (typically 10-100ms, up to seconds on slow resolvers). We offload it
+    to the default thread-pool executor via run_in_executor so the event
+    loop remains unblocked while waiting for DNS.
+
     Returns:
         Tuple of (is_valid, error_message)
     """
+    import asyncio
     from urllib.parse import urlparse
 
     if not url:
@@ -98,9 +105,18 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
     if hostname_lower in BLOCKED_HOSTNAMES:
         return False, f"Webhook URL cannot target {hostname_lower}"
 
-    # Try to resolve IMMEDIATELY (fail fast on unresolvable)
+    # Reasonable length limit (check before DNS to fail fast)
+    if len(url) > 2000:
+        return False, "URL is too long (max 2000 characters)"
+
+    # H2 FIX: Offload blocking DNS resolution to thread pool executor
+    port = parsed.port or 443
+    loop = asyncio.get_event_loop()
     try:
-        resolved = socket.getaddrinfo(hostname, parsed.port or 443, socket.AF_UNSPEC)
+        resolved = await loop.run_in_executor(
+            None,
+            lambda: socket.getaddrinfo(hostname, port, socket.AF_UNSPEC),
+        )
     except socket.gaierror as e:
         return False, f"Cannot resolve hostname '{hostname}': {e}"
 
@@ -109,10 +125,6 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
         ip_str = sockaddr[0]
         if is_private_ip(ip_str):
             return False, f"Webhook resolves to private IP: {ip_str}"
-
-    # Reasonable length limit
-    if len(url) > 2000:
-        return False, "URL is too long (max 2000 characters)"
 
     return True, "Valid"
 

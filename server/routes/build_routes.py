@@ -113,7 +113,7 @@ async def build_installer(
 
     job_id = secrets.token_hex(16)
 
-    # Initialize job in cache
+    # Initialize job in cache — store user_id for ownership enforcement (C2 FIX)
     compile_jobs_cache[job_id] = {
         "status": "pending",
         "progress": 0,
@@ -123,6 +123,7 @@ async def build_installer(
         "output_path": None,
         "error_message": None,
         "cancelled": False,  # Flag to support cancellation
+        "user_id": user["id"],  # C2 FIX: bind job to requesting user
     }
 
     # Run build in background
@@ -201,11 +202,14 @@ async def _run_installer_build_job(job_id: str, data: InstallerBuildRequest):
     except Exception as e:
         logger.error(f"[Build {job_id[:8]}] Build failed with exception", exc_info=True)
         compile_jobs_cache[job_id]["status"] = "failed"
-        # Store full error server-side for admin debugging
+        # Store full error server-side for admin debugging (never returned to client)
         compile_jobs_cache[job_id]["_internal_error"] = str(e)
-        # Sanitize error for client - don't expose internal paths/details
+        # H5 FIX: Never expose raw exception strings (which contain internal
+        # filesystem paths and compiler details) in the client-visible logs list.
+        # The sanitized error_message is sufficient for the user; full details
+        # are available to admins via server logs (exc_info=True above).
         compile_jobs_cache[job_id]["error_message"] = "Build failed. Please try again or contact support."
-        compile_jobs_cache[job_id]["logs"].append(f"❌ Build failed: {str(e)}")
+        compile_jobs_cache[job_id]["logs"].append("❌ Build failed. Check server logs for details.")
         compile_jobs_cache[job_id]["completed_time"] = time.time()
 
 
@@ -218,6 +222,10 @@ async def get_installer_build_status(
         raise HTTPException(status_code=404, detail="Build job not found")
 
     job = compile_jobs_cache[job_id]
+
+    # C2 FIX: Enforce ownership — only the user who started the job may poll it.
+    if job.get("user_id") != user["id"]:
+        raise HTTPException(status_code=404, detail="Build job not found")
 
     return {
         "job_id": job_id,
@@ -237,6 +245,10 @@ async def cancel_installer_build(job_id: str, user: dict = Depends(get_current_u
         raise HTTPException(status_code=404, detail="Build job not found")
 
     job = compile_jobs_cache[job_id]
+
+    # C2 FIX: Enforce ownership — only the user who started the job may cancel it.
+    if job.get("user_id") != user["id"]:
+        raise HTTPException(status_code=404, detail="Build job not found")
 
     if job["status"] not in ["pending", "running"]:
         return {
@@ -358,8 +370,12 @@ async def get_build_bundle(
     try:
         validate_project_id(project_id)
 
+        # C3 FIX: Fetch signing_public_key (Ed25519 public key for client-side
+        # signature verification) but NOT signing_secret (HMAC server secret).
+        # The HMAC secret must never leave the server — only the public key is
+        # needed by the CLI to verify server-signed validation responses.
         project = await conn.fetchrow(
-            "SELECT id, name, language, settings, compiler_options FROM projects WHERE id = $1 AND user_id = $2",
+            "SELECT id, name, language, settings, compiler_options, signing_public_key FROM projects WHERE id = $1 AND user_id = $2",
             project_id,
             user["id"],
         )
@@ -427,7 +443,9 @@ async def get_build_bundle(
             "license_key": license_key,
             "api_url": api_url,
             "server_url": server_url,
-            "signing_secret": project.get("signing_secret"),
+            # C3 FIX: Include Ed25519 public key (for client verification) —
+            # NEVER include signing_secret (HMAC server-only credential).
+            "signing_public_key": project.get("signing_public_key") or "",
             "nuitka_options": settings.get("nuitka_options", {}),
             "pkg_options": settings.get("pkg_options", {}),
             "compiler_options": compiler_options,

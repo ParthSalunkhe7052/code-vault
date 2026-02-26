@@ -58,20 +58,39 @@ async def get_admin_stats(user: dict = Depends(get_current_admin_user)):
 
 
 @router.get("/users")
-async def list_all_users(user: dict = Depends(get_current_admin_user)):
-    """List all users in the system with their project/license counts (admin only)."""
+async def list_all_users(
+    user: dict = Depends(get_current_admin_user),
+    limit: int = 500,
+    offset: int = 0,
+):
+    """List all users in the system with their project/license counts (admin only).
+
+    H8 FIX: Replaced two correlated subqueries (N+1 pattern — one extra query
+    per user row for each of project_count and license_count) with a single
+    LEFT JOIN + GROUP BY query that computes both counts in one pass.
+    Added LIMIT/OFFSET pagination to prevent unbounded full-table scans on
+    large platforms.
+    """
+    # Clamp limit to a safe maximum
+    limit = min(limit, 1000)
     conn = await get_db()
     try:
-        rows = await conn.fetch("""
-            SELECT 
+        rows = await conn.fetch(
+            """
+            SELECT
                 u.id, u.email, u.name, u.plan, u.role, u.created_at,
-                (SELECT COUNT(*) FROM projects p WHERE p.user_id = u.id) as project_count,
-                (SELECT COUNT(*) FROM licenses l 
-                 JOIN projects p ON l.project_id = p.id 
-                 WHERE p.user_id = u.id) as license_count
+                COUNT(DISTINCT p.id) AS project_count,
+                COUNT(DISTINCT l.id) AS license_count
             FROM users u
+            LEFT JOIN projects p ON p.user_id = u.id
+            LEFT JOIN licenses l ON l.project_id = p.id
+            GROUP BY u.id, u.email, u.name, u.plan, u.role, u.created_at
             ORDER BY u.created_at DESC
-        """)
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
 
         return [
             {
