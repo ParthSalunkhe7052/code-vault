@@ -390,14 +390,16 @@ _REDIS_UNAVAILABLE_WARNED = False
 async def _is_jwt_blacklisted(jti: str) -> bool:
     """Check if a JWT's jti is in the Redis blacklist.
 
-    H2 FIX: If Redis is unavailable, we CANNOT safely determine whether the
-    token has been revoked (e.g. after logout). To prevent revoked tokens from
-    regaining access during a Redis outage, we fail CLOSED — i.e. we treat the
-    token as blacklisted (return True) when Redis is unreachable.
+    H2 FIX (previous): If Redis is unavailable, fail CLOSED — treat the token
+    as blacklisted to prevent revoked tokens from regaining access during a
+    Redis outage.
 
-    This means users will be asked to log in again if Redis goes down, which is
-    the secure and correct behavior. The alternative (fail-open) allows any
-    previously logged-out session to resume access during an outage.
+    C4 FIX: The standard Redis fallback previously called aioredis.from_url()
+    on every single authenticated request, creating and immediately closing a
+    TCP connection pool each time.  We now prefer the shared _redis_client from
+    rate_limiter.py (initialised once at startup) to avoid per-request
+    connection churn.  The Upstash REST path is unchanged (it is HTTP-based and
+    stateless — constructing the thin client object is negligible).
     """
     global _REDIS_UNAVAILABLE_WARNED
     import logging as _log
@@ -407,7 +409,7 @@ async def _is_jwt_blacklisted(jti: str) -> bool:
     if not jti:
         return False
 
-    # Try Upstash REST API first
+    # Try Upstash REST API first (HTTP-based, no persistent connection)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
             from upstash_redis.asyncio import Redis
@@ -419,14 +421,22 @@ async def _is_jwt_blacklisted(jti: str) -> bool:
             _log.warning(f"[JWT Blacklist] Upstash unavailable, failing CLOSED: {e}")
             return True  # Fail closed: treat as blacklisted
 
-    # Fallback to standard Redis
+    # C4 FIX: Reuse the shared connection pool from rate_limiter instead of
+    # opening a new TCP connection for every request.
     if REDIS_URL:
         try:
+            from middleware.rate_limiter import get_redis_client
+            shared_client = await get_redis_client()
+            if shared_client is not None:
+                result = await shared_client.get(f"jwt_blacklist:{jti}")
+                _REDIS_UNAVAILABLE_WARNED = False
+                return result is not None
+            # Shared client not yet initialised — fall back to direct connection
             import redis.asyncio as aioredis
             r = aioredis.from_url(REDIS_URL)
             result = await r.get(f"jwt_blacklist:{jti}")
             await r.close()
-            _REDIS_UNAVAILABLE_WARNED = False  # reset on success
+            _REDIS_UNAVAILABLE_WARNED = False
             return result is not None
         except Exception as e:
             _log.warning(f"[JWT Blacklist] Redis unavailable, failing CLOSED: {e}")
@@ -444,14 +454,18 @@ async def _is_jwt_blacklisted(jti: str) -> bool:
 
 
 async def blacklist_jwt(jti: str, ttl_seconds: int) -> bool:
-    """Add a JWT's jti to the Redis blacklist with TTL."""
+    """Add a JWT's jti to the Redis blacklist with TTL.
+
+    C4 FIX: Reuse the shared rate-limiter Redis pool for the standard Redis
+    path instead of creating a new connection per call.
+    """
     from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, REDIS_URL
     import logging
 
     if not jti or ttl_seconds <= 0:
         return False
 
-    # Try Upstash REST API first
+    # Try Upstash REST API first (HTTP-based, stateless)
     if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
         try:
             from upstash_redis.asyncio import Redis
@@ -461,9 +475,15 @@ async def blacklist_jwt(jti: str, ttl_seconds: int) -> bool:
         except Exception as e:
             logging.warning(f"[JWT Blacklist] Upstash error: {e}")
 
-    # Fallback to standard Redis
+    # C4 FIX: Reuse shared connection pool
     if REDIS_URL:
         try:
+            from middleware.rate_limiter import get_redis_client
+            shared_client = await get_redis_client()
+            if shared_client is not None:
+                await shared_client.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)
+                return True
+            # Shared client not available — fall back to direct connection
             import redis.asyncio as aioredis
             r = aioredis.from_url(REDIS_URL)
             await r.set(f"jwt_blacklist:{jti}", "1", ex=ttl_seconds)

@@ -407,7 +407,9 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         print(f"[BUILD] Branding: {branding_status}", flush=True)
 
         public_key = config.get("signing_public_key") or ""
-        secret_key = config.get("signing_secret") or "dev-secret-key"
+        # C3 FIX: signing_secret is a server-only HMAC credential — never read
+        # it from the bundle.  get_python_wrapper's secret_key param is
+        # deprecated and ignored; pass None explicitly to make this clear.
         heartbeat_interval = config.get("heartbeat_interval", 300)
 
         app_name = (
@@ -423,7 +425,7 @@ def inject_license_wrapper(project_dir: Path, config: Dict[str, Any]) -> bool:
         wrapper = get_python_wrapper(
             license_key,
             server_url,
-            secret_key,
+            None,  # secret_key deprecated — Ed25519 public_key used instead
             lease_enabled,
             show_branding,
             public_key=public_key,
