@@ -615,7 +615,7 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
     python3 -c "
 import zipfile, os
 dn, on = '$$dist_name', '{output_name}'
-zf = zipfile.ZipFile(f'/workspace/{on}.zip', 'w', zipfile.ZIP_DEFLATED)
+zf = zipfile.ZipFile(f'/workspace/{{on}}.zip', 'w', zipfile.ZIP_DEFLATED)
 for r, ds, fs in os.walk(dn):
   ds[:] = [d for d in ds if d != '__pycache__']
   for f in fs:
@@ -922,7 +922,9 @@ gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/lin
 
         return steps
 
-    def _create_save_cache_step(self, gcs_bucket: str, language: str = "python") -> Dict[str, Any]:
+    def _create_save_cache_step(
+        self, gcs_bucket: str, language: str = "python"
+    ) -> Dict[str, Any]:
         """Create cache save step."""
         script = f"""set +e
 echo "[Cloud Build] Saving cache..."

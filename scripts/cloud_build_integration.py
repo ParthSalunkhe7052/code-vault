@@ -544,7 +544,7 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
     python3 -c "
 import zipfile, os
 dn, on = '$$dist_name', '{output_name}'
-zf = zipfile.ZipFile(f'/workspace/{on}.zip', 'w', zipfile.ZIP_DEFLATED)
+zf = zipfile.ZipFile(f'/workspace/{{on}}.zip', 'w', zipfile.ZIP_DEFLATED)
 for r, ds, fs in os.walk(dn):
   ds[:] = [d for d in ds if d != '__pycache__']
   for f in fs:
