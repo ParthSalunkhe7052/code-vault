@@ -1,0 +1,22 @@
+name: Deploy to Heroku
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Heroku CLI
+        uses: wizeline/setup-heroku-action@v1.1.0
+        with:
+          heroku-api-key: ${{ secrets.HEROKU_API_KEY }}
+
+      - name: Deploy to Heroku
+        run: |
+          git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/code-vault.git main --force
