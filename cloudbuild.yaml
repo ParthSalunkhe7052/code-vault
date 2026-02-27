@@ -328,6 +328,20 @@ steps:
         # Ensure artifacts directory exists
         mkdir -p /workspace/artifacts
 
+        # Write Python zip helper (zip CLI is not available in tobix/pywine image)
+        printf '%s\n' \
+          'import zipfile, os, sys' \
+          'dist, out = sys.argv[1], sys.argv[2]' \
+          'with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:' \
+          '    for root, dirs, files in os.walk(dist):' \
+          '        dirs[:] = [d for d in dirs if d != "__pycache__"]' \
+          '        for f in files:' \
+          '            if not f.endswith(".pyc"):' \
+          '                fp = os.path.join(root, f)' \
+          '                zf.write(fp, os.path.relpath(fp, os.path.dirname(dist)))' \
+          'print("Zip created:", out)' \
+          > /tmp/make_zip.py
+
         export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
         mkdir -p $$NUITKA_CACHE_DIR
 
@@ -392,9 +406,8 @@ steps:
           mkdir -p /workspace/artifacts
           parent_dir=$$(dirname "$$dist_dir")
           cd "$$parent_dir"
-          # Use zip for Windows (tar.gz is not natively supported on Windows)
-          apt-get install -y -qq zip 2>/dev/null || true
-          zip -r -q "/workspace/artifacts/${output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
+          # Use Python's built-in zipfile module - zip CLI is not available in tobix/pywine image
+          python3 /tmp/make_zip.py "$$dist_name" "/workspace/artifacts/${output_name}.zip"
           cd /workspace
 
           if [ -f "/workspace/artifacts/${output_name}.zip" ]; then
