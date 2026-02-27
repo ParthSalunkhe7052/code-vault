@@ -69,7 +69,7 @@ const api = axios.create({
 // offline extraction of tokens from localStorage by attackers who only have
 // disk access (not an active session).
 function _getSessionSecret(): string {
-    const SESSION_SECRET_KEY = '__cv_ss';
+    const SESSION_SECRET_KEY = '__cv_ss';  // pragma: allowlist secret
     let secret = sessionStorage.getItem(SESSION_SECRET_KEY);
     if (!secret) {
         // Generate a cryptographically random 32-byte hex string per browser session
@@ -200,18 +200,29 @@ export const projects = {
             timeout: 300000, // 5 minutes for large files
         }).then(res => res.data);
     },
-    uploadZip: (id: string, file: File, onProgress?: (progress: number) => void): Promise<{ message: string; files: string[] }> => {
-        const formData = new FormData();
-        formData.append('file', file);
-        return api.post(`/projects/${id}/upload-zip`, formData, {
+    uploadZip: async (id: string, file: File, onProgress?: (progress: number) => void): Promise<{ message: string; file_count?: number; structure?: any }> => {
+        // Step 1: Get presigned URL for direct R2 upload
+        const { upload_url, token } = await api.post(`/projects/${id}/upload-zip-url`, {
+            filename: file.name,
+            file_size: file.size,
+        }).then(res => res.data);
+
+        // Step 2: Upload directly to R2 using the presigned URL
+        await axios.put(upload_url, file, {
+            headers: {
+                'Content-Type': 'application/zip',
+            },
             onUploadProgress: (progressEvent) => {
                 if (onProgress && progressEvent.total) {
                     const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
                     onProgress(progress);
                 }
             },
-            timeout: 300000, // 5 minutes for large files
-        }).then(res => res.data);
+            timeout: 600000, // 10 minutes for large file upload to R2
+        });
+
+        // Step 3: Process the uploaded file on the server
+        return api.post(`/projects/${id}/process-upload?token=${token}`).then(res => res.data);
     },
     listFiles: (id: string): Promise<any[]> => api.get(`/projects/${id}/files`).then(res => res.data),
     deleteFile: (projectId: string, fileId: string): Promise<{ success: boolean }> => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),
