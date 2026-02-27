@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request
 import redis.asyncio as redis
 
+from config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+
 
 logger = logging.getLogger(__name__)
 
@@ -178,23 +180,40 @@ async def check_rate_limit(
         # Redis key for this rate limit
         redis_key = f"ratelimit:{key}"
 
-        # Use pipeline for atomic operations
-        pipe = _redis_client.pipeline()
+        # Check if using Upstash REST API
+        is_upstash = UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN
 
-        # Remove old entries outside the window
-        pipe.zremrangebyscore(redis_key, 0, window_start)
+        if is_upstash:
+            # Upstash REST API - execute commands sequentially
+            # Remove old entries outside the window
+            await _redis_client.zremrangebyscore(redis_key, 0, window_start)
 
-        # Count current requests in window
-        pipe.zcard(redis_key)
+            # Count current requests in window
+            current_count = await _redis_client.zcard(redis_key)
 
-        # Add current request
-        pipe.zadd(redis_key, {str(now): now})
+            # Add current request
+            await _redis_client.zadd(redis_key, {str(now): now})
 
-        # Set expiry on the key
-        pipe.expire(redis_key, window_seconds + 1)
+            # Set expiry on the key
+            await _redis_client.expire(redis_key, window_seconds + 1)
+        else:
+            # Standard redis-py - use pipeline for atomic operations
+            pipe = _redis_client.pipeline()
 
-        results = await pipe.execute()
-        current_count = results[1]  # zcard result
+            # Remove old entries outside the window
+            pipe.zremrangebyscore(redis_key, 0, window_start)
+
+            # Count current requests in window
+            pipe.zcard(redis_key)
+
+            # Add current request
+            pipe.zadd(redis_key, {str(now): now})
+
+            # Set expiry on the key
+            pipe.expire(redis_key, window_seconds + 1)
+
+            results = await pipe.execute()
+            current_count = results[1]  # zcard result
 
         if current_count >= max_requests:
             # Get the oldest entry to calculate retry time
