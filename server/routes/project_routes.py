@@ -27,7 +27,7 @@ from storage_service import (
     validate_file_size,
 )
 from models import ProjectCreateRequest, ProjectConfigRequest, ProjectBrandingRequest
-from pydantic import BaseModel, Field as PydanticField
+from pydantic import BaseModel, PydanticField
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from routes.cloud_build_utils import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
@@ -680,9 +680,207 @@ async def upload_project_zip(
         await release_db(conn)
 
 
-# =============================================================================
-# Binary Hash Registration (SEC2: Binary Integrity Checking)
-# =============================================================================
+class UploadUrlRequest(BaseModel):
+    """Request to get presigned upload URL."""
+
+    filename: str = PydanticField(..., pattern=r"^[^/\\:*?\"<>|]+\.zip$")
+    file_size: int = PydanticField(..., gt=0, le=500 * 1024 * 1024)
+
+
+@router.post("/{project_id}/upload-zip-url")
+async def get_upload_url(
+    project_id: str,
+    request: UploadUrlRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Get presigned URL for direct R2 upload (bypasses Heroku 30s timeout)."""
+    conn = await get_db()
+    try:
+        validate_project_id(project_id)
+
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if not request.filename.endswith(".zip"):
+            raise HTTPException(status_code=400, detail="File must be a .zip file")
+
+        upload_token = secrets.token_urlsafe(32)
+        r2_key = f"uploads/{project_id}/{upload_token}/{request.filename}"
+
+        presigned_url = storage_service.generate_presigned_url(
+            r2_key, expires_in=3600, for_upload=True
+        )
+
+        if not presigned_url:
+            raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+        await conn.execute(
+            """
+            INSERT INTO project_upload_tokens (project_id, token, r2_key, filename, file_size, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (project_id) DO UPDATE SET
+                token = EXCLUDED.token,
+                r2_key = EXCLUDED.r2_key,
+                filename = EXCLUDED.filename,
+                file_size = EXCLUDED.file_size,
+                created_at = EXCLUDED.created_at
+            """,
+            project_id,
+            upload_token,
+            r2_key,
+            request.filename,
+            request.file_size,
+        )
+
+        return {
+            "upload_url": presigned_url,
+            "token": upload_token,
+            "expires_in": 3600,
+        }
+    finally:
+        await release_db(conn)
+
+
+@router.post("/{project_id}/process-upload")
+async def process_r2_upload(
+    project_id: str,
+    token: str,
+    user: dict = Depends(get_current_user),
+):
+    """Process ZIP file after it's been uploaded to R2."""
+    conn = await get_db()
+    try:
+        validate_project_id(project_id)
+
+        project = await conn.fetchrow(
+            "SELECT id, name, language FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        token_record = await conn.fetchrow(
+            "SELECT r2_key, filename, file_size FROM project_upload_tokens WHERE project_id = $1 AND token = $2",
+            project_id,
+            token,
+        )
+        if not token_record:
+            raise HTTPException(status_code=400, detail="Invalid upload token")
+
+        r2_key = token_record["r2_key"]
+        temp_dir = safe_join(LOCAL_UPLOAD_DIR, project_id, "temp_upload")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        local_zip_path = safe_join(temp_dir, token_record["filename"])
+
+        try:
+            file_content = await storage_service.download_file(r2_key)
+            if not file_content:
+                raise HTTPException(status_code=400, detail="File not found in storage")
+            local_zip_path.write_bytes(file_content)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download from R2: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to download uploaded file"
+            )
+
+        project_dir = safe_join(LOCAL_UPLOAD_DIR, project_id)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        source_dir = safe_join(project_dir, "source")
+
+        async def _remove_old_source() -> None:
+            if source_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, source_dir)
+
+        await asyncio.gather(
+            _remove_old_source(),
+            storage_service.delete_file(r2_key),
+        )
+
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        def _validate_and_extract() -> None:
+            resolved_source = str(source_dir.resolve())
+            try:
+                with zipfile.ZipFile(local_zip_path, "r") as zip_ref:
+                    for member in zip_ref.infolist():
+                        member_path = (source_dir / member.filename).resolve()
+                        if not str(member_path).startswith(resolved_source):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Invalid ZIP: contains path traversal attempt",
+                            )
+                        zip_ref.extract(member, source_dir)
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+        await asyncio.to_thread(_validate_and_extract)
+
+        language = project.get("language", "python")
+
+        if language == "nodejs":
+            file_tree = await asyncio.to_thread(
+                scan_nodejs_project_structure, source_dir
+            )
+        else:
+            file_tree = await asyncio.to_thread(scan_project_structure, source_dir)
+
+        if file_tree["total_files"] == 0:
+            lang_name = "JavaScript/TypeScript" if language == "nodejs" else "Python"
+            raise HTTPException(
+                status_code=400, detail=f"No {lang_name} files found in ZIP"
+            )
+
+        settings = await conn.fetchval(
+            "SELECT settings FROM projects WHERE id = $1", project_id
+        )
+        settings = (
+            json.loads(settings) if isinstance(settings, str) and settings else {}
+        )
+
+        settings["file_tree"] = file_tree
+        settings["is_multi_folder"] = True
+        settings["zip_uploaded_at"] = utc_now().isoformat()
+
+        await conn.execute(
+            "UPDATE projects SET settings = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(settings),
+            project_id,
+        )
+
+        await asyncio.to_thread(local_zip_path.unlink, True)
+        await asyncio.to_thread(shutil.rmtree, temp_dir)
+
+        return {
+            "success": True,
+            "file_count": file_tree["total_files"],
+            "structure": file_tree,
+            "message": f"Successfully uploaded {file_tree['total_files']} files",
+        }
+    except HTTPException:
+        raise
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+    except zipfile.BadZipFile as e:
+        logger.error(f"Invalid ZIP file for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+    except Exception as e:
+        logger.error(
+            f"Unexpected error processing ZIP for project {project_id}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}"
+        )
+    finally:
+        await release_db(conn)
 
 
 class BinaryHashRequest(BaseModel):
