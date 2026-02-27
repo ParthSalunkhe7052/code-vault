@@ -266,7 +266,7 @@ export const licenses = {
     getBindings: (id: string): Promise<HardwareBinding[]> => api.get(`/licenses/${id}/bindings`).then(res => res.data),
     removeBinding: (licenseId: string, bindingId: string): Promise<{ success: boolean }> => api.delete(`/licenses/${licenseId}/bindings/${bindingId}`).then(res => res.data),
     // HWID Reset
-    resetHwid: (id: string, reason: string): Promise<{ success: boolean }> => api.post(`/licenses/${id}/reset-hwid`, { reason }).then(res => res.data),
+    resetHwid: (id: string, reason: string): Promise<{ success: boolean; bindings_removed: number; resets_remaining_this_month: number }> => api.post(`/licenses/${id}/reset-hwid`, { reason }).then(res => res.data),
     getResetHistory: (id: string): Promise<any[]> => api.get(`/licenses/${id}/reset-history`).then(res => res.data),
     getResetStatus: (id: string): Promise<any> => api.get(`/licenses/${id}/reset-status`).then(res => res.data),
 };
@@ -279,7 +279,7 @@ export const webhooks = {
     delete: (id: string): Promise<{ success: boolean }> => api.delete(`/webhooks/${id}`).then(res => res.data),
     getDeliveries: (id: string, limit: number = 50): Promise<WebhookDelivery[]> => api.get(`/webhooks/${id}/deliveries`, { params: { limit } }).then(res => res.data),
     test: (id: string): Promise<{ success: boolean; status_code: number; response_body: string }> => api.post(`/webhooks/${id}/test`).then(res => res.data),
-    getEvents: (): Promise<WebhookEvent[]> => api.get('/webhooks/events/list').then(res => res.data),
+    getEvents: (): Promise<{ events: WebhookEvent[]; descriptions: Record<string, string> }> => api.get('/webhooks/events/list').then(res => res.data),
 };
 
 export const stats = {

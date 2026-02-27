@@ -457,10 +457,10 @@ export function useProjectBuild(projectId: string) {
         ...build,
         start: (jobId: string) => startBuild(projectId, jobId),
         updateStatus: (statusData: any) => updateBuildStatus(projectId, statusData),
-        updateBuild: () => {},
-        addLog: () => {},
-        complete: () => {},
-        fail: () => {},
+        updateBuild: (data: Partial<BuildState>) => updateBuildStatus(projectId, { ...build, ...data }),
+        addLog: (log: string) => updateBuildStatus(projectId, { ...build, logs: [...build.logs, log].slice(-50) }),
+        complete: (path?: string) => updateBuildStatus(projectId, { ...build, status: 'completed', progress: 100, outputPath: path }),
+        fail: (error: string) => updateBuildStatus(projectId, { ...build, status: 'failed', error }),
         cancel: () => clearBuild(projectId),
     };
 }

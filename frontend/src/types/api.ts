@@ -12,7 +12,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: "user" | "admin";
+  role: "user" | "admin" | "banned";
   tier: "free" | "pro" | "business" | "enterprise";
   plan?: "free" | "pro" | "business" | "enterprise";
   polar_customer_id: string | null;
@@ -64,14 +64,25 @@ export interface ProjectConfig {
   server_url?: string;
   lease_enabled?: boolean;
   obfuscate_enabled?: boolean;
+  include_modules?: string[];
+  exclude_modules?: string[];
   nuitka_options?: NuitkaOptions;
   compiler_options?: CompilerOptions;
+  files?: any[];
+  settings?: {
+    file_tree?: any;
+  };
+  skip_obfuscation?: boolean;
+  enable_lease?: boolean;
+  enable_binary_hash?: boolean;
 }
 
 export interface NuitkaOptions {
   include_packages?: string[];
   enable_plugins?: string[];
   extra_args?: string[];
+  demo_mode?: boolean;
+  demo_duration?: number;
 }
 
 export interface CompilerOptions {
@@ -263,6 +274,20 @@ export interface DashboardStats {
   validations_today: number;
   validations_this_week: number;
   recent_activity: ActivityItem[];
+  projects?: number;
+  licenses?: {
+    total: number;
+    active: number;
+  };
+  validations?: {
+    last_24h?: {
+      total: number;
+      successful: number;
+    };
+    history?: any[];
+  };
+  expiring_soon?: any[];
+  active_machines?: any[];
 }
 
 export interface ActivityItem {
@@ -308,16 +333,23 @@ export interface AdminStats {
   total_users: number;
   total_projects: number;
   total_licenses: number;
+  active_licenses: number;
   total_validations: number;
+  validations_today: number;
+  validations_week: number;
   revenue_mtd: number;
   active_subscriptions: number;
   users_by_tier: Record<string, number>;
+  total_compiles: number;
+  successful_compiles: number;
 }
 
 export interface AdminUser extends User {
   projects_count: number;
   licenses_count: number;
   last_login?: string;
+  project_count?: number;
+  license_count?: number;
 }
 
 // =============================================================================
