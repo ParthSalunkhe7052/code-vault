@@ -5,8 +5,8 @@
 /**
  * Format a date string to a readable format
  */
-export const formatDate = (dateString: string | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}): string => {
-    if (!dateString) return 'N/A';
+export const formatDate = (dateString: string | number | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}): string => {
+    if (dateString === null || dateString === undefined) return 'N/A';
 
     try {
         const date = new Date(dateString);
@@ -28,8 +28,8 @@ export const formatDate = (dateString: string | Date | null | undefined, options
 /**
  * Format a date string to include time
  */
-export const formatDateTime = (dateString: string | Date | null | undefined): string => {
-    if (!dateString) return 'N/A';
+export const formatDateTime = (dateString: string | number | Date | null | undefined): string => {
+    if (dateString === null || dateString === undefined) return 'N/A';
 
     try {
         const date = new Date(dateString);
@@ -50,8 +50,8 @@ export const formatDateTime = (dateString: string | Date | null | undefined): st
 /**
  * Format a date as relative time (e.g., "In 5 days", "2 days ago")
  */
-export const formatRelativeTime = (dateString: string | Date | null | undefined): string => {
-    if (!dateString) return 'N/A';
+export const formatRelativeTime = (dateString: string | number | Date | null | undefined): string => {
+    if (dateString === null || dateString === undefined) return 'N/A';
 
     try {
         const date = new Date(dateString);
@@ -79,8 +79,8 @@ export const formatRelativeTime = (dateString: string | Date | null | undefined)
 /**
  * Get the number of days until a date expires
  */
-export const getDaysUntilExpiry = (dateString: string | Date | null | undefined): number | null => {
-    if (!dateString) return null;
+export const getDaysUntilExpiry = (dateString: string | number | Date | null | undefined): number | null => {
+    if (dateString === null || dateString === undefined) return null;
 
     try {
         const date = new Date(dateString);
