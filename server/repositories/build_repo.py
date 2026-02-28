@@ -32,8 +32,12 @@ class BuildRepository:
         """Create a new cloud build record."""
         await conn.execute(
             """
-            INSERT INTO cloud_builds (id, user_id, project_id, license_id, status, target_platforms, build_type)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO cloud_builds (
+                id, user_id, project_id, license_id, status, 
+                target_platforms, build_type, language, 
+                entry_file, output_name, config_json
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             """,
             data["id"],
             data["user_id"],
@@ -42,6 +46,10 @@ class BuildRepository:
             data["status"],
             json.dumps(data["target_platforms"]),
             data.get("build_type", "standard"),
+            data["language"],
+            data["entry_file"],
+            data["output_name"],
+            json.dumps(data.get("config_json", {})),
         )
 
     @staticmethod

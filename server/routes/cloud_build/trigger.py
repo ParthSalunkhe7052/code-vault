@@ -85,13 +85,25 @@ async def start_cloud_build(
         deducted_credits = credit_cost
 
         # 3. Create build record
+        project_settings = project.get("settings", {}) or {}
+        compiler_options = project.get("compiler_options", {}) or {}
+        
         build_data = {
-            'id': build_id,
-            'user_id': user["id"],
-            'project_id': data.project_id,
-            'license_id': data.license_id,
-            'status': 'pending',
-            'target_platforms': data.target_platforms,
+            "id": build_id,
+            "user_id": user["id"],
+            "project_id": data.project_id,
+            "license_id": data.license_id,
+            "status": "pending",
+            "target_platforms": data.target_platforms,
+            "language": project.get("language") or project_settings.get("language", "python"),
+            "entry_file": project_settings.get("entry_file", "main.py"),
+            "output_name": project_settings.get("output_name", "app"),
+            "config_json": {
+                "compatibility_mode": data.compatibility_mode,
+                "license_mode": data.license_mode,
+                "demo_duration": data.demo_duration,
+                "compiler_options": compiler_options,
+            },
         }
         await BuildRepository.create_build(conn, build_data)
 
