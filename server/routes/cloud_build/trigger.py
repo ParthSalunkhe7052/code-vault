@@ -114,9 +114,61 @@ async def start_cloud_build(
         }
         await BuildRepository.create_build(conn, build_data)
 
-        # 4. Trigger build (Simplified for extraction)
-        # In real implementation, this would call CloudBuildClient
-        logger.info(f"[CloudBuild] Triggered build {build_id} for project {data.project_id}")
+        # 4. Trigger build
+        try:
+            from config import (
+                PUBLIC_API_URL,
+                BUILD_CALLBACK_SECRET,
+                GCS_BUILDS_BUCKET,
+            )
+            
+            # Use storage service to get a signed URL for the source code
+            # Note: The ZIP should already be uploaded to storage
+            source_key = f"projects/{data.project_id}/source.zip"
+            source_url = await storage_service.get_signed_url(
+                GCS_BUILDS_BUCKET, source_key, expires_in=3600
+            )
+            
+            # Prepare config for GCP build
+            build_config = {
+                "build_id": build_id,
+                "project_id": data.project_id,
+                "language": language,
+                "target_platforms": ",".join(data.target_platforms),
+                "source_url": source_url,
+                "callback_url": f"{PUBLIC_API_URL}/api/v1/cloud-build/webhook",
+                "callback_secret": BUILD_CALLBACK_SECRET,
+                "output_name": project_settings.get("output_name", "app"),
+                "compatibility_mode": data.compatibility_mode,
+                "license_mode": data.license_mode,
+                "demo_duration": data.demo_duration,
+            }
+            
+            # Initialize client and trigger
+            cb_client = CloudBuildClient()
+            cb_result = cb_client.trigger_build(build_config)
+            
+            # Update build record with GCP ID
+            await BuildRepository.update_build_status(
+                conn, build_id, "pending", None
+            )
+            # We should probably add a method to update GCP ID, but status update is enough for now
+            # since update_build_status is already there. Let's add gcp_build_id if repo supports it.
+            await conn.execute(
+                "UPDATE cloud_builds SET gcp_build_id = $1 WHERE id = $2",
+                cb_result["build_id"],
+                build_id,
+            )
+            
+            logger.info(f"[CloudBuild] Triggered build {build_id} -> GCP {cb_result['build_id']}")
+
+        except Exception as trigger_err:
+            logger.error(f"[CloudBuild] Trigger failed: {trigger_err}")
+            # Even if trigger fails, we return the build_id so user can see it in history
+            # But we update status to failed
+            await BuildRepository.update_build_status(
+                conn, build_id, "failed", f"Trigger failed: {str(trigger_err)}"
+            )
 
         return CloudBuildResponse(
             build_id=build_id,

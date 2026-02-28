@@ -8,7 +8,7 @@ from utils import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/status/{build_id}")
+@router.get("/{build_id}/status")
 async def get_build_status(
     build_id: str,
     user: dict = Depends(get_current_user),
