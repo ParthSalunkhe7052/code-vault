@@ -201,28 +201,18 @@ export const projects = {
         }).then(res => res.data);
     },
     uploadZip: async (id: string, file: File, onProgress?: (progress: number) => void): Promise<{ message: string; file_count?: number; structure?: any }> => {
-        // Step 1: Get presigned URL for direct R2 upload
-        const { upload_url, token } = await api.post(`/projects/${id}/upload-zip-url`, {
-            filename: file.name,
-            file_size: file.size,
-        }).then(res => res.data);
-
-        // Step 2: Upload directly to R2 using the presigned URL
-        await axios.put(upload_url, file, {
-            headers: {
-                'Content-Type': 'application/zip',
-            },
+        const formData = new FormData();
+        formData.append('file', file as Blob);
+        
+        return api.post(`/projects/${id}/upload-zip`, formData, {
             onUploadProgress: (progressEvent) => {
                 if (onProgress && progressEvent.total) {
                     const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
                     onProgress(progress);
                 }
             },
-            timeout: 600000, // 10 minutes for large file upload to R2
-        });
-
-        // Step 3: Process the uploaded file on the server
-        return api.post(`/projects/${id}/process-upload?token=${token}`).then(res => res.data);
+            timeout: 600000, // 10 minutes for large file upload
+        }).then(res => res.data);
     },
     listFiles: (id: string): Promise<any[]> => api.get(`/projects/${id}/files`).then(res => res.data),
     deleteFile: (projectId: string, fileId: string): Promise<{ success: boolean }> => api.delete(`/projects/${projectId}/files/${fileId}`).then(res => res.data),
