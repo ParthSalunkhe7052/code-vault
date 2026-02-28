@@ -36,8 +36,11 @@ const Step2Review: React.FC<Step2ReviewProps> = memo(({ fileTree, files = [], en
         const rootFiles: string[] = [];
 
         fileTree.files.forEach((file: string) => {
-            if (file.includes('/')) {
-                const parts = file.split('/');
+            // Normalize path to use forward slashes
+            const normalizedFile = file.replace(/\\/g, '/');
+            
+            if (normalizedFile.includes('/')) {
+                const parts = normalizedFile.split('/');
                 const fileName = parts.pop()!;
                 const folderPath = parts.join('/');
 
@@ -46,7 +49,7 @@ const Step2Review: React.FC<Step2ReviewProps> = memo(({ fileTree, files = [], en
                 }
                 folders[folderPath].push(fileName);
             } else {
-                rootFiles.push(file);
+                rootFiles.push(normalizedFile);
             }
         });
 

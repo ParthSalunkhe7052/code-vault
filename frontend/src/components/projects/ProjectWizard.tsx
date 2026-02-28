@@ -465,8 +465,19 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({
         }
     }, [currentJobId, projectBuild]);
 
-    const handleSetEntryFile = useCallback((value: string) => {
-        setConfigData({ ...configData, entry_file: value });
+    const handleSetEntryFile = useCallback((value: string, confidence: string = 'high') => {
+        setConfigData({ 
+            ...configData, 
+            entry_file: value,
+            settings: {
+                ...configData.settings,
+                file_tree: configData.settings?.file_tree ? {
+                    ...configData.settings.file_tree,
+                    entry_point: value,
+                    entry_point_confidence: confidence
+                } : null
+            }
+        });
     }, [configData, setConfigData]);
 
     const renderStep = () => {
@@ -492,6 +503,7 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({
                         files={configData.files || []}
                         entryPoint={configData.entry_file || configData.settings?.file_tree?.entry_point}
                         entryPointConfidence={configData.settings?.file_tree?.entry_point_confidence}
+                        onEntryPointChange={handleSetEntryFile}
                     />
                 );
             case 3:
