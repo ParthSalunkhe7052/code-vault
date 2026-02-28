@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from database import get_db, release_db
-from email_service import notify_subscription_expired
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import secrets
 import shutil
@@ -11,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
 
 from database import get_db, release_db
-from repositories.project_repo import ProjectRepository
 from utils import (
     get_current_user,
     utc_now,
@@ -28,7 +26,7 @@ from storage_service import (
     validate_file_size,
 )
 from models import ProjectCreateRequest, ProjectConfigRequest, ProjectBrandingRequest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field as PydanticField
 from routes.project_helpers import scan_project_structure, scan_nodejs_project_structure
 from routes.cloud_build_utils import invalidate_cached_source
 from middleware.rate_limiter import RateLimitDependency
@@ -45,7 +43,14 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 async def list_projects(user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
-        rows = await ProjectRepository.list_user_projects(conn, user["id"])
+        rows = await conn.fetch(
+            """
+            SELECT p.id, p.name, p.description, p.created_at, p.language,
+                   (SELECT COUNT(*) FROM licenses l WHERE l.project_id = p.id) as license_count
+            FROM projects p WHERE p.user_id = $1 ORDER BY p.created_at DESC
+        """,
+            user["id"],
+        )
         return [
             {
                 "id": r["id"],
@@ -81,6 +86,9 @@ async def create_project(
                     detail=f"Project limit reached ({max_projects}). Upgrade your plan.",
                 )
 
+        project_id = secrets.token_hex(16)
+        signing_secret = secrets.token_hex(32)
+
         # Generate Ed25519 key pair for asymmetric signature verification
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives.serialization import (
@@ -105,25 +113,28 @@ async def create_project(
             .decode("utf-8")
         )
 
-        project_data = {
-            'name': data.name,
-            'description': data.description,
-            'language': data.language,
-            'compiler_options': data.compiler_options,
-            'signing_secret': secrets.token_hex(32),
-            'signing_private_key': signing_private_key,
-            'signing_public_key': signing_public_key,
-        }
-
-        project_id = await ProjectRepository.create_project(conn, user["id"], project_data)
-        
+        await conn.execute(
+            """
+            INSERT INTO projects (id, user_id, name, description, language, compiler_options, signing_secret, signing_private_key, signing_public_key) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        """,
+            project_id,
+            user["id"],
+            data.name,
+            data.description,
+            data.language,
+            json.dumps(data.compiler_options),
+            signing_secret,
+            signing_private_key,
+            signing_public_key,
+        )
         return {
             "id": project_id,
             "name": data.name,
             "description": data.description,
             "language": data.language,
             "compiler_options": data.compiler_options,
-            "signing_secret": project_data['signing_secret'],
+            "signing_secret": signing_secret,
             "signing_public_key": signing_public_key,
             "created_at": utc_now().isoformat(),
             "license_count": 0,
@@ -137,74 +148,99 @@ async def create_project(
 async def delete_project(project_id: str, user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user["id"])
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
         await storage_service.delete_project_files(project_id)
-        await ProjectRepository.delete_project(conn, project_id)
+        await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
         return {"status": "deleted"}
     finally:
         await release_db(conn)
 
-@router.get(\"/{project_id}/config\")
+
+@router.get("/{project_id}/config")
 async def get_project_config(project_id: str, user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id, name, settings, compiler_options, language, signing_secret, signing_public_key FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        settings = project[\"settings\"] or {}
+        settings = project["settings"] or {}
         if isinstance(settings, str):
             settings = json.loads(settings) if settings else {}
 
-        compiler_opts = project.get(\"compiler_options\") or {}
+        compiler_opts = project.get("compiler_options") or {}
         if isinstance(compiler_opts, str):
             compiler_opts = json.loads(compiler_opts)
 
-        language = project.get(\"language\", \"python\")
+        language = project.get("language", "python")
+        signing_secret = project.get("signing_secret")
 
-        files = await ProjectRepository.get_project_files(conn, project_id)
+        files = await conn.fetch(
+            """
+            SELECT id, filename, original_filename, file_size, file_hash, created_at
+            FROM project_files WHERE project_id = $1 ORDER BY created_at DESC
+        """,
+            project_id,
+        )
 
         import os
-        server_url = os.getenv(\"PUBLIC_API_URL\", \"http://127.0.0.1:8000\")
-        api_url = f\"{server_url}/api/v1/license/validate\"
 
-        selected_license_id = settings.get(\"selected_license_id\")
-        tier_info = await get_user_tier(user[\"id\"], conn)
+        # Get server URL for license validation API
+        server_url = os.getenv("PUBLIC_API_URL", "http://127.0.0.1:8000")
+        api_url = f"{server_url}/api/v1/license/validate"
+
+        # Get selected license if stored in settings
+        selected_license_id = settings.get("selected_license_id")
+
+        # Get user tier info for white-label branding
+        tier_info = await get_user_tier(user["id"], conn)
 
         return {
-            \"project_name\": project[\"name\"],
-            \"entry_file\": settings.get(\"entry_file\"),
-            \"output_name\": settings.get(\"output_name\"),
-            \"include_modules\": settings.get(\"include_modules\", []),
-            \"exclude_modules\": settings.get(\"exclude_modules\", []),
-            \"nuitka_options\": settings.get(\"nuitka_options\", {}),
-            \"pkg_options\": settings.get(\"pkg_options\", {}),
-            \"compiler_options\": compiler_opts,
-            \"language\": language,
-            \"signing_public_key\": project.get(\"signing_public_key\"),
-            \"api_url\": api_url,
-            \"server_url\": server_url,
-            \"selected_license_id\": selected_license_id,
-            \"skip_obfuscation\": settings.get(\"skip_obfuscation\", True),
-            \"enable_lease\": settings.get(\"enable_lease\", False),
-            \"use_onefile\": settings.get(\"use_onefile\", False),
-            \"is_gui_app\": settings.get(\"is_gui_app\", False),
-            \"enable_binary_hash\": settings.get(\"enable_binary_hash\", False),
-            \"tier\": tier_info[\"tier\"],
-            \"is_pro\": tier_info[\"is_pro\"],
-            \"can_remove_branding\": tier_info[\"can_remove_branding\"],
-            \"can_custom_branding\": tier_info[\"can_custom_branding\"],
-            \"files\": [
+            "project_name": project["name"],
+            "entry_file": settings.get("entry_file"),
+            "output_name": settings.get("output_name"),
+            "include_modules": settings.get("include_modules", []),
+            "exclude_modules": settings.get("exclude_modules", []),
+            "nuitka_options": settings.get("nuitka_options", {}),
+            "pkg_options": settings.get("pkg_options", {}),
+            "compiler_options": compiler_opts,
+            "language": language,
+            "signing_public_key": project.get("signing_public_key"),
+            "api_url": api_url,
+            "server_url": server_url,
+            "selected_license_id": selected_license_id,
+            # Build options
+            "skip_obfuscation": settings.get("skip_obfuscation", True),
+            "enable_lease": settings.get("enable_lease", False),
+            # Build mode options
+            "use_onefile": settings.get("use_onefile", False),
+            "is_gui_app": settings.get("is_gui_app", False),
+            # Security options
+            "enable_binary_hash": settings.get("enable_binary_hash", False),
+            # White-label branding tier info
+            "tier": tier_info["tier"],
+            "is_pro": tier_info["is_pro"],
+            "can_remove_branding": tier_info["can_remove_branding"],
+            "can_custom_branding": tier_info["can_custom_branding"],
+            "files": [
                 {
-                    \"id\": f[\"id\"],
-                    \"filename\": f[\"filename\"],
-                    \"original_filename\": f[\"original_filename\"],
-                    \"file_size\": f[\"file_size\"],
-                    \"file_hash\": f[\"file_hash\"],
-                    \"created_at\": f[\"created_at\"].isoformat(),
+                    "id": f["id"],
+                    "filename": f["filename"],
+                    "original_filename": f["original_filename"],
+                    "file_size": f["file_size"],
+                    "file_hash": f["file_hash"],
+                    "created_at": f["created_at"].isoformat(),
                 }
                 for f in files
             ],
@@ -213,169 +249,167 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
         await release_db(conn)
 
 
-@router.get(\"/{project_id}/build-config\")
-async def get_build_config(
-    project_id: str,
-    user: dict = Depends(get_current_user),
-):
-    import os
-    conn = await get_db()
-    try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
-        if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
-
-        settings = project[\"settings\"] or {}
-        if isinstance(settings, str):
-            settings = json.loads(settings) if settings else {}
-
-        tier_info = await get_user_tier(user[\"id\"], conn)
-        license_server_url = os.getenv(\"PUBLIC_API_URL\", \"https://api.codevault.dev\")
-        heartbeat_interval = settings.get(\"heartbeat_interval\", 300)
-
-        show_branding = not tier_info.get(\"can_remove_branding\", False)
-        if settings.get(\"show_branding\") is not None:
-            show_branding = settings.get(\"show_branding\", True)
-
-        return {
-            \"project_id\": project_id,
-            \"project_name\": project[\"name\"],
-            \"language\": project.get(\"language\", \"python\"),
-            \"server_url\": license_server_url,
-            \"signing_public_key\": project.get(\"signing_public_key\") or \"\",
-            \"heartbeat_interval\": heartbeat_interval,
-            \"entry_file\": settings.get(\"entry_file\"),
-            \"output_name\": settings.get(\"output_name\"),
-            \"enable_lease\": settings.get(\"enable_lease\", False),
-            \"enable_binary_hash\": settings.get(\"enable_binary_hash\", False),
-            \"show_branding\": show_branding,
-            \"brand_name\": project.get(\"brand_name\") or \"CodeVault\",
-            \"brand_url\": project.get(\"brand_url\") or \"https://codevault.dev\",
-            \"brand_primary_color\": project.get(\"brand_primary_color\") or \"#6366f1\",
-            \"nuitka_options\": settings.get(\"nuitka_options\", {}),
-            \"compiler_options\": {},
-            \"tier\": tier_info[\"tier\"],
-        }
-    finally:
-        await release_db(conn)
-
-
-@router.put(\"/{project_id}/config\")
+@router.put("/{project_id}/config")
 async def update_project_config(
     project_id: str, data: ProjectConfigRequest, user: dict = Depends(get_current_user)
 ):
+    # Debug: Log what we're receiving
+    logger.debug(
+        "Saving config for project %s: skip_obfuscation=%s, enable_lease=%s, enable_binary_hash=%s, use_onefile=%s, is_gui_app=%s, compiler_options=%s",
+        project_id,
+        data.skip_obfuscation,
+        data.enable_lease,
+        data.enable_binary_hash,
+        data.use_onefile,
+        data.is_gui_app,
+        data.compiler_options,
+    )
+
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id, settings FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
         current_settings = (
-            json.loads(project[\"settings\"])
-            if isinstance(project[\"settings\"], str)
-            else (project[\"settings\"] or {})
+            json.loads(project["settings"])
+            if isinstance(project["settings"], str)
+            else (project["settings"] or {})
         )
 
         current_settings.update(
             {
-                \"entry_file\": data.entry_file,
-                \"output_name\": data.output_name,
-                \"include_modules\": data.include_modules,
-                \"exclude_modules\": data.exclude_modules,
-                \"nuitka_options\": data.nuitka_options,
-                \"skip_obfuscation\": data.skip_obfuscation,
-                \"enable_lease\": data.enable_lease,
-                \"use_onefile\": data.use_onefile,
-                \"is_gui_app\": data.is_gui_app,
-                \"enable_binary_hash\": data.enable_binary_hash,
+                "entry_file": data.entry_file,
+                "output_name": data.output_name,
+                "include_modules": data.include_modules,
+                "exclude_modules": data.exclude_modules,
+                "nuitka_options": data.nuitka_options,
+                # Build options
+                "skip_obfuscation": data.skip_obfuscation,
+                "enable_lease": data.enable_lease,
+                # Build mode options
+                "use_onefile": data.use_onefile,
+                "is_gui_app": data.is_gui_app,
+                # Security options
+                "enable_binary_hash": data.enable_binary_hash,
             }
         )
 
-        await ProjectRepository.update_project_config(
-            conn,
+        await conn.execute(
+            """
+            UPDATE projects 
+            SET settings = $1, compiler_options = $2, updated_at = NOW() 
+            WHERE id = $3
+        """,
+            json.dumps(current_settings),
+            json.dumps(data.compiler_options),
             project_id,
-            current_settings,
-            data.compiler_options
         )
 
-        return {\"status\": \"ok\", \"message\": \"Configuration saved successfully\"}
+        return {"status": "ok", "message": "Configuration saved successfully"}
     finally:
         await release_db(conn)
 
-@router.post(\"/{project_id}/upload\")
+
+@router.post("/{project_id}/upload")
 async def upload_files(
     project_id: str,
     files: List[UploadFile] = File(...),
     user: dict = Depends(get_current_user),
     _rate_limit: None = Depends(
-        RateLimitDependency(max_requests=10, window_seconds=60, prefix=\"project:upload\")
+        RateLimitDependency(max_requests=10, window_seconds=60, prefix="project:upload")
     ),
 ):
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
         uploaded = []
         for upload_file in files:
-            filename = upload_file.filename or \"unnamed_file\"
+            filename = upload_file.filename or "unnamed_file"
             content = await upload_file.read()
 
             is_valid, error_msg = validate_file_size(len(content), is_zip=False)
             if not is_valid:
                 raise HTTPException(
                     status_code=400,
-                    detail=f\"File '{filename}': {error_msg}\",
+                    detail=f"File '{filename}': {error_msg}",
                 )
 
             stored = await upload_project_file(project_id, filename, content)
 
-            file_data = {
-                'project_id': project_id,
-                'filename': Path(stored.key).name,
-                'original_filename': filename,
-                'file_path': stored.key,
-                'file_hash': stored.hash,
-                'file_size': stored.size,
-                'is_cloud': not stored.is_local,
-            }
-            file_id = await ProjectRepository.create_project_file(conn, file_data)
+            file_id = secrets.token_hex(16)
+            await conn.execute(
+                """
+                INSERT INTO project_files (id, project_id, filename, original_filename, file_path, file_hash, file_size, is_cloud)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+                file_id,
+                project_id,
+                Path(stored.key).name,
+                filename,
+                stored.key,
+                stored.hash,
+                stored.size,
+                not stored.is_local,
+            )
 
             uploaded.append(
                 {
-                    \"id\": file_id,
-                    \"filename\": Path(stored.key).name,
-                    \"original_filename\": filename,
-                    \"file_size\": stored.size,
-                    \"file_hash\": stored.hash,
-                    \"created_at\": utc_now().isoformat(),
+                    "id": file_id,
+                    "filename": Path(stored.key).name,
+                    "original_filename": filename,
+                    "file_size": stored.size,
+                    "file_hash": stored.hash,
+                    "created_at": utc_now().isoformat(),
                 }
             )
 
+        # Invalidate cached source since files have changed
         await invalidate_cached_source(project_id)
+
         return uploaded
     finally:
         await release_db(conn)
 
 
-@router.get(\"/{project_id}/files\")
+@router.get("/{project_id}/files")
 async def list_files(project_id: str, user: dict = Depends(get_current_user)):
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        files = await ProjectRepository.get_project_files(conn, project_id)
+        files = await conn.fetch(
+            """
+            SELECT id, filename, original_filename, file_size, file_hash, created_at
+            FROM project_files WHERE project_id = $1 ORDER BY created_at DESC
+        """,
+            project_id,
+        )
         return [
             {
-                \"id\": f[\"id\"],
-                \"filename\": f[\"filename\"],
-                \"original_filename\": f[\"original_filename\"],
-                \"file_size\": f[\"file_size\"],
-                \"file_hash\": f[\"file_hash\"],
-                \"created_at\": f[\"created_at\"].isoformat(),
+                "id": f["id"],
+                "filename": f["filename"],
+                "original_filename": f["original_filename"],
+                "file_size": f["file_size"],
+                "file_hash": f["file_hash"],
+                "created_at": f["created_at"].isoformat(),
             }
             for f in files
         ]
@@ -383,276 +417,322 @@ async def list_files(project_id: str, user: dict = Depends(get_current_user)):
         await release_db(conn)
 
 
-@router.delete(\"/{project_id}/files/{file_id}\")
+@router.delete("/{project_id}/files/{file_id}")
 async def delete_file(
     project_id: str, file_id: str, user: dict = Depends(get_current_user)
 ):
     conn = await get_db()
     try:
-        file_row = await ProjectRepository.get_project_file(conn, file_id, user[\"id\"])
+        file_row = await conn.fetchrow(
+            """
+            SELECT pf.id, pf.file_path, pf.is_cloud FROM project_files pf
+            JOIN projects p ON pf.project_id = p.id
+            WHERE pf.id = $1 AND p.user_id = $2
+        """,
+            file_id,
+            user["id"],
+        )
         if not file_row:
-            raise HTTPException(status_code=404, detail=\"File not found\")
+            raise HTTPException(status_code=404, detail="File not found")
 
         await storage_service.delete_file(
-            file_row[\"file_path\"], not file_row[\"is_cloud\"]
+            file_row["file_path"], not file_row["is_cloud"]
         )
-        await ProjectRepository.delete_project_file(conn, file_id)
-        return {\"status\": \"deleted\"}
+        await conn.execute("DELETE FROM project_files WHERE id = $1", file_id)
+        return {"status": "deleted"}
     finally:
         await release_db(conn)
 
-@router.post(\"/{project_id}/upload-zip\")
+
+@router.post("/{project_id}/upload-zip")
 async def upload_project_zip(
     project_id: str,
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
     _rate_limit: None = Depends(
         RateLimitDependency(
-            max_requests=5, window_seconds=60, prefix=\"project:upload-zip\"
+            max_requests=5, window_seconds=60, prefix="project:upload-zip"
         )
     ),
 ):
+    """Upload an entire project as a ZIP file."""
     conn = await get_db()
     try:
+        # Security: Validate project_id format before any path operations
         validate_project_id(project_id)
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+
+        project = await conn.fetchrow(
+            "SELECT id, name, language FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(status_code=404, detail=\"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        if not file.filename or not file.filename.endswith(\".zip\"):
-            raise HTTPException(status_code=400, detail=\"File must be a .zip file\")
+        if not file.filename or not file.filename.endswith(".zip"):
+            raise HTTPException(status_code=400, detail="File must be a .zip file")
 
+        # Use safe_join for all path operations
         project_dir = safe_join(UPLOAD_DIR, project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = safe_join(project_dir, \"project.zip\")
 
-        CHUNK_SIZE = 1024 * 1024
+        zip_path = safe_join(project_dir, "project.zip")
+
+        # Stream upload for large files - process in chunks to avoid memory issues
+        CHUNK_SIZE = 1024 * 1024  # 1MB chunks
         total_size = 0
-        collected_chunks: list[bytes] = []
 
-        while chunk := await file.read(CHUNK_SIZE):
-            total_size += len(chunk)
-            is_valid, error_msg = validate_file_size(total_size, is_zip=True)
-            if not is_valid:
-                zip_path.unlink(missing_ok=True)
-                raise HTTPException(status_code=400, detail=error_msg)
-            collected_chunks.append(chunk)
+        with open(zip_path, "wb") as f:
+            while chunk := await file.read(CHUNK_SIZE):
+                total_size += len(chunk)
+                # Validate size as we go
+                is_valid, error_msg = validate_file_size(total_size, is_zip=True)
+                if not is_valid:
+                    f.close()
+                    zip_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=400, detail=error_msg)
+                f.write(chunk)
 
-        def _write_zip() -> None:
-            with open(zip_path, \"wb\") as fh:
-                for c in collected_chunks:
-                    fh.write(c)
+        source_dir = safe_join(project_dir, "source")
+        if source_dir.exists():
+            shutil.rmtree(source_dir)
 
-        await asyncio.to_thread(_write_zip)
-        del collected_chunks
+        # Invalidate cached source in R2 to ensure fresh builds
+        await invalidate_cached_source(project_id)
 
-        source_dir = safe_join(project_dir, \"source\")
-        async def _remove_old_source() -> None:
-            if source_dir.exists():
-                await asyncio.to_thread(shutil.rmtree, source_dir)
-
-        await asyncio.gather(_remove_old_source(), invalidate_cached_source(project_id))
         source_dir.mkdir(parents=True, exist_ok=True)
-
-        def _validate_and_extract() -> None:
-            resolved_source = str(source_dir.resolve())
-            try:
-                with zipfile.ZipFile(zip_path, \"r\") as zip_ref:
-                    for member in zip_ref.infolist():
-                        member_path = (source_dir / member.filename).resolve()
-                        if not str(member_path).startswith(resolved_source):
-                            raise HTTPException(400, \"Invalid ZIP: path traversal\")
-                        zip_ref.extract(member, source_dir)
-            except zipfile.BadZipFile:
-                raise HTTPException(400, \"Invalid ZIP file\")
-
-        await asyncio.to_thread(_validate_and_extract)
-
-        language = project.get(\"language\", \"python\")
-        if language == \"nodejs\":
-            file_tree = await asyncio.to_thread(scan_nodejs_project_structure, source_dir)
-        else:
-            file_tree = await asyncio.to_thread(scan_project_structure, source_dir)
-
-        if file_tree[\"total_files\"] == 0:
-            raise HTTPException(400, f\"No files found in ZIP\")
-
-        settings = project[\"settings\"] or {}
-        if isinstance(settings, str):
-            settings = json.loads(settings) if settings else {}
-
-        settings[\"file_tree\"] = file_tree
-        settings[\"is_multi_folder\"] = True
-        settings[\"zip_uploaded_at\"] = utc_now().isoformat()
-
-        await ProjectRepository.update_project_settings(conn, project_id, settings)
-        await asyncio.to_thread(zip_path.unlink, True)
-
-        return {\"success\": True, \"file_count\": file_tree[\"total_files\"], \"message\": \"Uploaded successfully\"}
-    finally:
-        await release_db(conn)
-
-
-@router.post(\"/{project_id}/upload-zip-url\")
-async def get_upload_url(
-    project_id: str,
-    request: UploadUrlRequest,
-    user: dict = Depends(get_current_user),
-):
-    conn = await get_db()
-    try:
-        validate_project_id(project_id)
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
-        if not project:
-            raise HTTPException(404, \"Project not found\")
-
-        upload_token = secrets.token_urlsafe(32)
-        r2_key = f\"uploads/{project_id}/{upload_token}/{request.filename}\"
-        presigned_url = storage_service.generate_presigned_url(r2_key, expires_in=3600, for_upload=True)
-
-        if not presigned_url:
-            raise HTTPException(503, \"Storage service unavailable\")
-
-        await ProjectRepository.create_upload_token(conn, project_id, {
-            'token': upload_token, 'r2_key': r2_key, 'filename': request.filename, 'file_size': request.file_size
-        })
-
-        return {\"upload_url\": presigned_url, \"token\": upload_token, \"expires_in\": 3600}
-    finally:
-        await release_db(conn)
-
-@router.post(\"/{project_id}/process-upload\")
-async def process_r2_upload(
-    project_id: str,
-    token: str,
-    user: dict = Depends(get_current_user),
-):
-    conn = await get_db()
-    try:
-        validate_project_id(project_id)
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
-        if not project:
-            raise HTTPException(404, \"Project not found\")
-
-        token_record = await ProjectRepository.get_upload_token(conn, project_id, token)
-        if not token_record:
-            raise HTTPException(400, \"Invalid upload token\")
-
-        r2_key = token_record[\"r2_key\"]
-        temp_dir = safe_join(LOCAL_UPLOAD_DIR, project_id, \"temp_upload\")
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        local_zip_path = safe_join(temp_dir, token_record[\"filename\"])
 
         try:
-            file_content = await storage_service.download_file(r2_key)
-            if not file_content:
-                raise HTTPException(400, \"File not found\")
-            local_zip_path.write_bytes(file_content)
-        except Exception:
-            raise HTTPException(500, \"Download failed\")
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                # Validate all paths to prevent Zip Slip vulnerability
+                for member in zip_ref.namelist():
+                    member_path = (source_dir / member).resolve()
+                    if not str(member_path).startswith(str(source_dir.resolve())):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Invalid ZIP: contains path traversal attempt",
+                        )
+                zip_ref.extractall(source_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid ZIP file")
 
-        project_dir = safe_join(LOCAL_UPLOAD_DIR, project_id)
-        source_dir = safe_join(project_dir, \"source\")
-        async def _remove_old_source() -> None:
-            if source_dir.exists():
-                await asyncio.to_thread(shutil.rmtree, source_dir)
+        language = (
+            project.get("language", "python")
+            if hasattr(project, "get")
+            else project["language"]
+        )
 
-        await asyncio.gather(_remove_old_source(), storage_service.delete_file(r2_key))
-        source_dir.mkdir(parents=True, exist_ok=True)
-
-        def _validate_and_extract() -> None:
-            resolved_source = str(source_dir.resolve())
-            with zipfile.ZipFile(local_zip_path, \"r\") as zip_ref:
-                for member in zip_ref.infolist():
-                    member_path = (source_dir / member.filename).resolve()
-                    if not str(member_path).startswith(resolved_source):
-                        raise HTTPException(400, \"Invalid ZIP\")
-                    zip_ref.extract(member, source_dir)
-
-        await asyncio.to_thread(_validate_and_extract)
-
-        language = project.get(\"language\", \"python\")
-        if language == \"nodejs\":
-            file_tree = await asyncio.to_thread(scan_nodejs_project_structure, source_dir)
+        if language == "nodejs":
+            file_tree = scan_nodejs_project_structure(source_dir)
         else:
-            file_tree = await asyncio.to_thread(scan_project_structure, source_dir)
+            file_tree = scan_project_structure(source_dir)
 
-        settings = project[\"settings\"] or {}
-        if isinstance(settings, str):
-            settings = json.loads(settings) if settings else {}
+        if file_tree["total_files"] == 0:
+            lang_name = "JavaScript/TypeScript" if language == "nodejs" else "Python"
+            raise HTTPException(
+                status_code=400, detail=f"No {lang_name} files found in ZIP"
+            )
 
-        settings[\"file_tree\"] = file_tree
-        settings[\"is_multi_folder\"] = True
-        settings[\"zip_uploaded_at\"] = utc_now().isoformat()
+        settings = await conn.fetchval(
+            "SELECT settings FROM projects WHERE id = $1", project_id
+        )
+        settings = (
+            json.loads(settings) if isinstance(settings, str) and settings else {}
+        )
 
-        await ProjectRepository.update_project_settings(conn, project_id, settings)
-        await asyncio.to_thread(local_zip_path.unlink, True)
-        await asyncio.to_thread(shutil.rmtree, temp_dir)
+        settings["file_tree"] = file_tree
+        settings["is_multi_folder"] = True
+        settings["zip_uploaded_at"] = utc_now().isoformat()
 
-        return {\"success\": True, \"file_count\": file_tree[\"total_files\"]}
+        await conn.execute(
+            "UPDATE projects SET settings = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(settings),
+            project_id,
+        )
+
+        zip_path.unlink()
+
+        return {
+            "success": True,
+            "file_count": file_tree["total_files"],
+            "structure": file_tree,
+            "message": f"Successfully uploaded {file_tree['total_files']} files",
+        }
+    except HTTPException:
+        raise
+    except SecurityError:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+    except zipfile.BadZipFile as e:
+        logger.error(f"Invalid ZIP file for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+    except PermissionError as e:
+        logger.error(
+            f"Permission error processing ZIP for project {project_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail="Server permission error - please contact support"
+        )
+    except OSError as e:
+        logger.error(
+            f"OS error processing ZIP for project {project_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail=f"File system error: {str(e)}")
+    except Exception as e:
+        logger.error(
+            f"Unexpected error processing ZIP for project {project_id}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process ZIP file: {type(e).__name__}"
+        )
     finally:
         await release_db(conn)
 
 
-@router.post(\"/{project_id}/binary-hash\")
+# =============================================================================
+# Binary Hash Registration (SEC2: Binary Integrity Checking)
+# =============================================================================
+
+
+class BinaryHashRequest(BaseModel):
+    """Validated request for registering a binary hash."""
+
+    binary_hash: str = PydanticField(
+        ..., min_length=64, max_length=64, pattern="^[a-f0-9]{64}$"
+    )
+    binary_size: Optional[int] = PydanticField(None, ge=0)
+    platform: Optional[str] = PydanticField(None, pattern="^(windows|linux|macos)$")
+    build_id: Optional[str] = PydanticField(None, max_length=100)
+
+
+@router.post("/{project_id}/binary-hash")
 async def register_binary_hash(
     project_id: str,
     data: BinaryHashRequest,
     user: dict = Depends(get_current_user),
 ):
+    """Register a compiled binary's SHA-256 hash for integrity verification.
+
+    Called by the CLI after successful compilation. During license validation,
+    the client can optionally send its own hash — if it doesn't match any
+    registered hash for the project, the response is 'tampered'.
+    """
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(404, \"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        await ProjectRepository.register_binary_hash(conn, project_id, data.dict())
-        return {\"status\": \"registered\", \"binary_hash\": data.binary_hash}
+        hash_id = secrets.token_hex(16)
+        await conn.execute(
+            """
+            INSERT INTO binary_hashes (id, project_id, binary_hash, binary_size, platform, build_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT DO NOTHING
+            """,
+            hash_id,
+            project_id,
+            data.binary_hash,
+            data.binary_size,
+            data.platform,
+            data.build_id,
+        )
+
+        return {"status": "registered", "binary_hash": data.binary_hash}
     finally:
         await release_db(conn)
 
 
-@router.get(\"/{project_id}/branding\")
+# =============================================================================
+# White Label Branding (Business/Enterprise Feature)
+# =============================================================================
+
+
+@router.get("/{project_id}/branding")
 async def get_project_branding(
     project_id: str,
     user: dict = Depends(get_current_user),
 ):
+    """Get project branding settings."""
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_branding(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            """SELECT id, brand_name, brand_url, brand_primary_color, brand_secondary_color, brand_logo_url
+               FROM projects WHERE id = $1 AND user_id = $2""",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(404, \"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        tier_info = await get_user_tier_limits(user[\"id\"], conn)
+        # Check if user has custom branding access
+        tier_info = await get_user_tier_limits(user["id"], conn)
+        can_custom_branding = tier_info.get("white_label_branding", False)
+
         return {
-            \"brand_name\": project[\"brand_name\"],
-            \"brand_url\": project[\"brand_url\"],
-            \"brand_primary_color\": project[\"brand_primary_color\"] or \"#6366f1\",
-            \"brand_secondary_color\": project[\"brand_secondary_color\"] or \"#4f46e5\",
-            \"brand_logo_url\": project[\"brand_logo_url\"],
-            \"can_custom_branding\": tier_info.get(\"white_label_branding\", False),
+            "brand_name": project["brand_name"],
+            "brand_url": project["brand_url"],
+            "brand_primary_color": project["brand_primary_color"] or "#6366f1",
+            "brand_secondary_color": project["brand_secondary_color"] or "#4f46e5",
+            "brand_logo_url": project["brand_logo_url"],
+            "can_custom_branding": can_custom_branding,
         }
     finally:
         await release_db(conn)
 
 
-@router.put(\"/{project_id}/branding\")
+@router.put("/{project_id}/branding")
 async def update_project_branding(
     project_id: str,
     data: ProjectBrandingRequest,
     user: dict = Depends(get_current_user),
 ):
+    """Update project branding settings (Business/Enterprise only)."""
     conn = await get_db()
     try:
-        project = await ProjectRepository.get_project_by_id(conn, project_id, user[\"id\"])
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE id = $1 AND user_id = $2",
+            project_id,
+            user["id"],
+        )
         if not project:
-            raise HTTPException(404, \"Project not found\")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        tier_info = await get_user_tier_limits(user[\"id\"], conn)
-        if not tier_info.get(\"white_label_branding\", False):
-            raise HTTPException(403, \"Upgrade for white label branding\")
+        # Check if user has custom branding access
+        tier_info = await get_user_tier_limits(user["id"], conn)
+        if not tier_info.get("white_label_branding", False):
+            raise HTTPException(
+                status_code=403,
+                detail="White label branding is a Business/Enterprise feature. Upgrade to customize branding.",
+            )
 
-        await ProjectRepository.update_branding(conn, project_id, data.dict())
-        return {\"status\": \"updated\"}
+        await conn.execute(
+            """UPDATE projects SET 
+               brand_name = $1,
+               brand_url = $2,
+               brand_primary_color = $3,
+               brand_secondary_color = $4,
+               brand_logo_url = $5
+               WHERE id = $6""",
+            data.brand_name,
+            data.brand_url,
+            data.brand_primary_color,
+            data.brand_secondary_color,
+            data.brand_logo_url,
+            project_id,
+        )
+
+        return {
+            "status": "updated",
+            "brand_name": data.brand_name,
+            "brand_url": data.brand_url,
+            "brand_primary_color": data.brand_primary_color,
+            "brand_secondary_color": data.brand_secondary_color,
+        }
     finally:
         await release_db(conn)

@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Optional, List
 from datetime import datetime, timezone
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 
@@ -1296,6 +1296,10 @@ async def get_kill_switch(
     finally:
         await release_db(conn)
 
+
+class KillSwitchPolicy(BaseModel):
+    enabled: bool = Field(..., description="Whether the kill-switch is enabled")
+    reason: Optional[str] = Field(None, description="Optional reason for the kill-switch")
 
 @router.post("/projects/{project_id}/kill-switch")
 async def set_kill_switch(

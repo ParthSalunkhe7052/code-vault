@@ -420,7 +420,7 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   cd "$$parent_dir"
   
   # Rename internal binary if it matches the dist prefix
-  base_name="$${dist_name%.dist}"
+  base_name="$$dist_name"
   if [ -f "$$dist_name/$$base_name" ]; then
     mv "$$dist_name/$$base_name" "$$dist_name/{output_name}"
   fi
@@ -558,7 +558,7 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   cd "$$parent_dir"
   
   # Rename internal executable if it matches the dist prefix
-  base_name="$${dist_name%.dist}"
+  base_name="$$dist_name"
   if [ -f "$$dist_name/$$base_name.exe" ]; then
     mv "$$dist_name/$$base_name.exe" "$$dist_name/{output_name}.exe"
   fi
