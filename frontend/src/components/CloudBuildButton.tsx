@@ -96,6 +96,9 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           if (response.data?.stage) {
             setStage(response.data.stage);
           }
+          if (isAdmin && response.data?.admin_error_details) {
+            setAdminErrorDetails(response.data.admin_error_details);
+          }
           
           const updatedArtifacts: Record<string, any> = {};
           let totalProgress = 0;
@@ -154,7 +157,8 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
             download_key,
             error: buildError,
             artifacts,
-            stage: buildStage
+            stage: buildStage,
+            admin_error_details: backendAdminDetails
           } = response.data;
           
           setProgress(buildProgress || 0);
@@ -173,6 +177,10 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
             if (!finalError && artifact.error) {
               finalError = artifact.error;
             }
+          }
+          
+          if (backendAdminDetails && isAdmin) {
+            setAdminErrorDetails(backendAdminDetails);
           }
           
           if (buildStatus === 'completed') {

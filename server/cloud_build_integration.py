@@ -392,7 +392,7 @@ fi
         scripts_dir = Path(__file__).parent / "scripts"
 
         # Linux build step - FIXED: Package entire .dist folder for standalone builds
-        linux_build_script = (scripts_dir / "build_python_linux.sh").read_text().replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
+        linux_build_script = (scripts_dir / "build_python_linux.sh").read_text().replace("$", "$$").replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
 
         # Linux and Windows build steps run in PARALLEL (both wait_for download-config)
         steps.append(
@@ -406,7 +406,7 @@ fi
         )
 
         # Linux upload step (with 3-retry logic)
-        linux_upload_script = (scripts_dir / "upload_linux.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
+        linux_upload_script = (scripts_dir / "upload_linux.sh").read_text().replace("$", "$$").replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -419,7 +419,7 @@ fi
         )
 
         # Windows build step - FIXED: Package entire .dist folder for standalone builds
-        windows_build_script = (scripts_dir / "build_python_windows.sh").read_text().replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
+        windows_build_script = (scripts_dir / "build_python_windows.sh").read_text().replace("$", "$$").replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
 
         # Windows build step also waits for download-config (runs PARALLEL to Linux)
         steps.append(
@@ -433,7 +433,7 @@ fi
         )
 
         # Windows upload step (with 3-retry logic)
-        windows_upload_script = (scripts_dir / "upload_windows.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
+        windows_upload_script = (scripts_dir / "upload_windows.sh").read_text().replace("$", "$$").replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -458,7 +458,7 @@ fi
         # Node.js build step (handles both Windows and Linux)
         # IMPORTANT: No fallback! If cloud_runner_nodejs.py fails, the build fails.
         # This ensures all builds have proper license protection and error handling.
-        build_script = (scripts_dir / "build_nodejs.sh").read_text().replace("{output_name}", output_name)
+        build_script = (scripts_dir / "build_nodejs.sh").read_text().replace("$", "$$").replace("{output_name}", output_name)
 
         steps.append(
             {
@@ -471,7 +471,7 @@ fi
         )
 
         # Windows upload
-        windows_upload_script = (scripts_dir / "upload_windows.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
+        windows_upload_script = (scripts_dir / "upload_windows.sh").read_text().replace("$", "$$").replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -484,7 +484,7 @@ fi
         )
 
         # Linux upload
-        linux_upload_script = (scripts_dir / "upload_linux.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
+        linux_upload_script = (scripts_dir / "upload_linux.sh").read_text().replace("$", "$$").replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {

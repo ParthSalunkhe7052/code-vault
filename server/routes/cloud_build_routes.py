@@ -1910,6 +1910,14 @@ async def get_build_status(
             "synced": sync,  # Indicate if sync was attempted
         }
 
+        # Add admin debug info if user is admin
+        if user.get("role") == "admin" and dict(build).get("admin_error_details"):
+            response["admin_error_details"] = {
+                "error": build.get("error_message") or build_error,
+                "traceback": build.get("admin_error_details"),
+                "build_id": build["id"]
+            }
+
         # Phase 5: Add provenance tokens for completed cloud builds
         if build["status"] == "completed" and build.get("project_id"):
             # Get project signing keys

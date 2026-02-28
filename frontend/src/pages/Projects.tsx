@@ -150,6 +150,19 @@ const Projects: React.FC = () => {
 
         try {
             const config = await projectApi.getConfig(project.id);
+            
+            // Backend might return settings as a JSON string
+            let parsedSettings = config.settings;
+            if (typeof parsedSettings === 'string') {
+                try {
+                    parsedSettings = JSON.parse(parsedSettings);
+                } catch (e) {
+                    console.warn('Failed to parse settings JSON:', e);
+                    parsedSettings = {};
+                }
+            }
+            parsedSettings = parsedSettings || {};
+
             setConfigData({
                 entry_file: config.entry_file || '',
                 output_name: config.output_name || '',
@@ -158,7 +171,8 @@ const Projects: React.FC = () => {
                 nuitka_options: config.nuitka_options || {},
                 files: config.files || [],
                 settings: {
-                    file_tree: config.settings?.file_tree || null
+                    ...parsedSettings,
+                    file_tree: parsedSettings.file_tree || null
                 },
                 skip_obfuscation: config.skip_obfuscation ?? true,
                 enable_lease: config.enable_lease ?? false,
