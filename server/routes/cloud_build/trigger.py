@@ -76,8 +76,13 @@ async def start_cloud_build(
             raise HTTPException(status_code=404, detail="Project not found")
 
         # 2. Check credits - get language from project settings
-        project_settings = project.get("settings", {}) if isinstance(project, dict) else {}
-        language = project_settings.get("language", "python") if isinstance(project_settings, dict) else "python"
+        project_dict = dict(project)
+        project_settings = project_dict.get("settings")
+        if isinstance(project_settings, str):
+            project_settings = json.loads(project_settings)
+        project_settings = project_settings or {}
+        
+        language = project_dict.get("language") or project_settings.get("language", "python")
         credit_cost = get_build_credit_cost(data.target_platforms, language)
         success = await BuildRepository.deduct_credits(conn, user["id"], credit_cost)
         if not success:
@@ -85,8 +90,10 @@ async def start_cloud_build(
         deducted_credits = credit_cost
 
         # 3. Create build record
-        project_settings = project.get("settings", {}) or {}
-        compiler_options = project.get("compiler_options", {}) or {}
+        compiler_options = project_dict.get("compiler_options")
+        if isinstance(compiler_options, str):
+            compiler_options = json.loads(compiler_options)
+        compiler_options = compiler_options or {}
         
         build_data = {
             "id": build_id,
@@ -95,7 +102,7 @@ async def start_cloud_build(
             "license_id": data.license_id,
             "status": "pending",
             "target_platforms": data.target_platforms,
-            "language": project.get("language") or project_settings.get("language", "python"),
+            "language": language,
             "entry_file": project_settings.get("entry_file", "main.py"),
             "output_name": project_settings.get("output_name", "app"),
             "config_json": {
