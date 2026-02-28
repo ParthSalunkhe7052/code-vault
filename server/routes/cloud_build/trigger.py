@@ -75,8 +75,10 @@ async def start_cloud_build(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # 2. Check credits
-        credit_cost = get_build_credit_cost(len(data.target_platforms))
+        # 2. Check credits - get language from project settings
+        project_settings = project.get("settings", {}) if isinstance(project, dict) else {}
+        language = project_settings.get("language", "python") if isinstance(project_settings, dict) else "python"
+        credit_cost = get_build_credit_cost(data.target_platforms, language)
         success = await BuildRepository.deduct_credits(conn, user["id"], credit_cost)
         if not success:
             raise HTTPException(status_code=402, detail="Insufficient build credits")
