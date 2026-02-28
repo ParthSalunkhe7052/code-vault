@@ -125,8 +125,8 @@ async def start_cloud_build(
             # Use storage service to get a signed URL for the source code
             # Note: The ZIP should already be uploaded to storage
             source_key = f"projects/{data.project_id}/source.zip"
-            source_url = await storage_service.get_signed_url(
-                GCS_BUILDS_BUCKET, source_key, expires_in=3600
+            source_url = storage_service.generate_presigned_url(
+                source_key, expires_in=3600
             )
             
             # Prepare config for GCP build
