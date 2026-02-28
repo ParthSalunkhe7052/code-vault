@@ -16,6 +16,21 @@ _ENTRY_SCAN_BYTES = 8 * 1024  # 8 KB
 # File extensions recognised as JavaScript/TypeScript sources (lowercased).
 _JS_EXTENSIONS = frozenset([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"])
 
+# File extensions recognised as Python sources (lowercased).
+_PYTHON_EXTENSIONS = frozenset([".py", ".pyw"])
+
+# Common configuration and data file extensions to include in the file tree.
+_CONFIG_EXTENSIONS = frozenset([
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env", 
+    ".txt", ".md", ".csv", ".xml", ".sql"
+])
+
+# Directories to skip during scanning to improve performance and reduce noise.
+_SKIP_DIRS = frozenset([
+    "__pycache__", "node_modules", "venv", ".venv", ".git", ".idea", 
+    ".vscode", "dist", "build", "target", "env"
+])
+
 
 def _read_partial(path: Path, max_bytes: int = _ENTRY_SCAN_BYTES) -> str:
     """Read at most *max_bytes* from *path*, decoded as UTF-8 (lossy).
@@ -133,31 +148,29 @@ def detect_entry_point_smart(base_path: Path, files: list) -> dict:
 
 
 def scan_project_structure(base_path: Path) -> dict:
-    """Scan uploaded project and return file tree with dependencies.
-
-    Optimisations vs. the original implementation:
-
-    * A single ``rglob("*.py")`` pass builds both the file list *and* the
-      folders set; the nested ``for parent in relative_path.parents`` loop is
-      replaced by collecting only the *immediate* parent directory — deeper
-      ancestors are implicitly discovered as their own files are encountered,
-      keeping the set correct while reducing inner-loop iterations.
-    * ``requirements.txt`` is read in the same function pass without a
-      second filesystem walk.
-    """
+    """Scan uploaded project and return file tree with dependencies."""
     files = []
     folders = set()
     dependencies = {"python": [], "has_requirements": False}
 
-    for py_file in base_path.rglob("*.py"):
-        relative_path = py_file.relative_to(base_path)
+    allowed_extensions = _PYTHON_EXTENSIONS | _CONFIG_EXTENSIONS
+
+    for item in base_path.rglob("*"):
+        # Skip noise directories early.
+        if any(skip in item.parts for skip in _SKIP_DIRS):
+            continue
+            
+        if not item.is_file():
+            continue
+            
+        if item.suffix.lower() not in allowed_extensions:
+            continue
+
+        relative_path = item.relative_to(base_path)
         file_str = str(relative_path).replace("\\", "/")
         files.append(file_str)
 
-        # Collect all ancestor directories (not just immediate parent) so that
-        # the folder tree displayed in the UI is complete.  We walk parents
-        # lazily and stop at the project root (".") — same semantics as before
-        # but expressed more clearly.
+        # Collect all ancestor directories.
         for parent in relative_path.parents:
             parent_str = str(parent).replace("\\", "/")
             if parent_str == ".":
@@ -274,32 +287,22 @@ def detect_nodejs_entry_point(base_path: Path, files: list) -> dict:
 
 
 def scan_nodejs_project_structure(base_path: Path) -> dict:
-    """Scan uploaded Node.js project and return file tree with dependencies.
-
-    Optimisations vs. the original implementation:
-
-    * A single ``rglob("*")`` pass replaces the original six separate
-      ``rglob(ext)`` calls, reducing the number of full directory traversals
-      from 6 to 1.  Extension filtering is done in Python with a set lookup
-      (O(1)) instead of relying on separate glob patterns.
-    * ``node_modules`` pruning is applied during the single traversal.
-    * Only the *relevant* ancestor directories are collected (same logic as
-      ``scan_project_structure``).
-    * ``package.json`` is read at most once — the same data is reused for
-      both entry-point detection and dependency extraction instead of being
-      parsed twice.
-    """
+    """Scan uploaded Node.js project and return file tree with dependencies."""
     files = []
     folders = set()
     dependencies = {"nodejs": [], "has_package_json": False}
 
+    allowed_extensions = _JS_EXTENSIONS | _CONFIG_EXTENSIONS
+
     for item in base_path.rglob("*"):
-        # Skip node_modules anywhere in the tree.
-        if "node_modules" in item.parts:
+        # Skip noise directories early.
+        if any(skip in item.parts for skip in _SKIP_DIRS):
             continue
+            
         if not item.is_file():
             continue
-        if item.suffix.lower() not in _JS_EXTENSIONS:
+            
+        if item.suffix.lower() not in allowed_extensions:
             continue
 
         relative_path = item.relative_to(base_path)

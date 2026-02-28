@@ -32,6 +32,9 @@ const Projects: React.FC = () => {
         exclude_modules: [],
         nuitka_options: {},
         files: [],
+        settings: {
+            file_tree: null
+        },
         skip_obfuscation: true,
         enable_lease: false,
         compiler_options: {}
@@ -154,7 +157,9 @@ const Projects: React.FC = () => {
                 exclude_modules: config.exclude_modules || [],
                 nuitka_options: config.nuitka_options || {},
                 files: config.files || [],
-                file_tree: config.settings?.file_tree || null,
+                settings: {
+                    file_tree: config.settings?.file_tree || null
+                },
                 skip_obfuscation: config.skip_obfuscation ?? true,
                 enable_lease: config.enable_lease ?? false,
                 enable_binary_hash: config.enable_binary_hash ?? false,
@@ -294,7 +299,10 @@ const Projects: React.FC = () => {
 
             setConfigData((prev: any) => ({
                 ...prev,
-                file_tree: result.structure,
+                settings: {
+                    ...prev.settings,
+                    file_tree: result.structure
+                },
                 entry_file: result.structure.entry_point || '',
                 files: []
             }));
