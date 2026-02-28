@@ -13,7 +13,7 @@ OUTPUT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,99}$")
 DANGEROUS_PATTERNS = [
     "..",  # Parent directory traversal
     "//",  # Double slashes
-    "\\",  # Double backslashes
+    "\\\\",  # Double backslashes
     "\x00",  # Null byte injection
     "%2e",  # URL-encoded dot
     "%2f",  # URL-encoded forward slash
@@ -38,6 +38,9 @@ def validate_entry_file(entry_file: str, project_dir: Path) -> Path:
     """
     if not entry_file:
         raise PathTraversalError("Entry file cannot be empty")
+
+    # Normalize backslashes to forward slashes for cross-platform compatibility
+    entry_file = entry_file.replace("\\", "/")
 
     # Check for dangerous patterns in the raw input
     entry_lower = entry_file.lower()
@@ -82,7 +85,7 @@ def validate_output_name(output_name: str) -> str:
         raise PathTraversalError("Output name cannot be empty")
 
     # Strip common path separators first
-    output_name = output_name.replace("/", "").replace("", "")
+    output_name = output_name.replace("/", "").replace("\\", "")
 
     # Check for dangerous patterns
     output_lower = output_name.lower()
@@ -130,7 +133,7 @@ def validate_include_package(package_name: str) -> str:
         return ""
 
     # Convert path separators to dots for module names
-    module_name = package_name.replace("/", ".").replace("", ".")
+    module_name = package_name.replace("/", ".").replace("\\", ".")
 
     # Validate: only alphanumeric, dots, underscores
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*$", module_name):
@@ -165,6 +168,9 @@ def safe_resolve_path(base_dir: Path, relative_path: str) -> Path:
     # Handle empty or current directory references
     if not relative_path or relative_path in (".", "./"):
         return base_resolved
+
+    # Normalize backslashes to forward slashes for cross-platform compatibility
+    relative_path = relative_path.replace("\\", "/")
 
     # Check for dangerous patterns
     path_lower = relative_path.lower()
