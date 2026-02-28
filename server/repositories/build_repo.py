@@ -35,13 +35,13 @@ class BuildRepository:
             INSERT INTO cloud_builds (id, user_id, project_id, license_id, status, target_platforms, build_type)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
-            data['id'],
-            data['user_id'],
-            data['project_id'],
-            data.get('license_id'),
-            data['status'],
-            data['target_platforms'],
-            data.get('build_type', 'standard')
+            data["id"],
+            data["user_id"],
+            data["project_id"],
+            data.get("license_id"),
+            data["status"],
+            json.dumps(data["target_platforms"]),
+            data.get("build_type", "standard"),
         )
 
     @staticmethod
