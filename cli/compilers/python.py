@@ -8,10 +8,12 @@ from typing import Dict, Any, Optional, Tuple, Callable
 
 from .base import BaseCompiler
 from cli.terminal import Colors
-from cli.compiler_logic import (
+from shared.security.validation import (
     validate_entry_file,
     validate_output_name,
     validate_include_package,
+)
+from cli.compiler_logic import (
     parse_nuitka_percent,
     parse_nuitka_phase,
 )

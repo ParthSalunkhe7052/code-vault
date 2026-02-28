@@ -20,15 +20,17 @@ from datetime import timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from compiler_logic import (
-    inject_license_wrapper,
-    inject_js_wrapper,
+from shared.security.validation import (
     validate_entry_file,
     validate_output_name,
     PathTraversalError,
-    _wait_for_output_with_timeout,
-    _readline_from_process,
 )
+from shared.utils.subprocess_monitor import (
+    wait_for_output_with_timeout as _wait_for_output_with_timeout,
+    readline_from_process as _readline_from_process,
+)
+from shared.wrappers.python_wrapper import inject_license_wrapper
+from shared.wrappers.nodejs_wrapper import inject_js_wrapper
 from compiler_constants import COMPILE_TIMEOUT
 
 from codevault_cli.simple_build_display import (
@@ -568,44 +570,9 @@ class SimpleBuildRunner:
                 return False
 
         # Build Nuitka command
-        cpu_count = os.cpu_count() or 4
-        max_jobs = min(cpu_count, 8)
-        if config.get("jobs"):
-            max_jobs = min(config.get("jobs"), 16)
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "nuitka",
-            "--standalone",
-            "--lto=no",
-            "--remove-output",
-            "--assume-yes-for-downloads",
-            "--enable-plugin=tk-inter",
-            "--no-prefer-source-code",
-            "--nofollow-import-to=pytest",
-            "--nofollow-import-to=unittest",
-            "--nofollow-import-to=sphinx",
-            "--nofollow-import-to=setuptools",
-            f"--jobs={max_jobs}",
-        ]
-
-        if fast_build:
-            cmd.extend([f"--output-dir={project_dir / 'build'}"])
-        else:
-            cmd.extend(
-                [
-                    "--onefile",
-                    f"--output-filename={output_name}.exe",
-                ]
-            )
-
-        # Add include packages
-        nuitka_opts = config.get("nuitka_options", {})
-        for pkg in nuitka_opts.get("include_packages", []):
-            cmd.append(f"--include-package={pkg}")
-
-        cmd.append(str(entry_path))
+        from shared.compilation_args.nuitka_args import get_nuitka_args
+        
+        cmd = get_nuitka_args(config, project_dir, entry_path, output_name)
 
         self._log("INFO", f"Nuitka command: {' '.join(cmd[:5])}...")
 
@@ -633,10 +600,6 @@ class SimpleBuildRunner:
             return False, None
 
         npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
-        pkg_cwd = entry_path.parent
-        entry_path_rel = entry_path.relative_to(pkg_cwd)
-
-        npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
         npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
         pkg_cwd = entry_path.parent
         entry_path_rel = entry_path.relative_to(pkg_cwd)
@@ -660,20 +623,9 @@ class SimpleBuildRunner:
             if not install_success:
                 self._log("WARN", "npm install had issues, continuing...")
 
-        cmd = [
-            npx_cmd,
-            "-y",
-            "@yao-pkg/pkg",
-            str(entry_path_rel),
-            "--targets",
-            "node20-win-x64",
-            "--output",
-            str(pkg_cwd / output_name),
-            "--compress",
-            "GZip",
-            "--public-packages",
-            "*",  # Include all public npm packages
-        ]
+        from shared.compilation_args.pkg_args import get_pkg_args
+        
+        cmd = get_pkg_args(config, str(entry_path_rel), output_name, pkg_cwd)
 
         self._log("INFO", f"pkg command: {' '.join(cmd)}")
 

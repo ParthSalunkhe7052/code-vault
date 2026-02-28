@@ -848,11 +848,16 @@ async def start_cloud_build(
 
         output_name = get_setting("output_name", project_name_safe)
 
+        # Strict validation for output_name to prevent command injection
+        if output_name:
+            import re
+            output_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "", output_name)
+
         # CRITICAL: Triple-check output_name is never empty
         if not output_name or not output_name.strip():
             output_name = project_name_safe or "app"
             logger.warning(
-                f"[CloudBuild] output_name was empty, using fallback: {output_name}"
+                f"[CloudBuild] output_name was empty or invalid, using fallback: {output_name}"
             )
 
         license_key = "GENERIC_BUILD"

@@ -110,11 +110,41 @@ class NodeJSCompiler(BaseCompiler):
                 progress_callback(10, "Injecting bootstrap...")
             bootstrap_filename = f"_cv_bootstrap_{uuid.uuid4().hex[:8]}.js"
             bootstrap_path = build_dir / bootstrap_filename
+            
+            from cli.generators.nodejs_generator import get_nodejs_wrapper_inline
+            from cli.url_utils import normalize_server_url
+            
+            license_key = self.config.get("license_key", "DEMO")
+            server_url = normalize_server_url(self.config.get("server_url", "http://localhost:8000"))
+            lease_enabled = self.config.get("lease_enabled", False)
+            show_branding = self.config.get("show_branding", True)
+            public_key = self.config.get("signing_public_key") or ""
+            heartbeat_interval = self.config.get("heartbeat_interval", 300)
+            app_name = self.config.get("app_name") or self.config.get("project_name") or "Protected Application"
+            binary_hash = self.config.get("binary_hash", "skip")
 
-            bootstrap_content = f"""
-console.log('[CodeVault] Verifying license...');
-require('./{entry_file.replace("\\", "/")}');
-"""
+            prefix, suffix = get_nodejs_wrapper_inline(
+                license_key, server_url, lease_enabled, show_branding,
+                public_key=public_key, heartbeat_interval=heartbeat_interval,
+                app_name=app_name, binary_hash=binary_hash
+            )
+
+            entry_import_path = entry_file.replace("\\", "/")
+            if not entry_import_path.startswith("./") and not entry_import_path.startswith("../"):
+                entry_import_path = f"./{entry_import_path}"
+
+            bootstrap_content = f"""{prefix}
+// Load user code
+try {{
+    require('{entry_import_path}');
+}} catch (e) {{
+    if (e.code === 'ERR_REQUIRE_ESM') {{
+        await import('{entry_import_path}');
+    }} else {{
+        throw e;
+    }}
+}}
+{suffix}"""
             bootstrap_path.write_text(bootstrap_content, encoding="utf-8")
             self._prepare_package_json(build_dir, bootstrap_filename, entry_file)
 

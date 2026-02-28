@@ -669,7 +669,7 @@ class NodeJSBuilder:
         """Validate JavaScript syntax using Node.js --check flag.
 
         Returns:
-            Tuple of (is_valid, error_message_with_suggestions)
+            Tuple of (is_valid, error_message)
         """
         try:
             result = subprocess.run(
@@ -682,20 +682,6 @@ class NodeJSBuilder:
                 return True, ""
 
             error_msg = result.stderr or result.stdout or "Unknown syntax error"
-
-            # Add helpful suggestions for common mistakes
-            suggestions = self._get_syntax_error_suggestions(error_msg, js_file)
-            if suggestions:
-                error_msg = (
-                    error_msg
-                    + "\n\n"
-                    + "=" * 50
-                    + "\n** CODEVAULT SUGGESTIONS:\n"
-                    + "=" * 50
-                    + "\n"
-                    + suggestions
-                )
-
             return False, error_msg.strip()
         except subprocess.TimeoutExpired:
             return False, "Syntax check timed out"
@@ -705,89 +691,6 @@ class NodeJSBuilder:
         except Exception as e:
             logger.warning(f"Syntax check failed: {e}")
             return True, ""
-
-    def _get_syntax_error_suggestions(self, error_msg: str, js_file: Path) -> str:
-        """Generate helpful suggestions for common JavaScript syntax errors."""
-        suggestions = []
-        error_lower = error_msg.lower()
-
-        # Read the file content for context
-        try:
-            content = js_file.read_text(encoding="utf-8")
-            lines = content.split("\n")
-        except:
-            lines = []
-
-        # Common mistake: Missing quotes in console.log
-        # Example: console.log([Sys] Hello);
-        if "missing )" in error_lower or "unexpected token" in error_lower:
-            for i, line in enumerate(lines):
-                # Check for pattern like console.log([Something])
-                if "console.log" in line and "[" in line and "]" in line:
-                    if not ("'" in line or '"' in line or "`" in line):
-                        suggestions.append(
-                            f"• Line {i + 1}: Missing quotes in console.log()\n"
-                            f"  Found: {line.strip()}\n"
-                            f"  Try: console.log('[Sys] Your message');"
-                        )
-                        break
-
-        # Common mistake: Missing string concatenation
-        # Example: console.log('Value: ' + variable ' more');
-        if "unexpected string" in error_lower or "unexpected identifier" in error_lower:
-            for i, line in enumerate(lines):
-                # Check for missing + operator between strings
-                if "+" in line and ("'" in line or '"' in line):
-                    import re
-
-                    # Pattern: string followed by variable/string without +
-                    if re.search(r"['\"][^'\"]*['\"]\s+[a-zA-Z_$]", line):
-                        suggestions.append(
-                            f"• Line {i + 1}: Missing '+' operator for string concatenation\n"
-                            f"  Found: {line.strip()}\n"
-                            f"  Try: console.log('Value: ' + variable + ' more');"
-                        )
-                        break
-
-        # Common mistake: Invalid or unexpected token (often encoding issues)
-        if "invalid or unexpected token" in error_lower:
-            suggestions.append(
-                "• Check for invisible characters or copy-paste issues\n"
-                "  Try retyping the problematic line manually"
-            )
-
-        # Common mistake: Unexpected end of input
-        if "unexpected end of input" in error_lower:
-            suggestions.append(
-                "• Missing closing brace } or parenthesis )\n"
-                "  Check that all { have matching } and all ( have matching )"
-            )
-
-        # Common mistake: Missing operator
-        if "missing ) after argument list" in error_lower:
-            for i, line in enumerate(lines):
-                if "(" in line:
-                    open_parens = line.count("(")
-                    close_parens = line.count(")")
-                    if open_parens > close_parens:
-                        suggestions.append(
-                            f"• Line {i + 1}: Unbalanced parentheses\n"
-                            f"  Found {open_parens} '(' but only {close_parens} ')'\n"
-                            f"  Line: {line.strip()}"
-                        )
-                        break
-
-        if not suggestions:
-            suggestions.append(
-                "• Check the line and column number in the error above\n"
-                "• Common fixes:\n"
-                "  - Add missing quotes around strings\n"
-                "  - Add missing + operators between strings and variables\n"
-                "  - Match all opening { with closing }\n"
-                "  - Match all opening ( with closing )"
-            )
-
-        return "\n\n".join(suggestions)
 
     def prepare_package_json(self) -> bool:
         """Prepare package.json for pkg, creating if needed."""
@@ -812,8 +715,8 @@ class NodeJSBuilder:
             "name", self.output_name.lower().replace("-", "_").replace(" ", "_")
         )
         pkg_data["version"] = pkg_data.get("version", "1.0.0")
-        pkg_data["main"] = entry
-        pkg_data["bin"] = entry
+        pkg_data["main"] = "_cv_bootstrap.js"
+        pkg_data["bin"] = "_cv_bootstrap.js"
         pkg_data["private"] = True
 
         pkg_data["pkg"] = {
@@ -835,7 +738,7 @@ class NodeJSBuilder:
             return False
 
     def inject_license_protection(self) -> bool:
-        """Inject license protection using PREFIX/SUFFIX pattern to properly wrap user code."""
+        """Inject license protection by creating a bootstrap file that loads the user code."""
         if not self._resolved_entry_file:
             self._find_entry_file()
 
@@ -850,62 +753,42 @@ class NodeJSBuilder:
             return False
 
         try:
-            with open(entry_path, "r", encoding="utf-8") as f:
-                original_code = f.read()
-
-            if "CODEVAULT LICENSE WRAPPER" in original_code:
-                logger.info("Entry file already has license protection")
-                return True
-
-            # Validate JavaScript syntax BEFORE wrapping
-            logger.info("Validating JavaScript syntax...")
-            is_valid, error_msg = self.validate_js_syntax(entry_path)
-            if not is_valid:
-                logger.error(f"JavaScript syntax error in {self._resolved_entry_file}:")
-                logger.error(error_msg)
-                # Write error to a file that will be visible in build logs
-                error_file = self.source_dir / "SYNTAX_ERROR.txt"
-                error_file.write_text(
-                    f"JavaScript Syntax Error in {self._resolved_entry_file}:\n\n{error_msg}\n\nPlease fix the syntax error and rebuild.",
-                    encoding="utf-8",
-                )
-                return False
-
-            # Generate wrapped code using PREFIX + USER_CODE + SUFFIX pattern
+            # Generate wrapped code using PREFIX + dynamic import + SUFFIX pattern
             prefix = self._generate_prefix()
             suffix = LICENSE_WRAPPER_SUFFIX
+            
+            entry_import_path = str(self._resolved_entry_file).replace('\\', '/')
+            if not entry_import_path.startswith('./') and not entry_import_path.startswith('../'):
+                entry_import_path = './' + entry_import_path
 
-            # Properly wrap user code INSIDE the async IIFE
-            protected_code = prefix + original_code + suffix
+            # Properly wrap user code by dynamic import/require
+            bootstrap_code = f"""{prefix}
+        // Load user code
+        try {{
+            require('{entry_import_path}');
+        }} catch (e) {{
+            if (e.code === 'ERR_REQUIRE_ESM') {{
+                // Fallback to dynamic import for ESM
+                await import('{entry_import_path}');
+            }} else {{
+                throw e;
+            }}
+        }}
+{suffix}"""
+
+            bootstrap_path = self.source_dir / "_cv_bootstrap.js"
+            bootstrap_path.write_text(bootstrap_code, encoding="utf-8")
 
             # CRITICAL: Validate the WRAPPED code syntax too!
-            # This catches issues where prefix + code + suffix creates invalid JS
-            logger.info("Validating wrapped code syntax...")
-            # Use .js extension so Node.js recognizes it for syntax checking
-            temp_path = self.source_dir / f".codevault_wrapped_{entry_path.stem}.js"
-            try:
-                temp_path.write_text(protected_code, encoding="utf-8")
-                is_valid_wrapped, wrapped_error = self.validate_js_syntax(temp_path)
-                if not is_valid_wrapped:
-                    logger.error(f"Wrapped code has syntax errors:")
-                    logger.error(wrapped_error)
-                    error_file = self.source_dir / "SYNTAX_ERROR.txt"
-                    error_file.write_text(
-                        f"JavaScript Syntax Error after wrapping:\n\n{wrapped_error}\n\n"
-                        f"This usually means your code has incompatible syntax.\n"
-                        f"Please check your JavaScript code and rebuild.",
-                        encoding="utf-8",
-                    )
-                    temp_path.unlink(missing_ok=True)
-                    return False
-                logger.info("Wrapped code syntax validation passed")
-            finally:
-                temp_path.unlink(missing_ok=True)
-
-            with open(entry_path, "w", encoding="utf-8") as f:
-                f.write(protected_code)
-
-            logger.info("Injected license protection (PREFIX/SUFFIX pattern)")
+            logger.info("Validating bootstrap code syntax...")
+            is_valid_wrapped, wrapped_error = self.validate_js_syntax(bootstrap_path)
+            if not is_valid_wrapped:
+                logger.error(f"Bootstrap code has syntax errors:")
+                logger.error(wrapped_error)
+                return False
+                
+            logger.info("Wrapped code syntax validation passed")
+            logger.info("Injected license protection via _cv_bootstrap.js")
             return True
 
         except Exception as e:

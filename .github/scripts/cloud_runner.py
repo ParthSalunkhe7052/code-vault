@@ -298,16 +298,8 @@ def _cv_get_machine_secret():
     except Exception:
         return _cv_hashlib.sha256(b"fallback_secret").digest()
 
-def _cv_xor_encrypt(data, key):
-    """XOR encryption (fallback only)."""
-    result = bytearray()
-    key_bytes = key if isinstance(key, bytes) else key.encode()
-    for i, b in enumerate(data):
-        result.append(b ^ key_bytes[i % len(key_bytes)])
-    return bytes(result)
-
 def _cv_encrypt_lease(lease_data):
-    """Encrypt lease with AES-256-GCM (or XOR fallback)."""
+    """Encrypt lease with AES-256-GCM."""
     try:
         secret = _cv_get_machine_secret()
         data_json = _cv_json.dumps(lease_data).encode('utf-8')
@@ -321,14 +313,13 @@ def _cv_encrypt_lease(lease_data):
             ciphertext = aesgcm.encrypt(nonce, data_json, None)
             return _cv_base64.b64encode(b"AES:" + nonce + ciphertext).decode()
         except ImportError:
-            # Fallback to XOR if cryptography not available
-            encrypted = _cv_xor_encrypt(data_json, secret)
-            return _cv_base64.b64encode(b"XOR:" + encrypted).decode()
+            print("[CodeVault] Error: cryptography module is missing. Offline lease disabled.")
+            return None
     except Exception:
         return None
 
 def _cv_decrypt_lease(encrypted_data):
-    """Decrypt lease (supports both AES and XOR)."""
+    """Decrypt lease with AES-256-GCM."""
     try:
         secret = _cv_get_machine_secret()
         raw = _cv_base64.b64decode(encrypted_data)
@@ -344,10 +335,6 @@ def _cv_decrypt_lease(encrypted_data):
                 return _cv_json.loads(data_json.decode('utf-8'))
             except Exception:
                 return None
-        elif raw.startswith(b"XOR:"):
-            encrypted = raw[4:]
-            data_json = _cv_xor_encrypt(encrypted, secret)
-            return _cv_json.loads(data_json.decode('utf-8'))
         else:
             return None
     except Exception:

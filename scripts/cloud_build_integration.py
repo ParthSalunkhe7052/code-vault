@@ -136,6 +136,14 @@ class CloudBuildClient:
             options={
                 "logging": "CLOUD_LOGGING_ONLY",
             },
+            available_secrets={
+                "secret_manager": [
+                    {
+                        "version_name": f"projects/{self.project_id}/secrets/CODEVAULT_WEBHOOK_SECRET/versions/latest",
+                        "env": "WEBHOOK_SECRET"
+                    }
+                ]
+            },
             # Add labels for tracking
             tags=[
                 f"codevault-{build_id}",
@@ -408,9 +416,21 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   dist_name=$$(basename "$$dist_dir")
   echo "[Cloud Build] Found standalone .dist folder: $$dist_dir (name: $$dist_name)"
   
-  # Zip the entire .dist folder with all dependencies (including python dlls)
   parent_dir=$$(dirname "$$dist_dir")
   cd "$$parent_dir"
+  
+  # Rename internal binary if it matches the dist prefix
+  base_name="$${dist_name%.dist}"
+  if [ -f "$$dist_name/$$base_name" ]; then
+    mv "$$dist_name/$$base_name" "$$dist_name/{output_name}"
+  fi
+  
+  # Rename the dist folder to match output_name
+  if [ "$$dist_name" != "{output_name}" ]; then
+    mv "$$dist_name" "{output_name}"
+    dist_name="{output_name}"
+  fi
+  
   tar -czf "/workspace/{output_name}.tar.gz" "$$dist_name"
   cd /workspace
   
@@ -534,10 +554,23 @@ if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
   echo "[Cloud Build] .dist folder contents:"
   ls -la "$$dist_dir/" 2>/dev/null || true
   
-  # Zip the entire .dist folder with all dependencies (including python311.dll)
-  # Use Python zipfile (more reliable than apt-get install zip)
   parent_dir=$$(dirname "$$dist_dir")
   cd "$$parent_dir"
+  
+  # Rename internal executable if it matches the dist prefix
+  base_name="$${dist_name%.dist}"
+  if [ -f "$$dist_name/$$base_name.exe" ]; then
+    mv "$$dist_name/$$base_name.exe" "$$dist_name/{output_name}.exe"
+  fi
+  
+  # Rename the dist folder to match output_name
+  if [ "$$dist_name" != "{output_name}" ]; then
+    mv "$$dist_name" "{output_name}"
+    dist_name="{output_name}"
+  fi
+  
+  # Zip the entire .dist folder with all dependencies (including python311.dll)
+  # Use Python zipfile (more reliable than apt-get install zip)
   if command -v zip &> /dev/null; then
     zip -r -q "/workspace/{output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
   else
@@ -907,8 +940,8 @@ error_msg_escaped=$$(echo "$$error_msg" | sed 's/"/\\"/g' | tr '\\n' ' ')
 # Note: BUILD_ID is a Cloud Build built-in substitution, not a shell variable
 payload='{{"build_id":"{build_id}","cloud_build_id":"'$BUILD_ID'","status":"'$$overall_status'","linux_status":"'$$linux_status'","windows_status":"'$$windows_status'","linux_download_key":"'$$linux_download_key'","windows_download_key":"'$$windows_download_key'","filename":"'$$filename'","error":"'$$error_msg_escaped'","timestamp":'$$(date +%s)'}}'
 
-if [ -n "{callback_secret}" ]; then
-  sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "{callback_secret}" | awk '{{print $$2}}')
+if [ -n "$$WEBHOOK_SECRET" ]; then
+  sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$WEBHOOK_SECRET" | awk '{{print $$2}}')
 else
   sig=""
 fi
@@ -950,6 +983,7 @@ echo "[Cloud Build] Webhook completed"
             "name": "gcr.io/cloud-builders/curl",
             "args": ["-c", script],
             "entrypoint": "bash",
+            "secretEnv": ["WEBHOOK_SECRET"],
         }
 
     def get_build_status(self, gcp_build_id: str) -> Dict[str, Any]:

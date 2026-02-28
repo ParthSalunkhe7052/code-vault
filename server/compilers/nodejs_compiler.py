@@ -355,12 +355,20 @@ function exitWithError(err) {{
     process.stdin.on('data', () => process.exit(1));
 }}
 
-validateLicense().then(() => {{
+validateLicense().then(async () => {{
     console.log('[CodeVault] License verified. Starting application...');
     try {{
         require('./{normalized_entry}');
     }} catch (e) {{
-        exitWithError(e);
+        if (e.code === 'ERR_REQUIRE_ESM') {{
+            try {{
+                await import('./{normalized_entry}');
+            }} catch (esmErr) {{
+                exitWithError(esmErr);
+            }}
+        }} else {{
+            exitWithError(e);
+        }}
     }}
 }}).catch(err => {{
     exitWithError(err);

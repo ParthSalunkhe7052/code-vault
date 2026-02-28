@@ -388,105 +388,10 @@ fi
     ) -> list:
         """Create Python-specific build and upload steps."""
         steps = []
+        from pathlib import Path
 
         # Linux build step - FIXED: Package entire .dist folder for standalone builds
-        linux_build_script = f"""set -e
-if [[ "{target_platforms}" != *"linux"* ]]; then
-  echo "[Cloud Build] Skipping Linux build"
-  echo "skipped" > /workspace/build_status_linux
-  exit 0
-fi
-
-echo "[Cloud Build] ===== Building for Linux ====="
-# Skip pip install if Nuitka 2.4.8 is already pre-installed in the builder image
-python3 -c "import nuitka; v=nuitka.__version__; assert v=='2.4.8', 'version mismatch: '+v" 2>/dev/null || \
-  pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
-
-if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
-  echo "cloud_runner.py not found" > ./project/source/error_message.txt
-  echo "failed" > /workspace/build_status_linux
-  exit 0
-fi
-
-decoded_config=$$(cat /workspace/config.json)
-export NUITKA_JOBS=6
-export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
-# Point ccache at the restored workspace directory so Nuitka's C compilation is cached
-export CCACHE_DIR=/workspace/.ccache
-export CCACHE_COMPRESS=1
-mkdir -p $$NUITKA_CACHE_DIR
-
-if [ -d /workspace/.nuitka-cache ]; then
-  mkdir -p $$HOME/.cache/Nuitka
-  cp -r /workspace/.nuitka-cache/. $$HOME/.cache/Nuitka/ 2>/dev/null || true
-fi
-
-python3 "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "./project/source" || true
-
-cd "./project/source"
-
-linux_artifacts=""
-linux_status="failed"
-linux_error=""
-
-# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
-# e.g., main.py -> main.dist, not {output_name}.dist
-dist_dir=$$(find ./project/source/build_output_linux -type d -name "*.dist" 2>/dev/null | head -1)
-
-if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
-  dist_name=$$(basename "$$dist_dir")
-  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir (name: $$dist_name)"
-  
-  # Zip the entire .dist folder with all dependencies (including python dlls)
-  parent_dir=$$(dirname "$$dist_dir")
-  cd "$$parent_dir"
-  tar -czf "/workspace/{output_name}.tar.gz" "$$dist_name"
-  cd /workspace
-  
-  if [ -f "/workspace/{output_name}.tar.gz" ]; then
-    linux_artifacts="{output_name}.tar.gz"
-    linux_status="completed"
-    echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (standalone folder with dependencies)"
-  else
-    linux_error="Failed to create tar.gz from .dist folder"
-  fi
-elif [ -d "build_output_linux" ]; then
-  # Fallback: Check for onefile mode (single binary)
-  found_binary=$$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
-  if [ -n "$$found_binary" ]; then
-    cp "$$found_binary" ./
-  fi
-  
-  if [ -f "{output_name}" ]; then
-    chmod +x "{output_name}"
-    tar -czf "/workspace/{output_name}.tar.gz" "{output_name}"
-    linux_artifacts="{output_name}.tar.gz"
-    linux_status="completed"
-    echo "[Cloud Build] Linux artifact ready: $$linux_artifacts (onefile binary)"
-  else
-    if [ -f "error_message.txt" ]; then
-      linux_error=$$(cat error_message.txt)
-    else
-      linux_error="Linux build output '{output_name}' not found"
-    fi
-  fi
-else
-  if [ -f "error_message.txt" ]; then
-    linux_error=$$(cat error_message.txt)
-  else
-    linux_error="Linux build output directory not found"
-  fi
-fi
-
-echo "$$linux_status" > /workspace/build_status_linux
-echo "$$linux_artifacts" > /workspace/linux_artifacts
-echo "$$linux_error" > /workspace/linux_error
-
-if [ -d "$$HOME/.cache/Nuitka" ]; then
-  mkdir -p /workspace/.nuitka-cache
-  cp -r $$HOME/.cache/Nuitka/. /workspace/.nuitka-cache/ 2>/dev/null || true
-fi
-"""
+        linux_build_script = Path("scripts/build_python_linux.sh").read_text().replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
 
         # Linux and Windows build steps run in PARALLEL (both wait_for download-config)
         steps.append(
@@ -500,37 +405,7 @@ fi
         )
 
         # Linux upload step (with 3-retry logic)
-        linux_upload_script = f"""linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-if [[ "$$linux_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Linux upload (status: $$linux_status)"
-  exit 0
-fi
-linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
-if [ -z "$$linux_artifact" ]; then
-  exit 0
-fi
-
-max_retries=3
-retry_count=0
-upload_success=false
-while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
-  if [ $$retry_count -gt 0 ]; then
-    echo "[Cloud Build] Retrying Linux upload (attempt $$((retry_count+1))/$$max_retries)..."
-    sleep 2
-  fi
-  echo "[Cloud Build] Uploading Linux: $$linux_artifact"
-  if gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact" 2>/dev/null; then
-    upload_success=true
-    echo "[Cloud Build] Linux upload successful"
-  else
-    retry_count=$$((retry_count+1))
-  fi
-done
-if [ "$$upload_success" != "true" ]; then
-  echo "[Cloud Build] Linux upload failed after $$max_retries attempts"
-  exit 1
-fi
-"""
+        linux_upload_script = Path("scripts/upload_linux.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -543,150 +418,7 @@ fi
         )
 
         # Windows build step - FIXED: Package entire .dist folder for standalone builds
-        windows_build_script = f"""set -e
-if [[ "{target_platforms}" != *"windows"* ]]; then
-  echo "[Cloud Build] Skipping Windows build"
-  echo "skipped" > /workspace/build_status_windows
-  exit 0
-fi
-
-echo "[Cloud Build] ===== Building for Windows ====="
-export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
-mkdir -p $$NUITKA_CACHE_DIR
-
-# Restore MinGW cache (avoids re-downloading ~300MB toolchain each build)
-if [ -d /workspace/.mingw-cache ]; then
-  echo "[Cloud Build] Restoring MinGW cache..."
-  mkdir -p /root/.cache/Nuitka/downloads
-  cp -r /workspace/.mingw-cache/. /root/.cache/Nuitka/downloads/ 2>/dev/null || true
-  echo "[Cloud Build] MinGW cache restored"
-fi
-
-wine python -m pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography pefile
-
-if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
-  echo "cloud_runner.py not found" > ./project/source/error_message.txt
-  echo "failed" > /workspace/build_status_windows
-  exit 0
-fi
-
-nuitka_depends_py=$$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
-if [ -n "$$nuitka_depends_py" ]; then
-  if [ -f "./project/source/.github/scripts/nuitka_patch.py" ]; then
-    wine python "./project/source/.github/scripts/nuitka_patch.py" "$$nuitka_depends_py"
-  fi
-fi
-
-decoded_config=$$(cat /workspace/config.json)
-
-echo "[Cloud Build] Running cloud_runner.py for Windows build..."
-set +e
-wine python "./project/source/.github/scripts/cloud_runner.py" --config "$$decoded_config" --source "$$(winepath -w $$(realpath ./project/source))" 2>&1
-runner_exit_code=$$?
-set -e
-
-if [ $$runner_exit_code -ne 0 ]; then
-  echo "[Cloud Build] ERROR: cloud_runner.py exited with code $$runner_exit_code"
-  echo "Build runner failed with exit code $$runner_exit_code" > ./project/source/error_message.txt
-fi
-
-windows_artifacts=""
-windows_status="failed"
-windows_error=""
-
-# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
-# e.g., main.py -> main.dist, not {output_name}.dist
-dist_dir=$$(find ./project/source/build_output_windows_wine -type d -name "*.dist" 2>/dev/null | head -1)
-
-if [ -n "$$dist_dir" ] && [ -d "$$dist_dir" ]; then
-  dist_name=$$(basename "$$dist_dir")
-  echo "[Cloud Build] Found standalone .dist folder: $$dist_dir (name: $$dist_name)"
-  # List contents for debugging
-  echo "[Cloud Build] .dist folder contents:"
-  ls -la "$$dist_dir/" 2>/dev/null || true
-  
-  # Zip the entire .dist folder with all dependencies (including python311.dll)
-  # Use Python zipfile (more reliable than apt-get install zip)
-  parent_dir=$$(dirname "$$dist_dir")
-  cd "$$parent_dir"
-  if command -v zip &> /dev/null; then
-    zip -r -q "/workspace/{output_name}.zip" "$$dist_name" -x "*.pyc" -x "__pycache__/*"
-  else
-    python3 -c "
-import zipfile, os
-dn, on = '$$dist_name', '{output_name}'
-zf = zipfile.ZipFile(f'/workspace/{{on}}.zip', 'w', zipfile.ZIP_DEFLATED)
-for r, ds, fs in os.walk(dn):
-  ds[:] = [d for d in ds if d != '__pycache__']
-  for f in fs:
-    if f.endswith('.pyc'): continue
-    zf.write(os.path.join(r, f), os.path.relpath(os.path.join(r, f), '.'))
-zf.close()
-"
-  fi
-  cd /workspace
-
-  if [ -f "/workspace/{output_name}.zip" ]; then
-    archive_size=$$(ls -lh "/workspace/{output_name}.zip" | awk '{{print $$5}}')
-    echo "[Cloud Build] Archive size: $$archive_size"
-    windows_artifacts="{output_name}.zip"
-    windows_status="completed"
-    echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (standalone folder with dependencies)"
-  else
-    windows_error="Failed to create zip from .dist folder"
-  fi
-else
-  # Fallback: Check for onefile mode (single EXE)
-  echo "[Cloud Build] No .dist folder found, checking for onefile EXE..."
-  found_exe=""
-  
-  if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
-    found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
-    echo "[Cloud Build] Found onefile EXE: $$found_exe"
-  else
-    found_exe=$$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
-    if [ -n "$$found_exe" ]; then
-      echo "[Cloud Build] Found EXE: $$found_exe"
-    fi
-  fi
-
-  if [ -n "$$found_exe" ] && [ -f "$$found_exe" ]; then
-    exe_size=$$(ls -lh "$$found_exe" | awk '{{print $$5}}')
-    echo "[Cloud Build] EXE size: $$exe_size"
-    cp "$$found_exe" "/workspace/{output_name}.exe"
-    if [ -f "/workspace/{output_name}.exe" ]; then
-      windows_artifacts="{output_name}.exe"
-      windows_status="completed"
-      echo "[Cloud Build] Windows artifact ready: $$windows_artifacts (self-contained onefile EXE)"
-    else
-      windows_error="Failed to copy EXE to artifacts"
-    fi
-  else
-    if [ -f "./project/source/error_message.txt" ]; then
-      windows_error=$$(cat ./project/source/error_message.txt)
-    else
-      windows_error="Windows EXE not found in build output"
-    fi
-  fi
-fi
-
-echo "$$windows_status" > /workspace/build_status_windows
-echo "$$windows_artifacts" > /workspace/windows_artifacts
-echo "$$windows_error" > /workspace/windows_error
-
-# Save MinGW cache for faster future Windows builds (10MB < size < 600MB)
-if [ -d /root/.cache/Nuitka/downloads ]; then
-  mingw_cache_size=$$(du -s /root/.cache/Nuitka/downloads 2>/dev/null | cut -f1)
-  if [ -n "$$mingw_cache_size" ] && [ "$$mingw_cache_size" -gt 10000 ] && [ "$$mingw_cache_size" -lt 600000 ]; then
-    echo "[Cloud Build] Saving MinGW cache ($$mingw_cache_size KB)..."
-    mkdir -p /workspace/.mingw-cache
-    cp -r /root/.cache/Nuitka/downloads/. /workspace/.mingw-cache/ 2>/dev/null || true
-    echo "[Cloud Build] MinGW cache staged"
-  else
-    echo "[Cloud Build] Skipping MinGW cache (size: $$mingw_cache_size KB, limit: 600MB)"
-  fi
-fi
-"""
+        windows_build_script = Path("scripts/build_python_windows.sh").read_text().replace("{target_platforms}", target_platforms).replace("{output_name}", output_name)
 
         # Windows build step also waits for download-config (runs PARALLEL to Linux)
         steps.append(
@@ -700,37 +432,7 @@ fi
         )
 
         # Windows upload step (with 3-retry logic)
-        windows_upload_script = f"""windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-if [[ "$$windows_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Windows upload (status: $$windows_status)"
-  exit 0
-fi
-windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
-if [ -z "$$windows_artifact" ]; then
-  exit 0
-fi
-
-max_retries=3
-retry_count=0
-upload_success=false
-while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
-  if [ $$retry_count -gt 0 ]; then
-    echo "[Cloud Build] Retrying Windows upload (attempt $$((retry_count+1))/$$max_retries)..."
-    sleep 2
-  fi
-  echo "[Cloud Build] Uploading Windows: $$windows_artifact"
-  if gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact" 2>/dev/null; then
-    upload_success=true
-    echo "[Cloud Build] Windows upload successful"
-  else
-    retry_count=$$((retry_count+1))
-  fi
-done
-if [ "$$upload_success" != "true" ]; then
-  echo "[Cloud Build] Windows upload failed after $$max_retries attempts"
-  exit 1
-fi
-"""
+        windows_upload_script = Path("scripts/upload_windows.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -749,118 +451,12 @@ fi
     ) -> list:
         """Create Node.js-specific build and upload steps."""
         steps = []
+        from pathlib import Path
 
         # Node.js build step (handles both Windows and Linux)
         # IMPORTANT: No fallback! If cloud_runner_nodejs.py fails, the build fails.
         # This ensures all builds have proper license protection and error handling.
-        build_script = f"""set -e
-echo "[Cloud Build] ===== Building for Node.js ====="
-
-apt-get update -qq && apt-get install -y -qq python3 > /dev/null 2>&1
-npm install -g @yao-pkg/pkg --quiet
-
-cd "./project/source"
-
-echo "[Cloud Build] Directory contents:"
-ls -la
-echo ""
-
-echo "[Cloud Build] Config:"
-cat /workspace/config.json
-echo ""
-
-# Check for cloud_runner_nodejs.py - required for all builds
-if [ ! -f ".github/scripts/cloud_runner_nodejs.py" ]; then
-  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py not found!"
-  echo "[Cloud Build] This file should be included in the source upload."
-  echo "failed" > /workspace/build_status_windows
-  echo "failed" > /workspace/build_status_linux
-  echo "cloud_runner_nodejs.py not found - cannot proceed without license wrapper" > /workspace/windows_error
-  echo "cloud_runner_nodejs.py not found - cannot proceed without license wrapper" > /workspace/linux_error
-  exit 1
-fi
-
-echo "[Cloud Build] Running cloud_runner_nodejs.py..."
-echo "[Cloud Build] This will inject license protection and build for all target platforms."
-
-# Run the runner - if it fails, the build fails (no fallback!)
-python3 .github/scripts/cloud_runner_nodejs.py --config "$$(cat /workspace/config.json)" --source "$$(pwd)" 2>&1
-runner_exit_code=$$?
-
-if [ $$runner_exit_code -ne 0 ]; then
-  echo "[Cloud Build] ERROR: cloud_runner_nodejs.py failed with exit code $$runner_exit_code"
-  echo "[Cloud Build] Build cannot proceed without license wrapper."
-  echo "failed" > /workspace/build_status_windows
-  echo "failed" > /workspace/build_status_linux
-  echo "License wrapper injection failed - check build logs for details" > /workspace/windows_error
-  echo "License wrapper injection failed - check build logs for details" > /workspace/linux_error
-  exit 1
-fi
-
-echo "[Cloud Build] cloud_runner_nodejs.py completed successfully"
-
-echo "[Cloud Build] Artifacts directory contents:"
-ls -la /workspace/ 2>/dev/null || echo "Workspace empty"
-
-# Parse target platforms from config
-target_plats=$$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
-echo "[Cloud Build] Target platforms: $$target_plats"
-
-# Windows artifact - strict: only accept expected output file
-if [[ "$$target_plats" == *"windows"* ]]; then
-  if [ -f "build_output_windows/{output_name}.exe" ]; then
-    exe_size=$$(stat -c%s "build_output_windows/{output_name}.exe" 2>/dev/null || echo "0")
-    echo "[Cloud Build] Found Windows exe: build_output_windows/{output_name}.exe ($$exe_size bytes)"
-    if [ "$$exe_size" -lt 10000 ]; then
-      echo "[Cloud Build] WARNING: EXE seems too small, may be corrupted"
-      echo "failed" > /workspace/build_status_windows
-      echo "Windows EXE file is too small ($$exe_size bytes) - likely corrupted" > /workspace/windows_error
-    else
-      cp "build_output_windows/{output_name}.exe" /workspace/
-      echo "completed" > /workspace/build_status_windows
-      echo "{output_name}.exe" > /workspace/windows_artifacts
-      echo "[Cloud Build] Windows artifact ready: {output_name}.exe"
-    fi
-  else
-    echo "[Cloud Build] ERROR: Expected output not found at build_output_windows/{output_name}.exe"
-    echo "[Cloud Build] Build output directory contents:"
-    ls -la build_output_windows/ 2>/dev/null || echo "Directory does not exist"
-    echo "failed" > /workspace/build_status_windows
-    echo "Windows build output not found at expected location" > /workspace/windows_error
-  fi
-else
-  echo "skipped" > /workspace/build_status_windows
-fi
-
-# Linux artifact - strict: only accept expected output file
-if [[ "$$target_plats" == *"linux"* ]]; then
-  if [ -f "build_output_linux/{output_name}" ]; then
-    linux_size=$$(stat -c%s "build_output_linux/{output_name}" 2>/dev/null || echo "0")
-    echo "[Cloud Build] Found Linux binary: build_output_linux/{output_name} ($$linux_size bytes)"
-    if [ "$$linux_size" -lt 10000 ]; then
-      echo "[Cloud Build] WARNING: Binary seems too small, may be corrupted"
-      echo "failed" > /workspace/build_status_linux
-      echo "Linux binary file is too small ($$linux_size bytes) - likely corrupted" > /workspace/linux_error
-    else
-      cp "build_output_linux/{output_name}" /workspace/
-      chmod +x "/workspace/{output_name}"
-      echo "completed" > /workspace/build_status_linux
-      echo "{output_name}" > /workspace/linux_artifacts
-      echo "[Cloud Build] Linux artifact ready: {output_name}"
-    fi
-  else
-    echo "[Cloud Build] ERROR: Expected output not found at build_output_linux/{output_name}"
-    echo "[Cloud Build] Build output directory contents:"
-    ls -la build_output_linux/ 2>/dev/null || echo "Directory does not exist"
-    echo "failed" > /workspace/build_status_linux
-    echo "Linux build output not found at expected location" > /workspace/linux_error
-  fi
-else
-  echo "skipped" > /workspace/build_status_linux
-fi
-
-echo "[Cloud Build] Node.js build step complete"
-"""
+        build_script = Path("scripts/build_nodejs.sh").read_text().replace("{output_name}", output_name)
 
         steps.append(
             {
@@ -873,18 +469,7 @@ echo "[Cloud Build] Node.js build step complete"
         )
 
         # Windows upload
-        windows_upload_script = f"""windows_status=$$(cat /workspace/build_status_windows 2>/dev/null || echo "pending")
-if [[ "$$windows_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Node.js Windows upload (status: $$windows_status)"
-  exit 0
-fi
-windows_artifact=$$(cat /workspace/windows_artifacts 2>/dev/null)
-if [ -z "$$windows_artifact" ]; then
-  exit 0
-fi
-echo "[Cloud Build] Uploading Node.js Windows: $$windows_artifact"
-gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/windows/$$windows_artifact"
-"""
+        windows_upload_script = Path("scripts/upload_windows.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
@@ -897,18 +482,7 @@ gsutil cp "/workspace/$$windows_artifact" "gs://{gcs_bucket}/builds/{build_id}/w
         )
 
         # Linux upload
-        linux_upload_script = f"""linux_status=$$(cat /workspace/build_status_linux 2>/dev/null || echo "pending")
-if [[ "$$linux_status" != "completed" ]]; then
-  echo "[Cloud Build] Skipping Node.js Linux upload (status: $$linux_status)"
-  exit 0
-fi
-linux_artifact=$$(cat /workspace/linux_artifacts 2>/dev/null)
-if [ -z "$$linux_artifact" ]; then
-  exit 0
-fi
-echo "[Cloud Build] Uploading Node.js Linux: $$linux_artifact"
-gsutil cp "/workspace/$$linux_artifact" "gs://{gcs_bucket}/builds/{build_id}/linux/$$linux_artifact"
-"""
+        linux_upload_script = Path("scripts/upload_linux.sh").read_text().replace("{gcs_bucket}", gcs_bucket).replace("{build_id}", build_id)
 
         steps.append(
             {
