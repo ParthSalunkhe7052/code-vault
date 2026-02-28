@@ -14,11 +14,16 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return encoded_jwt
 
 if __name__ == "__main__":
+    # Use the secret from heroku config
+    ACTUAL_JWT_SECRET = "72b2b66ab650740858e1409283fb365d7ac0546e240076f21a9d32a1669a6327" # pragma: allowlist secret
     user_id = "114738fa7a15ca2374cc5fd97515d93d"
     email = "parth.ajit7052@gmail.com"
     
-    token = create_access_token(
-        data={"sub": email, "id": user_id},
-        expires_delta=timedelta(days=1)
-    )
+    # Payload must have 'sub' as user_id because get_current_user uses payload["sub"]
+    token = jwt.encode({
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(days=1)
+    }, ACTUAL_JWT_SECRET, algorithm="HS256")
+    
     print(token)
