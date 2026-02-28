@@ -35,7 +35,7 @@ def get_pkg_args(config: Dict[str, Any], entry_path_rel: str, output_name: str, 
         "*"
     ]
     
-    if not config.get("fast_build"):
+    if config.get("debug_build"):
         cmd.append("--debug")
         
     return cmd

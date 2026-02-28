@@ -378,16 +378,30 @@ def extract_or_use_source(
     """
     import zipfile
     import shutil
-
+    import sys
+    from pathlib import Path
+    
+    # Add project root to sys.path to find shared security modules
+    _root = Path(__file__).resolve().parent.parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+        
     try:
+        from shared.security.zip_safety import safe_extract_zip
+        from shared.security.validation import PathTraversalError
+
         if source_path.is_file() and source_path.suffix.lower() == ".zip":
             # Extract zip file
             console.print(f"[INFO] Extracting ZIP file: {source_path.name}")
             extract_dir = temp_dir / "project"
             extract_dir.mkdir(exist_ok=True)
 
-            with zipfile.ZipFile(source_path, "r") as zip_ref:
-                zip_ref.extractall(extract_dir)
+            try:
+                safe_extract_zip(source_path, extract_dir)
+            except PathTraversalError as e:
+                return None, f"Security error: {e}"
+            except zipfile.BadZipFile:
+                return None, f"Invalid ZIP file: {source_path}"
 
             console.print(f"[OK] Extracted to: {extract_dir}")
             return extract_dir, ""

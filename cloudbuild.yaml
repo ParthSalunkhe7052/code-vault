@@ -6,7 +6,6 @@
 
 substitutions:
   _CALLBACK_URL: 'https://code-vault-b66848f67c75.herokuapp.com/api/v1/cloud-build/webhook'
-  _CALLBACK_SECRET: ''
   _TARGET_PLATFORMS: 'linux,windows'
   _LANGUAGE: 'python'
   _GCS_BUCKET: 'codevault-builds'
@@ -21,7 +20,7 @@ options:
   dynamicSubstitutions: true
   pool: {}
 
-timeout: 3600s
+timeout: 1800s
 
 steps:
   - name: 'gcr.io/cloud-builders/gsutil'
@@ -265,12 +264,12 @@ steps:
       - '-c'
       - |
         linux_status=$$(cat /workspace/artifacts/build_status_linux 2>/dev/null || echo "pending")
-        if [[ "$$linux_status" != "completed" ]]; then
-          echo "[Cloud Build] Skipping Linux upload (status: $$linux_status)"
+        if [[ "$${linux_status}" != "completed" ]]; then
+          echo "[Cloud Build] Skipping Linux upload (status: $${linux_status})"
           exit 0
         fi
         linux_artifact=$$(cat /workspace/artifacts/linux_artifacts 2>/dev/null)
-        if [ -z "$$linux_artifact" ]; then
+        if [ -z "$${linux_artifact}" ]; then
           exit 0
         fi
         
@@ -279,18 +278,18 @@ steps:
         retry_count=0
         upload_success=false
         
-        while [ $$retry_count -lt $$max_retries ] && [ "$$upload_success" = "false" ]; do
-          if [ $$retry_count -gt 0 ]; then
-            echo "[Cloud Build] Retrying upload (attempt $$((retry_count+1))/$$max_retries)..."
+        while [ $${retry_count} -lt $${max_retries} ] && [ "$${upload_success}" = "false" ]; do
+          if [ $${retry_count} -gt 0 ]; then
+            echo "[Cloud Build] Retrying upload (attempt $$(($${retry_count}+1))/$${max_retries})..."
             sleep 2
           fi
           
-          echo "[Cloud Build] Uploading Linux: $$linux_artifact"
-          if gsutil cp "/workspace/artifacts/$$linux_artifact" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$$linux_artifact" 2>/dev/null; then
+          echo "[Cloud Build] Uploading Linux: $${linux_artifact}"
+          if gsutil cp "/workspace/artifacts/$${linux_artifact}" "gs://${_GCS_BUCKET}/builds/${_BUILD_ID}/linux/$${linux_artifact}" 2>/dev/null; then
             upload_success=true
             echo "[Cloud Build] Linux upload successful"
           else
-            retry_count=$$((retry_count+1))
+            retry_count=$$(($${retry_count}+1))
           fi
         done
         
@@ -525,49 +524,14 @@ steps:
         # Run the Node.js build runner
         if [ -f ".github/scripts/cloud_runner_nodejs.py" ]; then
           echo "[Cloud Build] Running cloud_runner_nodejs.py..."
-          python3 .github/scripts/cloud_runner_nodejs.py --config "$(cat /workspace/config.json)" --source "$(pwd)" 2>&1 || {
-            exit_code=$?
-            echo "[Cloud Build] Runner failed with exit code: $exit_code"
-            echo "[Cloud Build] Attempting direct pkg fallback..."
-            
-            # Direct pkg fallback
-            if [ -f "package.json" ]; then
-              echo "[Cloud Build] Using existing package.json"
-              # Fix common JSON issues in package.json (unescaped quotes in scripts)
-              # Replace patterns like "test": "echo "Error: with "test": "echo \"
-              sed -i 's/"echo \([^"]*\)\(["]\)/"echo \\"\1\\"\2/g' package.json || true
-              # Also fix npm scripts
-              sed -i 's/"npm \([^"]*\)\(["]\)/"npm \\"\1\\"\2/g' package.json || true
-            else
-              entry_file=$(ls *.js 2>/dev/null | head -1 || echo "index.js")
-              echo "[Cloud Build] Creating package.json with main: $entry_file"
-              echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\", \"private\": true}" > package.json
-            fi
-            
-            echo "[Cloud Build] package.json content:"
-            cat package.json
-            
-            mkdir -p /workspace/artifacts
-            # Use --output with full path, NOT --out-path (pkg doesn't allow both)
-            npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/artifacts/${_OUTPUT_NAME}.exe" --compress GZip 2>&1 || true
+          python3 .github/scripts/cloud_runner_nodejs.py --config "$$(cat /workspace/config.json)" --source "$$(pwd)" 2>&1 || {
+            exit_code=$$?
+            echo "[Cloud Build] Runner failed with exit code: $$exit_code"
+            exit $$exit_code
           }
         else
-          echo "[Cloud Build] cloud_runner_nodejs.py not found, using fallback"
-          # Fallback: Create package.json if missing
-          if [ ! -f "package.json" ]; then
-            entry_file=$(ls *.js 2>/dev/null | head 1 || echo "index.js")
-            echo "{\"name\": \"${_OUTPUT_NAME}\", \"version\": \"1.0.0\", \"main\": \"$entry_file\", \"private\": true}" > package.json
-          else
-            # Fix common JSON issues in package.json (unescaped quotes in scripts)
-            sed -i 's/"echo \([^"]*\)\(["]\)/"echo \\"\1\\"\2/g' package.json || true
-            sed -i 's/"npm \([^"]*\)\(["]\)/"npm \\"\1\\"\2/g' package.json || true
-          fi
-          echo "[Cloud Build] package.json content:"
-          cat package.json
-          npm install --quiet 2>/dev/null || true
-          mkdir -p /workspace/artifacts
-          # Use --output with full path, NOT --out-path (pkg doesn't allow both)
-          npx @yao-pkg/pkg . --target node20-win-x64 --output "/workspace/artifacts/${_OUTPUT_NAME}.exe" --compress GZip
+          echo "[Cloud Build] ERROR: cloud_runner_nodejs.py not found!"
+          exit 1
         fi
         
         # Copy artifacts to workspace
@@ -578,12 +542,12 @@ steps:
         ls -la /workspace/artifacts/ 2>/dev/null || echo "Artifacts directory empty or not found"
         
         # Parse target platforms from config
-        target_platforms=$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
-        echo "[Cloud Build] Target platforms: $target_platforms"
+        target_platforms=$$(cat /workspace/config.json | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('target_platforms', ['windows'])))" 2>/dev/null || echo "windows")
+        echo "[Cloud Build] Target platforms: $$target_platforms"
         
         # Find and copy Windows artifact
         echo "[Cloud Build] DEBUG: Checking for Windows artifact..."
-        if [[ "$target_platforms" == *"windows"* ]]; then
+        if [[ "$$target_platforms" == *"windows"* ]]; then
           echo "[Cloud Build] DEBUG: Windows is in target platforms"
           if [ -f "build_output_windows/${_OUTPUT_NAME}.exe" ]; then
             cp "build_output_windows/${_OUTPUT_NAME}.exe" /workspace/artifacts/
@@ -597,20 +561,10 @@ steps:
             echo "[Cloud Build] Found Windows artifact in /workspace/artifacts"
             echo "[Cloud Build] DEBUG: Wrote windows_status=completed"
           else
-            # Search for any exe
-            found_exe=$(find . -name "*.exe" -type f 2>/dev/null | head -1)
-            if [ -n "$found_exe" ]; then
-              cp "$found_exe" /workspace/artifacts/
-              echo "completed" > /workspace/artifacts/build_status_windows
-              echo "$(basename $found_exe)" > /workspace/artifacts/windows_artifacts
-              echo "[Cloud Build] Found Windows artifact via search: $found_exe"
-              echo "[Cloud Build] DEBUG: Wrote windows_status=completed"
-            else
-              echo "failed" > /workspace/artifacts/build_status_windows
-              echo "Node.js Windows build output not found" > /workspace/artifacts/windows_error
-              echo "[Cloud Build] ERROR: No Windows exe file found anywhere!"
-              echo "[Cloud Build] DEBUG: Wrote windows_status=failed"
-            fi
+            echo "failed" > /workspace/artifacts/build_status_windows
+            echo "Node.js Windows build output not found" > /workspace/artifacts/windows_error
+            echo "[Cloud Build] ERROR: Expected Windows exe file (${_OUTPUT_NAME}.exe) not found!"
+            echo "[Cloud Build] DEBUG: Wrote windows_status=failed"
           fi
         else
           echo "skipped" > /workspace/artifacts/build_status_windows
@@ -619,7 +573,7 @@ steps:
         fi
         
         # Find and copy Linux artifact
-        if [[ "$target_platforms" == *"linux"* ]]; then
+        if [[ "$$target_platforms" == *"linux"* ]]; then
           if [ -f "build_output_linux/${_OUTPUT_NAME}" ]; then
             cp "build_output_linux/${_OUTPUT_NAME}" /workspace/artifacts/
             chmod +x "/workspace/artifacts/${_OUTPUT_NAME}"
@@ -627,19 +581,9 @@ steps:
             echo "${_OUTPUT_NAME}" > /workspace/artifacts/linux_artifacts
             echo "[Cloud Build] Found Linux artifact in build_output_linux"
           else
-            # Search for any linux binary
-            found_linux=$(find ./build_output_linux -type f -executable 2>/dev/null | head -1)
-            if [ -n "$found_linux" ]; then
-              cp "$found_linux" /workspace/artifacts/
-              chmod +x "/workspace/artifacts/$(basename $found_linux)"
-              echo "completed" > /workspace/artifacts/build_status_linux
-              echo "$(basename $found_linux)" > /workspace/artifacts/linux_artifacts
-              echo "[Cloud Build] Found Linux artifact via search: $found_linux"
-            else
-              echo "failed" > /workspace/artifacts/build_status_linux
-              echo "Node.js Linux build output not found" > /workspace/artifacts/linux_error
-              echo "[Cloud Build] ERROR: No Linux binary found!"
-            fi
+            echo "failed" > /workspace/artifacts/build_status_linux
+            echo "Node.js Linux build output not found" > /workspace/artifacts/linux_error
+            echo "[Cloud Build] ERROR: Expected Linux binary (${_OUTPUT_NAME}) not found!"
           fi
         else
           echo "skipped" > /workspace/artifacts/build_status_linux
@@ -813,32 +757,18 @@ steps:
         linux_error=$$(cat /workspace/artifacts/linux_error 2>/dev/null || echo "")
         windows_error=$$(cat /workspace/artifacts/windows_error 2>/dev/null || echo "")
 
-        echo "[Cloud Build] Linux: $$linux_status, artifact: $$linux_artifact"
-        echo "[Cloud Build] Windows: $$windows_status, artifact: $$windows_artifact"
+        echo "[Cloud Build] Linux: $${linux_status}, artifact: $${linux_artifact}"
+        echo "[Cloud Build] Windows: $${windows_status}, artifact: $${windows_artifact}"
 
-        all_skipped=true
-        any_completed=false
-        if [[ "$$linux_status" != "skipped" ]]; then 
-          all_skipped=false
-        fi
-        if [[ "$$windows_status" != "skipped" ]]; then 
-          all_skipped=false
-        fi
-        if [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then 
-          any_completed=true
-        fi
-
-        if [[ "$$any_completed" == "true" ]]; then
+        if [[ "$$linux_status" == "completed" || "$$windows_status" == "completed" ]]; then
           overall_status="completed"
-        elif [[ "$$all_skipped" == "true" ]]; then
+        elif [[ "$$linux_status" == "skipped" && "$$windows_status" == "skipped" ]]; then
           overall_status="cancelled"
-        elif [[ "$$linux_status" == "failed" || "$$windows_status" == "failed" ]]; then
-          overall_status="failed"
         else
           overall_status="failed"
         fi
 
-        echo "[Cloud Build] Overall: $$overall_status"
+        echo "[Cloud Build] Overall: $${overall_status}"
 
         linux_download_key=""
         windows_download_key=""
@@ -869,8 +799,8 @@ steps:
         # ${_BUILD_ID} is our CodeVault build ID (passed as substitution)
         payload="{\"build_id\":\"${_BUILD_ID}\",\"cloud_build_id\":\"$BUILD_ID\",\"status\":\"$$overall_status\",\"linux_status\":\"$$linux_status\",\"windows_status\":\"$$windows_status\",\"linux_download_key\":\"$$linux_download_key\",\"windows_download_key\":\"$$windows_download_key\",\"filename\":\"$$filename\",\"error\":\"$$error_msg_escaped\",\"timestamp\":$$(date +%s)}"
 
-        if [ -n "${_CALLBACK_SECRET}" ]; then
-          sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "${_CALLBACK_SECRET}" | awk '{print $$2}')
+        if [ -n "$$WEBHOOK_SECRET" ]; then
+          sig=$$(echo -n "$$payload" | openssl dgst -sha256 -hmac "$$WEBHOOK_SECRET" | awk '{print $$2}')
         else
           sig=""
         fi
@@ -913,6 +843,12 @@ steps:
 
         echo "[Cloud Build] Webhook completed"
     waitFor: ['save-cache']
+    secretEnv: ['WEBHOOK_SECRET']
     volumes:
       - name: 'artifacts'
         path: '/workspace/artifacts'
+
+availableSecrets:
+  secretManager:
+  - versionName: projects/$PROJECT_ID/secrets/CODEVAULT_WEBHOOK_SECRET/versions/latest
+    env: 'WEBHOOK_SECRET'

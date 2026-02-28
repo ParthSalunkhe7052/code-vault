@@ -26,8 +26,7 @@ def inject_js_wrapper(entry_file: Path, config: Dict[str, Any]) -> bool:
 
         shebang = ""
         if original_code.startswith("#!"):
-            first_newline = original_code.find("
-")
+            first_newline = original_code.find("\n")
             if first_newline != -1:
                 shebang = original_code[: first_newline + 1]
                 original_code = original_code[first_newline + 1 :]

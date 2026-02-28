@@ -18,13 +18,17 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict, Any, Callable
 from datetime import timedelta
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to sys.path to find shared modules
+_root = Path(__file__).resolve().parent.parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from shared.security.validation import (
     validate_entry_file,
     validate_output_name,
     PathTraversalError,
 )
+from shared.security.zip_safety import safe_extract_zip
 from shared.utils.subprocess_monitor import (
     wait_for_output_with_timeout as _wait_for_output_with_timeout,
     readline_from_process as _readline_from_process,
@@ -1176,9 +1180,15 @@ def run_remote_build_simple(
 
             # Extract bundle
             try:
-                with zipfile.ZipFile(bundle_path, "r") as zf:
-                    zf.extractall(project_dir)
+                safe_extract_zip(bundle_path, project_dir)
                 logger.info("Bundle extracted successfully")
+            except PathTraversalError as e:
+                error_msg = f"Security violation in ZIP: {e}"
+                logger.error(error_msg)
+                last_error = error_msg
+                # Cleanup before retry
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                continue
             except zipfile.BadZipFile as e:
                 error_msg = f"Invalid ZIP file: {e}"
                 logger.error(error_msg)

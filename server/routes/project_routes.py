@@ -8,6 +8,8 @@ from typing import List, Optional
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
+from shared.security.zip_safety import safe_extract_zip
+from shared.security.validation import PathTraversalError
 
 from database import get_db, release_db
 from utils import (
@@ -503,16 +505,12 @@ async def upload_project_zip(
         source_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                # Validate all paths to prevent Zip Slip vulnerability
-                for member in zip_ref.namelist():
-                    member_path = (source_dir / member).resolve()
-                    if not str(member_path).startswith(str(source_dir.resolve())):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Invalid ZIP: contains path traversal attempt",
-                        )
-                zip_ref.extractall(source_dir)
+            safe_extract_zip(zip_path, source_dir)
+        except PathTraversalError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid ZIP: {e}",
+            )
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid ZIP file")
 

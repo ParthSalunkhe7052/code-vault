@@ -259,14 +259,17 @@ function _lw_getHWID() {
     
     try {
         const networkInterfaces = os.networkInterfaces();
+        const macs = [];
         for (const name of Object.keys(networkInterfaces)) {
             for (const iface of networkInterfaces[name]) {
                 if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
-                    components.push('mac:' + iface.mac);
-                    break;
+                    macs.push(iface.mac.toLowerCase());
                 }
             }
-            if (components.length > 0) break;
+        }
+        if (macs.length > 0) {
+            macs.sort();
+            components.push('mac:' + macs[0]);
         }
     } catch (e) {}
     
@@ -275,18 +278,6 @@ function _lw_getHWID() {
         if (cpus && cpus.length > 0 && cpus[0].model) {
             components.push('cpu:' + cpus[0].model.substring(0, 32));
         }
-    } catch (e) {}
-    
-    try {
-        components.push('host:' + os.hostname());
-    } catch (e) {}
-    
-    try {
-        components.push('mem:' + os.totalmem());
-    } catch (e) {}
-    
-    try {
-        components.push('plat:' + os.platform() + '|' + os.arch());
     } catch (e) {}
     
     if (process.platform === 'win32') {
@@ -299,16 +290,6 @@ function _lw_getHWID() {
                     const diskSerial = lines[1].trim();
                     if (diskSerial && diskSerial !== 'SerialNumber') {
                         components.push('disk:' + diskSerial);
-                    }
-                }
-            } catch (e) {}
-            try {
-                const mbOutput = execSync('wmic baseboard get serialnumber', { encoding: 'utf8', timeout: 5000 });
-                const lines = mbOutput.trim().split('\n');
-                if (lines.length > 1) {
-                    const mbSerial = lines[1].trim();
-                    if (mbSerial && mbSerial !== 'SerialNumber') {
-                        components.push('mb:' + mbSerial);
                     }
                 }
             } catch (e) {}
@@ -1159,14 +1140,17 @@ function _lw_getHWID() {
     
     try {
         const networkInterfaces = _lw_os.networkInterfaces();
+        const macs = [];
         for (const name of Object.keys(networkInterfaces)) {
             for (const iface of networkInterfaces[name]) {
                 if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
-                    components.push('mac:' + iface.mac);
-                    break;
+                    macs.push(iface.mac.toLowerCase());
                 }
             }
-            if (components.length > 0) break;
+        }
+        if (macs.length > 0) {
+            macs.sort();
+            components.push('mac:' + macs[0]);
         }
     } catch (e) {}
     
@@ -1175,18 +1159,6 @@ function _lw_getHWID() {
         if (cpus && cpus.length > 0 && cpus[0].model) {
             components.push('cpu:' + cpus[0].model.substring(0, 32));
         }
-    } catch (e) {}
-    
-    try {
-        components.push('host:' + _lw_os.hostname());
-    } catch (e) {}
-    
-    try {
-        components.push('mem:' + _lw_os.totalmem());
-    } catch (e) {}
-    
-    try {
-        components.push('plat:' + _lw_os.platform() + '|' + _lw_os.arch());
     } catch (e) {}
     
     if (process.platform === 'win32') {
@@ -1199,16 +1171,6 @@ function _lw_getHWID() {
                     const diskSerial = lines[1].trim();
                     if (diskSerial && diskSerial !== 'SerialNumber') {
                         components.push('disk:' + diskSerial);
-                    }
-                }
-            } catch (e) {}
-            try {
-                const mbOutput = execSync('wmic baseboard get serialnumber', { encoding: 'utf8', timeout: 5000 });
-                const lines = mbOutput.trim().split('\n');
-                if (lines.length > 1) {
-                    const mbSerial = lines[1].trim();
-                    if (mbSerial && mbSerial !== 'SerialNumber') {
-                        components.push('mb:' + mbSerial);
                     }
                 }
             } catch (e) {}

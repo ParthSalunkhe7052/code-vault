@@ -138,6 +138,51 @@ function _cv_getMachineSecret() {
 }
 
 function _cv_getHWID() {
+    const components = [];
+    
+    try {
+        const networkInterfaces = _cv_os.networkInterfaces();
+        const macs = [];
+        for (const name of Object.keys(networkInterfaces)) {
+            for (const iface of networkInterfaces[name]) {
+                if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    macs.push(iface.mac.toLowerCase());
+                }
+            }
+        }
+        if (macs.length > 0) {
+            macs.sort();
+            components.push('mac:' + macs[0]);
+        }
+    } catch (e) {}
+    
+    try {
+        const cpus = _cv_os.cpus();
+        if (cpus && cpus.length > 0 && cpus[0].model) {
+            components.push('cpu:' + cpus[0].model.substring(0, 32));
+        }
+    } catch (e) {}
+    
+    if (process.platform === 'win32') {
+        try {
+            const { execSync } = require('child_process');
+            try {
+                const diskOutput = execSync('wmic diskdrive get serialnumber', { encoding: 'utf8', timeout: 5000 });
+                const lines = diskOutput.trim().split('\n');
+                if (lines.length > 1) {
+                    const diskSerial = lines[1].trim();
+                    if (diskSerial && diskSerial !== 'SerialNumber') {
+                        components.push('disk:' + diskSerial);
+                    }
+                }
+            } catch (e) {}
+        } catch (e) {}
+    }
+    
+    if (components.length > 0) {
+        return _cv_crypto.createHash('sha256').update(components.join('|')).digest('hex').substring(0, 32);
+    }
+    
     const cpus = _cv_os.cpus();
     const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'generic';
     const info = `${_cv_os.hostname()}|${_cv_os.platform()}|${_cv_os.arch()}|${_cv_os.totalmem()}|${cpuModel}`;

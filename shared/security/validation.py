@@ -13,7 +13,7 @@ OUTPUT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,99}$")
 DANGEROUS_PATTERNS = [
     "..",  # Parent directory traversal
     "//",  # Double slashes
-    "",  # Double backslashes
+    "\\",  # Double backslashes
     "\x00",  # Null byte injection
     "%2e",  # URL-encoded dot
     "%2f",  # URL-encoded forward slash

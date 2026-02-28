@@ -9,19 +9,9 @@ This template combines the best features from CLI, Server, and Cloud Build versi
 - Offline lease support (24h)
 - Better HWID generation with MAC address
 - Fall back to file logging when GUI unavailable
-
-Usage:
-    from unified_license_wrapper import get_license_wrapper
-
-    wrapper = get_license_wrapper(
-        license_key="LIC-XXXX-XXXX",
-        server_url="https://api.codevault.app",
-        lease_enabled=True,
-        public_key="...",
-        heartbeat_interval=300,
-        app_name="My App"
-    )
 """
+
+import string
 
 UNIFIED_LICENSE_WRAPPER_TEMPLATE = r'''# ============ CODEVAULT LICENSE PROTECTION ============
 # This code protects your application with license validation
@@ -37,20 +27,24 @@ import base64 as _cv_base64
 import uuid as _cv_uuid
 import re as _cv_re
 import atexit as _cv_atexit
+import threading as _cv_threading
+import traceback as _cv_traceback
+import urllib.request as _cv_urllib
+import urllib.error as _cv_urllib_error
 from pathlib import Path as _cv_Path
 
 # Configuration - Do not modify these values directly
-_CV_LICENSE_KEY = "{license_key}"
-_CV_SERVER_URL = "{server_url}"
-_CV_LEASE_ENABLED = {lease_enabled}
-_CV_PUBLIC_KEY = """{public_key}"""
-_CV_BINARY_HASH = "{binary_hash}"
-_CV_HEARTBEAT_INTERVAL = {heartbeat_interval}
-_CV_APP_NAME = "{app_name}"
-_CV_SHOW_BRANDING = {show_branding}
-_CV_BRAND_NAME = "{brand_name}"
-_CV_BRAND_URL = "{brand_url}"
-_CV_BRAND_PRIMARY_COLOR = "{brand_primary_color}"
+_CV_LICENSE_KEY = "${license_key}"
+_CV_SERVER_URL = "${server_url}"
+_CV_LEASE_ENABLED = ${lease_enabled}
+_CV_PUBLIC_KEY = """${public_key}"""
+_CV_BINARY_HASH = "${binary_hash}"
+_CV_HEARTBEAT_INTERVAL = ${heartbeat_interval}
+_CV_APP_NAME = "${app_name}"
+_CV_SHOW_BRANDING = ${show_branding}
+_CV_BRAND_NAME = "${brand_name}"
+_CV_BRAND_URL = "${brand_url}"
+_CV_BRAND_PRIMARY_COLOR = "${brand_primary_color}"
 
 # Lease configuration
 _CV_LEASE_DURATION = 24 * 60 * 60  # 24 hours in seconds
@@ -412,18 +406,39 @@ class _CV_LicenseDialog:
 def _cv_get_hwid():
     """
     Generate robust multi-factor hardware ID for license validation.
-    Uses MAC address, disk serial, CPU ID, and motherboard serial.
+    Uses MAC address, CPU model, and Windows disk serial.
     Gracefully falls back if any factor fails.
     """
     components = []
     
+    # 1. MAC Address - Unify by picking the smallest non-zero MAC
     try:
-        mac = ":".join(_cv_re.findall("..", "%012x" % _cv_uuid.getnode()))
-        components.append(f"mac:{mac}")
+        if _cv_platform.system() == "Windows":
+            import subprocess as _cv_subprocess
+            output = _cv_subprocess.check_output("ipconfig /all", text=True, timeout=5)
+            all_macs = _cv_re.findall(r"Physical Address[. ]+: ([\w-]+)", output)
+            formatted_macs = [m.replace("-", ":").lower() for m in all_macs if m and m != "00-00-00-00-00-00"]
+            if formatted_macs:
+                components.append(f"mac:{sorted(formatted_macs)[0]}")
+        else:
+            mac = ":".join(_cv_re.findall("..", "%012x" % _cv_uuid.getnode()))
+            if mac and mac != "00:00:00:00:00:00":
+                components.append(f"mac:{mac.lower()}")
     except Exception:
         pass
     
+    # 2. CPU Model - Unify with Node.js using Registry on Windows
     if _cv_platform.system() == "Windows":
+        try:
+            import winreg as _cv_winreg
+            key = _cv_winreg.OpenKey(_cv_winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+            cpu_model, _ = _cv_winreg.QueryValueEx(key, "ProcessorNameString")
+            if cpu_model:
+                components.append(f"cpu:{cpu_model.strip()[:32]}")
+        except Exception:
+            pass
+            
+        # 3. Disk Serial - Continue using wmic but with silent failure
         try:
             import subprocess as _cv_subprocess
             result = _cv_subprocess.run(
@@ -437,27 +452,14 @@ def _cv_get_hwid():
                     components.append(f"disk:{disk_serial}")
         except Exception:
             pass
-        
+    else:
+        # Non-Windows fallbacks
         try:
-            import subprocess as _cv_subprocess
-            result = _cv_subprocess.run(
-                ["wmic", "baseboard", "get", "serialnumber"],
-                capture_output=True, text=True, timeout=5
-            )
-            lines = result.stdout.strip().split("\n")
-            if len(lines) > 1:
-                mb_serial = lines[1].strip()
-                if mb_serial and mb_serial != "SerialNumber":
-                    components.append(f"mb:{mb_serial}")
+            cpu_id = _cv_platform.processor()
+            if cpu_id:
+                components.append(f"cpu:{cpu_id[:32]}")
         except Exception:
             pass
-    
-    try:
-        cpu_id = _cv_platform.processor()
-        if cpu_id:
-            components.append(f"cpu:{cpu_id[:32]}")
-    except Exception:
-        pass
     
     if components:
         return _cv_hash.sha256("|".join(components).encode()).hexdigest()[:32]
@@ -663,14 +665,10 @@ def _cv_validate_lease(license_key):
 def _cv_start_heartbeat(license_key, hwid, interval, session_token=None):
     """Start background heartbeat thread for floating licenses."""
     try:
-        import threading as _threading
-        
         def heartbeat_loop():
             while True:
                 _cv_time.sleep(interval)
                 try:
-                    import urllib.request
-                    
                     payload_data = {
                         "license_key": license_key,
                         "hwid": hwid,
@@ -682,18 +680,18 @@ def _cv_start_heartbeat(license_key, hwid, interval, session_token=None):
                     
                     payload = _cv_json.dumps(payload_data).encode('utf-8')
                     
-                    req = urllib.request.Request(
+                    req = _cv_urllib.Request(
                         _CV_SERVER_URL + "/api/v1/license/heartbeat",
                         data=payload,
                         headers={"Content-Type": "application/json"}
                     )
                     
-                    with urllib.request.urlopen(req, timeout=10) as resp:
+                    with _cv_urllib.urlopen(req, timeout=10) as resp:
                         pass
                 except:
                     pass
         
-        t = _threading.Thread(target=heartbeat_loop, daemon=True)
+        t = _cv_threading.Thread(target=heartbeat_loop, daemon=True)
         t.start()
     except:
         pass
@@ -704,21 +702,19 @@ def _cv_release_session():
     if not _CV_SESSION_TOKEN:
         return
     try:
-        import urllib.request
-        
         hwid = _cv_get_hwid()
         payload = _cv_json.dumps({
             "session_token": _CV_SESSION_TOKEN,
             "hwid": hwid
         }).encode('utf-8')
         
-        req = urllib.request.Request(
+        req = _cv_urllib.Request(
             _CV_SERVER_URL + "/api/v1/license/release",
             data=payload,
             headers={"Content-Type": "application/json"}
         )
         
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with _cv_urllib.urlopen(req, timeout=5) as resp:
             pass
     except:
         pass
@@ -866,9 +862,6 @@ def _cv_validate_license():
     
     # Build validation request
     try:
-        import urllib.request
-        import urllib.error
-        
         nonce = _cv_hash.sha256(str(_cv_time.time()).encode()).hexdigest()[:32]
         
         payload = _cv_json.dumps({
@@ -880,14 +873,13 @@ def _cv_validate_license():
             "binary_hash": _cv_get_binary_hash()
         }).encode('utf-8')
         
-        req = urllib.request.Request(
+        req = _cv_urllib.Request(
             _CV_SERVER_URL + "/api/v1/license/validate",
             data=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=15
+            headers={"Content-Type": "application/json"}
         )
         
-        with urllib.request.urlopen(req) as resp:
+        with _cv_urllib.urlopen(req, timeout=15) as resp:
             result = _cv_json.loads(resp.read().decode('utf-8'))
             
             # Verify signature
@@ -919,14 +911,14 @@ def _cv_validate_license():
                 return False
             
             if result.get("status") == "valid":
+                # Save session token
+                _CV_SESSION_TOKEN = result.get("variables", {}).get("_cv_session_token")
+                
                 # Start heartbeat
                 _cv_start_heartbeat(license_key, hwid, _CV_HEARTBEAT_INTERVAL, _CV_SESSION_TOKEN)
                 
                 # Register session release
-                _atexit.register(_cv_release_session)
-                
-                # Save session token
-                _CV_SESSION_TOKEN = result.get("variables", {}).get("_cv_session_token")
+                _cv_atexit.register(_cv_release_session)
                 
                 # Check clock drift and save lease
                 server_time = result.get("server_time", result.get("timestamp", int(_cv_time.time())))
@@ -983,10 +975,8 @@ def _cv_validate_license():
 
 def _cv_excepthook(exc_type, exc_value, exc_tb):
     """Global exception handler for user code crashes."""
-    import traceback
-    
     error_msg = f"Type: {exc_type.__name__}\nMessage: {exc_value}"
-    details = traceback.format_exc()
+    details = _cv_traceback.format_exc()
     
     _cv_show_error("APPLICATION ERROR",
                   "An unexpected error occurred in the application.",
@@ -1020,40 +1010,22 @@ def get_license_wrapper(
     brand_primary_color: str = "#6366f1",
 ) -> str:
     """
-    Get the unified license wrapper code.
-
-    Args:
-        license_key: License key to embed (or "DEMO" or "GENERIC_BUILD")
-        server_url: Server URL for license validation
-        lease_enabled: Whether to enable offline lease (default: True)
-        public_key: Ed25519 public key PEM for signature verification
-        binary_hash: SHA-256 hash of binary for integrity checking (default: "skip")
-        heartbeat_interval: Heartbeat interval in seconds (default: 300)
-        app_name: Application name for UI (default: "Protected Application")
-        show_branding: Show CodeVault branding (default: True for free tier)
-        brand_name: Custom brand name (Business/Enterprise only)
-        brand_url: Custom brand URL (Business/Enterprise only)
-        brand_primary_color: Custom primary color hex (Business/Enterprise only)
-
-    Returns:
-        Complete wrapper code ready to be prepended to user code
+    Get the unified license wrapper code using string.Template for security.
     """
-    code = UNIFIED_LICENSE_WRAPPER_TEMPLATE.replace("{license_key}", license_key)
-    code = code.replace("{server_url}", server_url)
-    code = code.replace("{lease_enabled}", "True" if lease_enabled else "False")
-    code = code.replace("{public_key}", public_key if public_key else "")
-    code = code.replace("{binary_hash}", binary_hash if binary_hash else "skip")
-    code = code.replace("{heartbeat_interval}", str(heartbeat_interval))
-    code = code.replace("{app_name}", app_name)
-    code = code.replace("{show_branding}", "True" if show_branding else "False")
-    code = code.replace("{brand_name}", brand_name if brand_name else "CodeVault")
-    code = code.replace(
-        "{brand_url}", brand_url if brand_url else "https://codevault.dev"
-    )
-    code = code.replace(
-        "{brand_primary_color}",
-        brand_primary_color if brand_primary_color else "#6366f1",
-    )
+    template = string.Template(UNIFIED_LICENSE_WRAPPER_TEMPLATE)
+    code = template.safe_substitute({
+        "license_key": license_key,
+        "server_url": server_url,
+        "lease_enabled": "True" if lease_enabled else "False",
+        "public_key": public_key if public_key else "",
+        "binary_hash": binary_hash if binary_hash else "skip",
+        "heartbeat_interval": str(heartbeat_interval),
+        "app_name": app_name,
+        "show_branding": "True" if show_branding else "False",
+        "brand_name": brand_name if brand_name else "CodeVault",
+        "brand_url": brand_url if brand_url else "https://codevault.dev",
+        "brand_primary_color": brand_primary_color if brand_primary_color else "#6366f1",
+    })
 
     return code
 
