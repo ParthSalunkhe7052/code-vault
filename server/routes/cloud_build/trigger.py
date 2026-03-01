@@ -114,6 +114,15 @@ async def start_cloud_build(
         }
         await BuildRepository.create_build(conn, build_data)
 
+        # 3.5 Create placeholder artifacts
+        for platform in data.target_platforms:
+            await BuildRepository.create_artifact(conn, {
+                "id": f"art_{secrets.token_hex(8)}",
+                "build_id": build_id,
+                "platform": platform,
+                "status": "pending"
+            })
+
         # 4. Trigger build
         try:
             from config import (

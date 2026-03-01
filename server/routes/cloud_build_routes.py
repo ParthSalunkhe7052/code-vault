@@ -2505,7 +2505,7 @@ async def retry_build(
             raise HTTPException(400, "Maximum retry attempts (3) reached")
 
         # Create new build with incremented retry count
-        new_build_id = f"bld_{secrets.token_hex(8)}"
+        new_build_id = secrets.token_hex(16)
         config = json.loads(build["config_json"]) if build["config_json"] else {}
         
         output_name = config.get("output_name", "app")
