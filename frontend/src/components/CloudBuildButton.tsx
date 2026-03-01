@@ -8,10 +8,10 @@ import { useAuth } from '../contexts/AuthContext';
  * Platform configuration for display
  */
 interface PlatformMeta {
-    name: string;
-    emoji: string | null;
-    icon: LucideIcon | null;
-    extension: string;
+  name: string;
+  emoji: string | null;
+  icon: LucideIcon | null;
+  extension: string;
 }
 
 const PLATFORM_INFO: Record<string, PlatformMeta> = {
@@ -21,26 +21,26 @@ const PLATFORM_INFO: Record<string, PlatformMeta> = {
 };
 
 interface CloudBuildButtonProps {
-    projectId: string;
-    licenseId?: string | undefined;
-    targetPlatforms?: string[];
-    licenseMode?: string;
-    demoDuration?: number;
-    onComplete?: (data: any) => void;
-    className?: string;
+  projectId: string;
+  licenseId?: string | undefined;
+  targetPlatforms?: string[];
+  licenseMode?: string;
+  demoDuration?: number;
+  onComplete?: (data: any) => void;
+  className?: string;
 }
 
 /**
  * CloudBuildButton - Trigger cloud builds with multi-platform support
  */
-export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({ 
-  projectId, 
-  licenseId, 
+export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
+  projectId,
+  licenseId,
   targetPlatforms = ['windows'],
   licenseMode = 'generic',
   demoDuration = 60,
-  onComplete, 
-  className = "" 
+  onComplete,
+  className = ""
 }) => {
   const projectBuild = useProjectBuild(projectId);
   const { isAdmin } = useAuth();
@@ -53,11 +53,11 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
   const [stage, setStage] = useState('');
   const [adminErrorDetails, setAdminErrorDetails] = useState<any>(null);
   const [showAdminDetails, setShowAdminDetails] = useState(false);
-  
+
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [platformArtifacts, setPlatformArtifacts] = useState<Record<string, any>>({});
   const isMultiPlatform = targetPlatforms.length > 1;
-  
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -84,12 +84,12 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
 
   const pollStatus = useCallback(async (id: string) => {
     let pollCount = 0;
-    
+
     const checkStatus = async () => {
       try {
         pollCount++;
         const shouldSync = pollCount % 5 === 0;
-        
+
         if (isMultiPlatform) {
           const response = await api.get(`/cloud-build/${id}/status${shouldSync ? '?sync=true' : ''}`);
           const artifacts = response.data?.artifacts || [];
@@ -99,12 +99,12 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           if (isAdmin && response.data?.admin_error_details) {
             setAdminErrorDetails(response.data.admin_error_details);
           }
-          
+
           const updatedArtifacts: Record<string, any> = {};
           let totalProgress = 0;
           let completedCount = 0;
           let failedCount = 0;
-          
+
           artifacts.forEach((artifact: any) => {
             updatedArtifacts[artifact.platform] = {
               status: artifact.status,
@@ -113,7 +113,7 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
               filename: artifact.filename,
               error: artifact.error,
             };
-            
+
             if (artifact.status === 'completed') {
               completedCount++;
               totalProgress += 100;
@@ -124,25 +124,25 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
               totalProgress += 50;
             }
           });
-          
+
           setPlatformArtifacts(updatedArtifacts);
           setProgress(Math.round(totalProgress / targetPlatforms.length));
-          
+
           const allDone = completedCount + failedCount === targetPlatforms.length;
           if (allDone) {
             const finalStatus = failedCount === targetPlatforms.length ? 'failed' : 'completed';
             setStatus(finalStatus);
             if (finalStatus === 'failed') {
-                const errors = artifacts.filter((a: any) => a.error).map((a: any) => `${a.platform}: ${a.error}`);
-                setError(errors.length > 0 ? errors.join('; ') : 'All platform builds failed');
+              const errors = artifacts.filter((a: any) => a.error).map((a: any) => `${a.platform}: ${a.error}`);
+              setError(errors.length > 0 ? errors.join('; ') : 'All platform builds failed');
             }
-            
+
             if (projectBuild && projectBuild.updateStatus) {
-                projectBuild.updateStatus({
-                    status: finalStatus,
-                    progress: 100,
-                    artifacts: Object.values(updatedArtifacts)
-                });
+              projectBuild.updateStatus({
+                status: finalStatus,
+                progress: 100,
+                artifacts: Object.values(updatedArtifacts)
+              });
             }
 
             if (onComplete) onComplete({ artifacts: updatedArtifacts });
@@ -150,25 +150,25 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           }
         } else {
           const response = await api.get(`/cloud-build/${id}/status${shouldSync ? '?sync=true' : ''}`);
-          const { 
-            status: buildStatus, 
-            progress: buildProgress, 
-            download_url, 
+          const {
+            status: buildStatus,
+            progress: buildProgress,
+            download_url,
             download_key,
             error: buildError,
             artifacts,
             stage: buildStage,
             admin_error_details: backendAdminDetails
           } = response.data;
-          
+
           setProgress(buildProgress || 0);
           if (buildStage) {
             setStage(buildStage);
           }
-          
+
           let finalDownloadUrl = download_url || download_key;
           let finalError = buildError;
-          
+
           if (artifacts && artifacts.length > 0) {
             const artifact = artifacts[0];
             if (!finalDownloadUrl && artifact.download_url) {
@@ -178,16 +178,16 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
               finalError = artifact.error;
             }
           }
-          
+
           if (backendAdminDetails && isAdmin) {
             setAdminErrorDetails(backendAdminDetails);
           }
-          
+
           if (buildStatus === 'completed') {
             setStatus('completed');
             setDownloadUrl(finalDownloadUrl);
             if (projectBuild && projectBuild.updateStatus) {
-                projectBuild.updateStatus(response.data);
+              projectBuild.updateStatus(response.data);
             }
             if (onComplete) onComplete(response.data);
             return;
@@ -195,26 +195,26 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
             setStatus('failed');
             setError(finalError || "Build failed - check logs for details");
             if (projectBuild && projectBuild.updateStatus) {
-                projectBuild.updateStatus(response.data);
+              projectBuild.updateStatus(response.data);
             }
             return;
           } else if (buildStatus === 'cancelled') {
             setStatus('cancelled');
             setError('Build was cancelled');
             if (projectBuild && projectBuild.updateStatus) {
-                projectBuild.updateStatus(response.data);
+              projectBuild.updateStatus(response.data);
             }
             return;
           }
         }
-        
+
         pollIntervalRef.current = setTimeout(checkStatus, 3000);
       } catch (err) {
         console.error('Status check failed:', err);
         pollIntervalRef.current = setTimeout(checkStatus, 5000);
       }
     };
-    
+
     checkStatus();
   }, [isMultiPlatform, targetPlatforms, projectBuild, onComplete]);
 
@@ -227,7 +227,7 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
     setDisplayProgress(5);
     setDownloadUrl(null);
     setPlatformArtifacts({});
-    
+
     try {
       const endpoint = '/cloud-build/start';
       const payload = {
@@ -237,17 +237,17 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
         license_mode: licenseMode,
         demo_duration: demoDuration,
       };
-      
+
       const response = await api.post(endpoint, payload);
       const newBuildId = response.data.build_id;
-      
+
       setBuildId(newBuildId);
       setStatus('building');
-      
+
       if (projectBuild && projectBuild.start) {
-          projectBuild.start(newBuildId);
+        projectBuild.start(newBuildId);
       }
-      
+
       if (isMultiPlatform) {
         const initialArtifacts: Record<string, any> = {};
         targetPlatforms.forEach(p => {
@@ -255,7 +255,7 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
         });
         setPlatformArtifacts(initialArtifacts);
       }
-      
+
       pollStatus(newBuildId);
     } catch (err: any) {
       setStatus('failed');
@@ -311,31 +311,31 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
 
   useEffect(() => {
     if (projectBuild && projectBuild.status) {
-       if (['pending', 'queued', 'running'].includes(projectBuild.status)) {
-           setStatus('building');
-           setBuildId(projectBuild.jobId || null);
-           if (typeof projectBuild.progress === 'number') {
-             setProgress(projectBuild.progress);
-           }
-           if (status === 'idle' && projectBuild.jobId) {
-             pollStatus(projectBuild.jobId);
-           }
-       }
-       if (projectBuild.status === 'completed' && status === 'building') {
-           if (!pollIntervalRef.current && projectBuild.jobId) {
-               pollStatus(projectBuild.jobId);
-           }
-       }
-       if (projectBuild.status === 'failed') {
-           setStatus('failed');
-           if (projectBuild.error) {
-             setError(projectBuild.error);
-           }
-       }
-       if (projectBuild.status === 'cancelled') {
-           setStatus('cancelled');
-           setError('Build was cancelled');
-       }
+      if (['pending', 'queued', 'running'].includes(projectBuild.status)) {
+        setStatus('building');
+        setBuildId(projectBuild.jobId || null);
+        if (typeof projectBuild.progress === 'number') {
+          setProgress(projectBuild.progress);
+        }
+        if (status === 'idle' && projectBuild.jobId) {
+          pollStatus(projectBuild.jobId);
+        }
+      }
+      if (projectBuild.status === 'completed' && status === 'building') {
+        if (!pollIntervalRef.current && projectBuild.jobId) {
+          pollStatus(projectBuild.jobId);
+        }
+      }
+      if (projectBuild.status === 'failed') {
+        setStatus('failed');
+        if (projectBuild.error) {
+          setError(projectBuild.error);
+        }
+      }
+      if (projectBuild.status === 'cancelled') {
+        setStatus('cancelled');
+        setError('Build was cancelled');
+      }
     }
   }, [projectBuild, status, pollStatus]);
 
@@ -381,23 +381,23 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           {stage && (
             <p className="text-xs text-slate-500">{stage}</p>
           )}
-          
+
           <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
-            <div 
+            <div
               className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-300 ease-out relative"
               style={{ width: `${Math.max(5, displayProgress)}%` }}
             >
               <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
             </div>
           </div>
-          
+
           {isMultiPlatform && Object.keys(platformArtifacts).length > 0 && (
             <div className="space-y-2 mt-3 pt-3 border-t border-slate-700">
               {targetPlatforms.map(platformId => {
                 const artifact = platformArtifacts[platformId] || { status: 'pending' };
                 const platform = PLATFORM_INFO[platformId];
                 const IconComponent = platform?.icon;
-                
+
                 return (
                   <div key={platformId} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
@@ -431,7 +431,7 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
               })}
             </div>
           )}
-          
+
           <button
             onClick={cancelBuild}
             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm transition-colors"
@@ -460,7 +460,7 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           <div className="flex items-center gap-2 text-emerald-400 font-medium">
             <CheckCircle className="w-5 h-5" /> {isMultiPlatform ? 'All builds completed!' : 'Build completed successfully!'}
           </div>
-          
+
           {!isMultiPlatform && (
             downloadUrl ? (
               <a
@@ -473,14 +473,14 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
               </a>
             ) : (
               <div className="text-center p-2">
-                 <p className="text-sm text-emerald-400 mb-2">Build Successful</p>
-                 <span className="text-xs text-slate-400 flex items-center justify-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Finalizing download...
-                 </span>
+                <p className="text-sm text-emerald-400 mb-2">Build Successful</p>
+                <span className="text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Finalizing download...
+                </span>
               </div>
             )
           )}
-          
+
           {isMultiPlatform && (
             <div className="space-y-2">
               {targetPlatforms.map(platformId => {
@@ -522,7 +522,18 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           <div className="flex items-center gap-2 text-red-400 font-medium">
             <XCircle className="w-5 h-5" /> Build failed
           </div>
-          <p className="text-sm text-red-300 bg-red-950/30 p-2 rounded">{error}</p>
+
+          <div className="text-sm text-red-300 bg-red-950/40 p-3 rounded-lg border border-red-900/50 space-y-2">
+            <p className="font-medium text-red-200 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              Compilation error detected in your uploaded files:
+            </p>
+            <pre className="font-mono whitespace-pre-wrap text-red-400 break-all text-xs bg-black/40 p-2 rounded mt-2">{error}</pre>
+            <p className="text-red-300 mt-3 border-t border-red-900/50 pt-2">
+              <strong>Action required:</strong> Please fix the error above in your source code, recreate your project source files, and re-upload them in the "Upload" tab to try compiling again.
+            </p>
+          </div>
+
           {isAdmin && adminErrorDetails && (
             <div className="mt-3">
               <button onClick={() => setShowAdminDetails(!showAdminDetails)} className="flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 mb-2">

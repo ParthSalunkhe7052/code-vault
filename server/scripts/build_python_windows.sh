@@ -36,13 +36,16 @@ decoded_config=$(cat /workspace/config.json)
 
 echo "[Cloud Build] Running cloud_runner.py for Windows build..."
 set +e
-wine python "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_config" --source "$(winepath -w $(realpath ./project/source))" 2>&1
+output=$(wine python "./project/source/.github/scripts/cloud_runner.py" --config "$decoded_config" --source "$(winepath -w $(realpath ./project/source))" 2>&1)
 runner_exit_code=$?
 set -e
 
+echo "$output"
+
 if [ $runner_exit_code -ne 0 ]; then
   echo "[Cloud Build] ERROR: cloud_runner.py exited with code $runner_exit_code"
-  echo "Build runner failed with exit code $runner_exit_code" > ./project/source/error_message.txt
+  error_snippet=$(echo "$output" | grep -v "wine:" | grep -v "fixme:" | tail -n 5)
+  echo "Build Failed: $error_snippet" > ./project/source/error_message.txt
 fi
 
 windows_artifacts=""

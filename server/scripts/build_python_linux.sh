@@ -29,7 +29,19 @@ if [ -d /workspace/.nuitka-cache ]; then
   cp -r /workspace/.nuitka-cache/. "${HOME}/.cache/Nuitka/" 2>/dev/null || true
 fi
 
-python3 "./project/source/.github/scripts/cloud_runner.py" --config "${decoded_config}" --source "./project/source" || true
+echo "[Cloud Build] Running cloud_runner.py for Linux build..."
+set +e
+output=$(python3 "./project/source/.github/scripts/cloud_runner.py" --config "${decoded_config}" --source "./project/source" 2>&1)
+runner_exit_code=$?
+set -e
+
+echo "$output"
+
+if [ $runner_exit_code -ne 0 ]; then
+  echo "[Cloud Build] ERROR: cloud_runner.py exited with code $runner_exit_code"
+  error_snippet=$(echo "$output" | tail -n 5)
+  echo "Build Failed: $error_snippet" > ./project/source/error_message.txt
+fi
 
 cd "./project/source"
 
