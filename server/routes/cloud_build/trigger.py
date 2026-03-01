@@ -131,6 +131,10 @@ async def start_cloud_build(
             logger.info(f"[CloudBuild] Packaging local source {source_dir} and uploading to R2 for build {build_id}")
             source_url = await upload_source_to_r2(build_id, source_dir)
             
+            output_name = project_settings.get("output_name", "app")
+            if not output_name or not str(output_name).strip():
+                output_name = "app"
+                
             # Prepare config JSON for GCP build
             full_config = {
                 "project_id": data.project_id,
@@ -140,7 +144,7 @@ async def start_cloud_build(
                 "license_mode": data.license_mode,
                 "demo_duration": data.demo_duration,
                 "compiler_options": compiler_options,
-                "output_name": project_settings.get("output_name", "app"),
+                "output_name": output_name,
             }
             logger.info(f"[CloudBuild] Uploading config.json to R2 for build {build_id}")
             config_url = await upload_config_to_r2(build_id, full_config)
@@ -156,7 +160,7 @@ async def start_cloud_build(
                 "config": full_config,
                 "callback_url": f"{PUBLIC_API_URL}/api/v1/cloud-build/webhook",
                 "callback_secret": BUILD_CALLBACK_SECRET or "",
-                "output_name": project_settings.get("output_name", "app"),
+                "output_name": output_name,
                 "compatibility_mode": data.compatibility_mode,
                 "license_mode": data.license_mode,
                 "demo_duration": data.demo_duration,
