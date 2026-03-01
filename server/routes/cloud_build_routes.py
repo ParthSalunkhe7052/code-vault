@@ -472,11 +472,15 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
             bucket = storage_service.bucket
 
             # Upload build-specific source
+            logger.info(f"[Upload] Uploading source to EXACT R2 bucket='{bucket}', key='{key}', size={len(content)}")
             s3.put_object(Bucket=bucket, Key=key, Body=content)
+            logger.info(f"[Upload] Successfully uploaded to R2")
 
-            return s3.generate_presigned_url(
+            presigned = s3.generate_presigned_url(
                 "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
             )
+            logger.info(f"[Upload] Generated presigned source url for '{key}': {presigned[:100]}...")
+            return presigned
         else:
             if ENVIRONMENT == "production":
                 raise HTTPException(500, "Cloud Builds require R2 in production.")
@@ -502,11 +506,15 @@ async def upload_config_to_r2(build_id: str, config: dict) -> str:
         bucket = storage_service.bucket
 
         # Upload config JSON
+        logger.info(f"[Upload] Uploading config to EXACT R2 bucket='{bucket}', key='{key}', size={len(config_bytes)}")
         s3.put_object(Bucket=bucket, Key=key, Body=config_bytes)
+        logger.info(f"[Upload] Successfully uploaded config to R2")
 
-        return s3.generate_presigned_url(
+        presigned = s3.generate_presigned_url(
             "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
         )
+        logger.info(f"[Upload] Generated presigned config url for '{key}': {presigned[:100]}...")
+        return presigned
     else:
         if ENVIRONMENT == "production":
             raise HTTPException(500, "Cloud Builds require R2 in production.")
