@@ -2507,6 +2507,11 @@ async def retry_build(
         # Create new build with incremented retry count
         new_build_id = f"bld_{secrets.token_hex(8)}"
         config = json.loads(build["config_json"]) if build["config_json"] else {}
+        
+        output_name = config.get("output_name", "app")
+        if not output_name or not str(output_name).strip():
+            output_name = "app"
+            config["output_name"] = "app"
 
         await conn.execute(
             """
@@ -2520,7 +2525,7 @@ async def retry_build(
             user["id"],
             config.get("language", "python"),
             config.get("entry_file", "main.py"),
-            config.get("output_name", "app"),
+            output_name,
             json.dumps(config),
             json.dumps(config.get("target_platforms", ["windows"])),
             retry_count + 1,
