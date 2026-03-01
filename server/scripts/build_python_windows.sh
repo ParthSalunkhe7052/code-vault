@@ -70,10 +70,10 @@ if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
   if command -v zip &> /dev/null; then
     zip -r -q "/workspace/{output_name}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
   else
-    python3 -c "
+    wine python -c "
 import zipfile, os
 dn, on = '$dist_name', '{output_name}'
-zf = zipfile.ZipFile(f'/workspace/{{on}}.zip', 'w', zipfile.ZIP_DEFLATED)
+zf = zipfile.ZipFile(f'Z:\\workspace\\{on}.zip', 'w', zipfile.ZIP_DEFLATED)
 for r, ds, fs in os.walk(dn):
   ds[:] = [d for d in ds if d != '__pycache__']
   for f in fs:
