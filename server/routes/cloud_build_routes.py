@@ -1150,7 +1150,10 @@ async def build_webhook(request: Request):
     download_url = payload.download_url
     download_key = payload.download_key
     filename = payload.filename
-    error = payload.error
+    # Fix #3: Strip whitespace from error field — build scripts send " " when no error
+    error = payload.error.strip() if payload.error else None
+    if error == "":
+        error = None
     linux_status = payload.linux_status
     windows_status = payload.windows_status
 
@@ -1223,27 +1226,35 @@ async def build_webhook(request: Request):
                 if linux_download_key:
                     linux_filename = linux_download_key.split("/")[-1]
                     linux_artifact_status = linux_status or "completed"
-                    await conn.execute(
+                    # Fix #1A: Removed status IN filter — it silently blocked download_key storage
+                    # when artifact status was set by a previous sync or race condition.
+                    result = await conn.execute(
                         """
                         UPDATE cloud_build_artifacts
                         SET status = $1, download_key = $2, download_filename = $3, 
                             completed_at = NOW()
-                        WHERE build_id = $4 AND platform = 'linux' AND status IN ('pending', 'running', 'completed')
+                        WHERE build_id = $4 AND platform = 'linux'
                         """,
                         linux_artifact_status,
                         linux_download_key,
                         linux_filename,
                         build_id,
                     )
-                    logger.info(
-                        f"[CloudBuild] Updated Linux artifact with key: {linux_download_key}, status: {linux_artifact_status}"
-                    )
+                    rows_updated = int(result.split()[-1]) if result else 0
+                    if rows_updated == 0:
+                        logger.warning(
+                            f"[CloudBuild] Linux artifact UPDATE matched 0 rows for build_id={build_id} — artifact record may be missing"
+                        )
+                    else:
+                        logger.info(
+                            f"[CloudBuild] Updated Linux artifact with key: {linux_download_key}, status: {linux_artifact_status}"
+                        )
                 elif linux_status:
                     await conn.execute(
                         """
                         UPDATE cloud_build_artifacts
                         SET status = $1, error_message = $2, completed_at = NOW()
-                        WHERE build_id = $3 AND platform = 'linux' AND status IN ('pending', 'running')
+                        WHERE build_id = $3 AND platform = 'linux' AND status NOT IN ('completed', 'failed', 'cancelled')
                         """,
                         linux_status,
                         error if linux_status == "failed" else None,
@@ -1253,27 +1264,34 @@ async def build_webhook(request: Request):
                 if windows_download_key:
                     windows_filename = windows_download_key.split("/")[-1]
                     windows_artifact_status = windows_status or "completed"
-                    await conn.execute(
+                    # Fix #1A: Removed status IN filter — same race condition fix as Linux
+                    result = await conn.execute(
                         """
                         UPDATE cloud_build_artifacts
                         SET status = $1, download_key = $2, download_filename = $3, 
                             completed_at = NOW()
-                        WHERE build_id = $4 AND platform = 'windows' AND status IN ('pending', 'running', 'completed')
+                        WHERE build_id = $4 AND platform = 'windows'
                         """,
                         windows_artifact_status,
                         windows_download_key,
                         windows_filename,
                         build_id,
                     )
-                    logger.info(
-                        f"[CloudBuild] Updated Windows artifact with key: {windows_download_key}, status: {windows_artifact_status}"
-                    )
+                    rows_updated = int(result.split()[-1]) if result else 0
+                    if rows_updated == 0:
+                        logger.warning(
+                            f"[CloudBuild] Windows artifact UPDATE matched 0 rows for build_id={build_id} — artifact record may be missing"
+                        )
+                    else:
+                        logger.info(
+                            f"[CloudBuild] Updated Windows artifact with key: {windows_download_key}, status: {windows_artifact_status}"
+                        )
                 elif windows_status:
                     await conn.execute(
                         """
                         UPDATE cloud_build_artifacts
                         SET status = $1, error_message = $2, completed_at = NOW()
-                        WHERE build_id = $3 AND platform = 'windows' AND status IN ('pending', 'running')
+                        WHERE build_id = $3 AND platform = 'windows' AND status NOT IN ('completed', 'failed', 'cancelled')
                         """,
                         windows_status,
                         error if windows_status == "failed" else None,
@@ -1957,6 +1975,20 @@ async def get_build_status(
                     )
                     art["provenance_token"] = provenance_token
 
+        # Fix #1B: Belt-and-suspenders — if a single-artifact build completed but the
+        # artifact-level download_url is still None (e.g., download_key wasn't recovered),
+        # generate it directly from the build-level download_key stored by the webhook.
+        if build["status"] == "completed" and len(artifact_list) == 1:
+            if not artifact_list[0].get("download_url"):
+                build_dk = build.get("download_key")
+                if build_dk:
+                    recovered_url = generate_gcs_signed_url(build_dk)
+                    if recovered_url:
+                        artifact_list[0]["download_url"] = recovered_url
+                        logger.info(
+                            f"[CloudBuild] Fix #1B: Recovered download URL from build-level key for {build_id}"
+                        )
+
         # Backward compatibility for single artifact builds
         if len(artifact_list) == 1:
             response["download_key"] = artifact_list[0].get("download_url")
@@ -2628,7 +2660,11 @@ async def proxy_download(
     build_id: str,
     platform: str,
 ):
-    """Proxy download for cloud build artifacts to bypass Workload Identity signed URL limits."""
+    """Proxy download for cloud build artifacts to bypass Workload Identity signed URL limits.
+    
+    Streams in 64KB chunks instead of loading the full artifact into memory,
+    preventing OOM on Heroku dynos when artifacts are large.
+    """
     conn = await get_db()
     try:
         # Note: Removing get_current_user dependency here to make it easier for the frontend
@@ -2654,37 +2690,74 @@ async def proxy_download(
         from routes.cloud_build_utils import get_gcs_client_with_credentials
         from config import GCS_BUILDS_BUCKET
         from fastapi.responses import StreamingResponse
-        import io
         
-        # 1. Try GCS first
+        CHUNK_SIZE = 64 * 1024  # 64KB chunks — avoids OOM on Heroku 512MB dynos
+        
+        # 1. Try GCS first — stream in chunks, not all-at-once
         gcs_client, _ = get_gcs_client_with_credentials()
         if gcs_client:
             bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
             blob = bucket.blob(download_key)
             if blob.exists():
-                file_bytes = blob.download_as_bytes()
-                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                # Reload metadata to get accurate size for Content-Length
+                blob.reload()
+                blob_size = blob.size
+
+                def gcs_chunk_generator():
+                    with blob.open("rb") as f:
+                        while True:
+                            chunk = f.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            yield chunk
+
+                headers = {
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Type": "application/zip"
+                    if filename.endswith(".zip")
+                    else "application/octet-stream",
+                }
+                if blob_size:
+                    headers["Content-Length"] = str(blob_size)
                 return StreamingResponse(
-                    io.BytesIO(file_bytes),
-                    media_type="application/octet-stream",
-                    headers=headers
+                    gcs_chunk_generator(),
+                    media_type=headers["Content-Type"],
+                    headers=headers,
                 )
                 
-        # 2. Add fallback to R2
+        # 2. Fallback to R2 — stream response body in chunks
         if storage_service.is_cloud_enabled() and storage_service.client:
             try:
-                response = storage_service.client.get_object(
+                r2_response = storage_service.client.get_object(
                     Bucket=storage_service.bucket, Key=download_key
                 )
-                file_bytes = response["Body"].read()
-                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                body = r2_response["Body"]
+                content_length = r2_response.get("ContentLength")
+
+                def r2_chunk_generator():
+                    while True:
+                        chunk = body.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        yield chunk
+
+                headers = {
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Type": "application/zip"
+                    if filename.endswith(".zip")
+                    else "application/octet-stream",
+                }
+                if content_length:
+                    headers["Content-Length"] = str(content_length)
                 return StreamingResponse(
-                    io.BytesIO(file_bytes),
-                    media_type="application/octet-stream",
-                    headers=headers
+                    r2_chunk_generator(),
+                    media_type=headers["Content-Type"],
+                    headers=headers,
                 )
             except Exception as e:
                 logger.debug(f"[CloudBuild] Proxy download failed for R2: {e}")
+                
+
                 
         raise HTTPException(404, "Artifact file not found in storage")
     finally:

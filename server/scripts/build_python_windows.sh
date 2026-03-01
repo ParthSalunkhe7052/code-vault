@@ -7,6 +7,7 @@ fi
 
 echo "[Cloud Build] ===== Building for Windows ====="
 export NUITKA_CACHE_DIR=/workspace/.nuitka-cache
+export NUITKA_JOBS=4
 mkdir -p $NUITKA_CACHE_DIR
 
 # Restore MinGW cache (avoids re-downloading ~300MB toolchain each build)
@@ -17,7 +18,8 @@ if [ -d /workspace/.mingw-cache ]; then
   echo "[Cloud Build] MinGW cache restored"
 fi
 
-wine python -m pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography pefile
+wine python -m pip install --quiet --disable-pip-version-check nuitka==2.4.8
+wine python -m pip install --quiet --disable-pip-version-check ordered-set zstandard requests cryptography pefile
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   echo "cloud_runner.py not found" > ./project/source/error_message.txt

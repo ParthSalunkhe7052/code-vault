@@ -337,10 +337,15 @@ fi
 
     def _create_extract_source_step(self) -> Dict[str, Any]:
         """Create source extraction step."""
+        # Speed optimization: Use Python's built-in zipfile instead of apt-get install unzip.
+        # Saves ~8s per build (apt-get update + install on a fresh container is slow).
         script = """set -e
-apt-get update -qq && apt-get install -y -qq unzip > /dev/null 2>&1
 echo "[Cloud Build] Extracting source..."
-unzip -q source.zip -d ./extracted
+python3 -c "
+import zipfile, shutil, os
+with zipfile.ZipFile('source.zip', 'r') as zf:
+    zf.extractall('./extracted')
+"
 mkdir -p ./project/source
 if [ -d "./extracted/.github" ]; then
   cp -r ./extracted/. ./project/source/
@@ -350,11 +355,12 @@ elif [ -d "./extracted/source" ]; then
 else
   cp -r ./extracted/. ./project/source/ 2>/dev/null || true
 fi
+rm -rf ./extracted
 echo "[Cloud Build] Source prepared"
 """
 
         return {
-            "name": "ubuntu",
+            "name": "gcr.io/cloud-builders/gsutil",
             "id": "extract-source",
             "args": ["-c", script],
             "entrypoint": "bash",
