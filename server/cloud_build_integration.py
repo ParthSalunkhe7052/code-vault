@@ -316,7 +316,14 @@ echo "Target: {target_platforms}, Output: {output_name}"
 if [[ "{source_url}" == gs://* ]]; then
   gsutil cp "{source_url}" source.zip
 else
-  curl -L -o source.zip "{source_url}"
+  # Debug: Print the exact URL being curled, without the signature if possible
+  echo "Curling source URL..."
+  http_code=$$(curl -sL -w "%{{http_code}}" -o source.zip "{source_url}")
+  if [ "$$http_code" != "200" ]; then
+    echo "[ERROR] source.zip download failed with HTTP $$http_code"
+    cat source.zip
+    exit 1
+  fi
 fi
 """
 
@@ -371,7 +378,12 @@ echo "[Cloud Build] Downloading config..."
 if [[ "{config_url}" == gs://* ]]; then
   gsutil cp "{config_url}" /workspace/config.json
 else
-  curl -L -o /workspace/config.json "{config_url}"
+  http_code=$$(curl -sL -w "%{{http_code}}" -o /workspace/config.json "{config_url}")
+  if [ "$$http_code" != "200" ]; then
+    echo "[ERROR] config.json download failed with HTTP $$http_code"
+    cat /workspace/config.json
+    exit 1
+  fi
 fi
 """
 
