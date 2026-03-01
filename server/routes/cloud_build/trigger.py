@@ -121,27 +121,46 @@ async def start_cloud_build(
                 BUILD_CALLBACK_SECRET,
                 GCS_BUILDS_BUCKET,
             )
+            from routes.cloud_build_routes import upload_source_to_r2, upload_config_to_r2
             
             # Use storage service to get a signed URL for the source code
-            # Note: The ZIP should already be uploaded to storage
-            source_key = f"projects/{data.project_id}/source.zip"
-            source_url = storage_service.generate_presigned_url(
-                source_key, expires_in=3600
-            )
+            source_dir = UPLOAD_DIR / data.project_id / "source"
+            if not source_dir.exists():
+                raise HTTPException(status_code=400, detail="No source code found. Please re-upload your project files.")
             
-            # Prepare config for GCP build
+            logger.info(f"[CloudBuild] Packaging local source {source_dir} and uploading to R2 for build {build_id}")
+            source_url = await upload_source_to_r2(build_id, source_dir)
+            
+            # Prepare config JSON for GCP build
+            full_config = {
+                "project_id": data.project_id,
+                "language": language,
+                "target_platforms": data.target_platforms,
+                "compatibility_mode": data.compatibility_mode,
+                "license_mode": data.license_mode,
+                "demo_duration": data.demo_duration,
+                "compiler_options": compiler_options,
+                "output_name": project_settings.get("output_name", "app"),
+            }
+            logger.info(f"[CloudBuild] Uploading config.json to R2 for build {build_id}")
+            config_url = await upload_config_to_r2(build_id, full_config)
+            
+            # Prepare config for GCP build client
             build_config = {
                 "build_id": build_id,
                 "project_id": data.project_id,
                 "language": language,
                 "target_platforms": ",".join(data.target_platforms),
                 "source_url": source_url,
+                "config_url": config_url,
+                "config": full_config,
                 "callback_url": f"{PUBLIC_API_URL}/api/v1/cloud-build/webhook",
-                "callback_secret": BUILD_CALLBACK_SECRET,
+                "callback_secret": BUILD_CALLBACK_SECRET or "",
                 "output_name": project_settings.get("output_name", "app"),
                 "compatibility_mode": data.compatibility_mode,
                 "license_mode": data.license_mode,
                 "demo_duration": data.demo_duration,
+                "fast_build": False,
             }
             
             # Initialize client and trigger
