@@ -2623,6 +2623,74 @@ async def cleanup_build_artifacts(
         await release_db(conn)
 
 
+@router.get("/{build_id}/download/{platform}")
+async def proxy_download(
+    build_id: str,
+    platform: str,
+):
+    """Proxy download for cloud build artifacts to bypass Workload Identity signed URL limits."""
+    conn = await get_db()
+    try:
+        # Note: Removing get_current_user dependency here to make it easier for the frontend
+        # to download via a simple window.location.href or <a> tag without injecting JWT headers.
+        # As long as the build_id is a secure unguessable ID, it acts as a capability URL.
+        build = await conn.fetchrow(
+            "SELECT id FROM cloud_builds WHERE id = $1",
+            build_id
+        )
+        if not build:
+            raise HTTPException(404, "Build not found")
+            
+        art = await conn.fetchrow(
+            "SELECT download_key, download_filename FROM cloud_build_artifacts WHERE build_id = $1 AND platform = $2",
+            build_id, platform
+        )
+        if not art or not art["download_key"]:
+            raise HTTPException(404, "Artifact not found or not completed")
+            
+        download_key = art["download_key"]
+        filename = art["download_filename"] or f"{platform}_build.zip"
+        
+        from routes.cloud_build_utils import get_gcs_client_with_credentials
+        from config import GCS_BUILDS_BUCKET
+        from fastapi.responses import StreamingResponse
+        import io
+        
+        # 1. Try GCS first
+        gcs_client, _ = get_gcs_client_with_credentials()
+        if gcs_client:
+            bucket = gcs_client.bucket(GCS_BUILDS_BUCKET)
+            blob = bucket.blob(download_key)
+            if blob.exists():
+                file_bytes = blob.download_as_bytes()
+                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                return StreamingResponse(
+                    io.BytesIO(file_bytes),
+                    media_type="application/octet-stream",
+                    headers=headers
+                )
+                
+        # 2. Add fallback to R2
+        if storage_service.is_cloud_enabled() and storage_service.client:
+            try:
+                response = storage_service.client.get_object(
+                    Bucket=storage_service.bucket, Key=download_key
+                )
+                file_bytes = response["Body"].read()
+                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                return StreamingResponse(
+                    io.BytesIO(file_bytes),
+                    media_type="application/octet-stream",
+                    headers=headers
+                )
+            except Exception as e:
+                logger.debug(f"[CloudBuild] Proxy download failed for R2: {e}")
+                
+        raise HTTPException(404, "Artifact file not found in storage")
+    finally:
+        await release_db(conn)
+
+
 @router.get("/history")
 async def get_build_history(
     limit: int = 20,

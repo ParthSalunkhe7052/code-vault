@@ -198,18 +198,22 @@ def get_artifact_filename_priority(
 def generate_gcs_signed_url(
     download_key: str, verify_exists: bool = True
 ) -> Optional[str]:
-    """Generate signed URL for GCS artifacts (Cloud Build) or R2 artifacts (GitHub Actions).
-
-    Priority:
-    1. Try GCS first (for Cloud Build artifacts)
-    2. Fallback to R2 (for GitHub Actions artifacts)
-
-    Args:
-        download_key: The GCS/R2 object key
-        verify_exists: If True, verify blob exists before generating URL
-
-    Returns signed URL valid for 1 hour, or None if generation fails.
+    """Generate signed URL for GCS artifacts, falling back to proxy URL.
+    Workload Identity doesn't support local JWT signing, so we just use the proxy route.
     """
+    public_api_url = os.getenv("PUBLIC_API_URL", "")
+    
+    # Strip any trailing slashes from public_api_url
+    if public_api_url and public_api_url.endswith("/"):
+        public_api_url = public_api_url[:-1]
+        
+    parts = download_key.split("/")
+    if len(parts) >= 3 and parts[0] == "builds":
+        build_id = parts[1]
+        platform = parts[2]
+        return f"{public_api_url}/api/v1/cloud-build/{build_id}/download/{platform}"
+    
+    # Fallback to older generation logic just in case the key isn't standard
     try:
         from config import GCS_BUILDS_BUCKET
 
