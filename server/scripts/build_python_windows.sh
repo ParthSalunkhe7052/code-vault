@@ -18,7 +18,7 @@ if [ -d /workspace/.mingw-cache ]; then
   echo "[Cloud Build] MinGW cache restored"
 fi
 
-wine python -m pip install --quiet --disable-pip-version-check nuitka==2.4.8
+wine python -m pip install --quiet --disable-pip-version-check nuitka==2.8.9
 wine python -m pip install --quiet --disable-pip-version-check ordered-set zstandard requests cryptography pefile
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
@@ -27,13 +27,7 @@ if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   exit 0
 fi
 
-nuitka_depends_py=$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
-if [ -n "$nuitka_depends_py" ]; then
-  if [ -f "./project/source/.github/scripts/nuitka_patch.py" ]; then
-    wine python "./project/source/.github/scripts/nuitka_patch.py" "$nuitka_depends_py"
-  fi
-fi
-
+# Nuitka 2.8.9 natively handles Dependencies under Wine via pefile
 decoded_config=$(cat /workspace/config.json)
 
 echo "[Cloud Build] Running cloud_runner.py for Windows build..."
@@ -62,18 +56,6 @@ if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
   dist_name=$(basename "$dist_dir")
   echo "[Cloud Build] Found standalone .dist folder: $dist_dir (name: $dist_name)"
   
-  # Manually copy python311.dll to .dist if missing due to DependsExe.py patch
-  wine python -c "
-import sys, os, shutil
-dll_name = f'python{sys.version_info.major}{sys.version_info.minor}.dll'
-src = os.path.join(sys.prefix, dll_name)
-dist_path = os.path.abspath('$dist_dir')
-dst = os.path.join(dist_path, dll_name)
-if os.path.exists(src) and not os.path.exists(dst):
-    print(f'[Cloud Build] Nuitka missed {dll_name}, copying manually...')
-    shutil.copy(src, dst)
-  "
-
   # List contents for debugging
   echo "[Cloud Build] .dist folder contents:"
   ls -la "$dist_dir/" 2>/dev/null || true

@@ -6,9 +6,9 @@ if [[ "{target_platforms}" != *"linux"* ]]; then
 fi
 
 echo "[Cloud Build] ===== Building for Linux ====="
-# Skip pip install if Nuitka 2.4.8 is already pre-installed in the builder image
-python3 -c "import nuitka; v=nuitka.__version__; assert v=='2.4.8', 'version mismatch: '+v" 2>/dev/null || 
-  pip install --quiet --disable-pip-version-check nuitka==2.4.8 ordered-set zstandard requests cryptography
+# Skip pip install if Nuitka 2.8.9 is already pre-installed in the builder image
+python3 -c "import nuitka; v=nuitka.__version__; assert v=='2.8.9', 'version mismatch: '+v" 2>/dev/null || 
+  pip install --quiet --disable-pip-version-check nuitka==2.8.9 ordered-set zstandard requests cryptography
 
 if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   echo "cloud_runner.py not found" > ./project/source/error_message.txt

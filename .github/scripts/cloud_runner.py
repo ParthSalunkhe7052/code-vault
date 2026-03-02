@@ -941,7 +941,7 @@ class CloudRunner:
             cmd.append("--macos-create-app-bundle")
 
         if sys.platform == "win32":
-            cmd.append("--experimental=use_pefile_recursion")
+            cmd.append("--windows-dependency-tool=pefile")
 
             if use_onefile:
                 logger.info("Windows/Wine: Using --onefile for single EXE output")
@@ -1067,7 +1067,7 @@ class CloudRunner:
         if not compatibility_mode:
             logger.info("⚡ TURBO MODE ENABLED")
             # Enable anti-bloat to reduce compilation size and time
-            cmd.append("--enable-plugin=anti-bloat")
+            # cmd.append("--enable-plugin=anti-bloat") # DISABLED due to AV heuristics
 
             # Aggressive exclusions (but keep Unicode support)
             turbo_exclusions = [
@@ -1085,7 +1085,7 @@ class CloudRunner:
             logger.info("Using Compatibility Mode (Standard optimizations)")
             # In compat mode, we might disable anti-bloat if it causes issues,
             # or keep it enabled but less aggressive. For now, let's enable it as standard.
-            cmd.append("--enable-plugin=anti-bloat")
+            # cmd.append("--enable-plugin=anti-bloat") # DISABLED due to AV heuristics
 
         # Ensure UTF-8 and Unicode support for emojis and international characters
         # Include necessary encoding modules for full Unicode support
