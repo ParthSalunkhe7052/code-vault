@@ -235,6 +235,7 @@ async def get_project_config(project_id: str, user: dict = Depends(get_current_u
             "is_pro": tier_info["is_pro"],
             "can_remove_branding": tier_info["can_remove_branding"],
             "can_custom_branding": tier_info["can_custom_branding"],
+            "settings": settings,
             "files": [
                 {
                     "id": f["id"],
