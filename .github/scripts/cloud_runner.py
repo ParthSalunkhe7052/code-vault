@@ -941,7 +941,7 @@ class CloudRunner:
             cmd.append("--macos-create-app-bundle")
 
         if sys.platform == "win32":
-            cmd.append("--windows-dependency-tool=pefile")
+            cmd.append("--mingw64")
 
             if use_onefile:
                 logger.info("Windows/Wine: Using --onefile for single EXE output")

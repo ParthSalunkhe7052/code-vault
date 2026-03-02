@@ -49,53 +49,55 @@ linux_artifacts=""
 linux_status="failed"
 linux_error=""
 
-# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
-# e.g., main.py -> main.dist, not {output_name}.dist
-# Fixed path: search specifically in the build_output_linux directory within project/source
-dist_dir=$(find build_output_linux -type d -name "*.dist" 2>/dev/null | head -1)
-
-if [ -n "${dist_dir}" ] && [ -d "${dist_dir}" ]; then
-  dist_name=$(basename "${dist_dir}")
-  echo "[Cloud Build] Found standalone .dist folder: ${dist_dir} (name: ${dist_name})"
+if [ $runner_exit_code -eq 0 ]; then
+  # Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
+  # e.g., main.py -> main.dist, not {output_name}.dist
+  # Fixed path: search specifically in the build_output_linux directory within project/source
+  dist_dir=$(find build_output_linux -type d -name "*.dist" 2>/dev/null | head -1)
   
-  # Zip the entire .dist folder with all dependencies (including python dlls)
-  parent_dir=$(dirname "${dist_dir}")
-  cd "${parent_dir}"
-  tar -czf "/workspace/{output_name}.tar.gz" "${dist_name}"
-  cd /workspace
-  
-  if [ -f "/workspace/{output_name}.tar.gz" ]; then
-    linux_artifacts="{output_name}.tar.gz"
-    linux_status="completed"
-    echo "[Cloud Build] Linux artifact ready: ${linux_artifacts} (standalone folder with dependencies)"
-  else
-    linux_error="Failed to create tar.gz from .dist folder"
-  fi
-elif [ -d "build_output_linux" ]; then
-  # Fallback: Check for onefile mode (single binary)
-  found_binary=$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
-  if [ -n "${found_binary}" ]; then
-    cp "${found_binary}" ./
-  fi
-  
-  if [ -f "{output_name}" ]; then
-    chmod +x "{output_name}"
-    tar -czf "/workspace/{output_name}.tar.gz" "{output_name}"
-    linux_artifacts="{output_name}.tar.gz"
-    linux_status="completed"
-    echo "[Cloud Build] Linux artifact ready: ${linux_artifacts} (onefile binary)"
+  if [ -n "${dist_dir}" ] && [ -d "${dist_dir}" ]; then
+    dist_name=$(basename "${dist_dir}")
+    echo "[Cloud Build] Found standalone .dist folder: ${dist_dir} (name: ${dist_name})"
+    
+    # Zip the entire .dist folder with all dependencies (including python dlls)
+    parent_dir=$(dirname "${dist_dir}")
+    cd "${parent_dir}"
+    tar -czf "/workspace/{output_name}.tar.gz" "${dist_name}"
+    cd /workspace
+    
+    if [ -f "/workspace/{output_name}.tar.gz" ]; then
+      linux_artifacts="{output_name}.tar.gz"
+      linux_status="completed"
+      echo "[Cloud Build] Linux artifact ready: ${linux_artifacts} (standalone folder with dependencies)"
+    else
+      linux_error="Failed to create tar.gz from .dist folder"
+    fi
+  elif [ -d "build_output_linux" ]; then
+    # Fallback: Check for onefile mode (single binary)
+    found_binary=$(find build_output_linux -type f -name "{output_name}" 2>/dev/null | head -1)
+    if [ -n "${found_binary}" ]; then
+      cp "${found_binary}" ./
+    fi
+    
+    if [ -f "{output_name}" ]; then
+      chmod +x "{output_name}"
+      tar -czf "/workspace/{output_name}.tar.gz" "{output_name}"
+      linux_artifacts="{output_name}.tar.gz"
+      linux_status="completed"
+      echo "[Cloud Build] Linux artifact ready: ${linux_artifacts} (onefile binary)"
+    else
+      if [ -f "error_message.txt" ]; then
+        linux_error=$(cat error_message.txt)
+      else
+        linux_error="Linux build output '{output_name}' not found"
+      fi
+    fi
   else
     if [ -f "error_message.txt" ]; then
       linux_error=$(cat error_message.txt)
     else
-      linux_error="Linux build output '{output_name}' not found"
+      linux_error="Linux build output directory not found"
     fi
-  fi
-else
-  if [ -f "error_message.txt" ]; then
-    linux_error=$(cat error_message.txt)
-  else
-    linux_error="Linux build output directory not found"
   fi
 fi
 

@@ -48,26 +48,27 @@ windows_artifacts=""
 windows_status="failed"
 windows_error=""
 
-# Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
-# e.g., main.py -> main.dist, not {output_name}.dist
-dist_dir=$(find ./project/source/build_output_windows_wine -type d -name "*.dist" 2>/dev/null | head -1)
-
-if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
-  dist_name=$(basename "$dist_dir")
-  echo "[Cloud Build] Found standalone .dist folder: $dist_dir (name: $dist_name)"
+if [ $runner_exit_code -eq 0 ]; then
+  # Check for standalone output - look for ANY .dist folder (Nuitka names it after entry file, not output name)
+  # e.g., main.py -> main.dist, not {output_name}.dist
+  dist_dir=$(find ./project/source/build_output_windows_wine -type d -name "*.dist" 2>/dev/null | head -1)
   
-  # List contents for debugging
-  echo "[Cloud Build] .dist folder contents:"
-  ls -la "$dist_dir/" 2>/dev/null || true
-  
-  # Zip the entire .dist folder with all dependencies (including python311.dll)
-  # Use Python zipfile (more reliable than apt-get install zip)
-  parent_dir=$(dirname "$dist_dir")
-  cd "$parent_dir"
-  if command -v zip &> /dev/null; then
-    zip -r -q "/workspace/{output_name}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
-  else
-    wine python -c "
+  if [ -n "$dist_dir" ] && [ -d "$dist_dir" ]; then
+    dist_name=$(basename "$dist_dir")
+    echo "[Cloud Build] Found standalone .dist folder: $dist_dir (name: $dist_name)"
+    
+    # List contents for debugging
+    echo "[Cloud Build] .dist folder contents:"
+    ls -la "$dist_dir/" 2>/dev/null || true
+    
+    # Zip the entire .dist folder with all dependencies (including python311.dll)
+    # Use Python zipfile (more reliable than apt-get install zip)
+    parent_dir=$(dirname "$dist_dir")
+    cd "$parent_dir"
+    if command -v zip &> /dev/null; then
+      zip -r -q "/workspace/{output_name}.zip" "$dist_name" -x "*.pyc" -x "__pycache__/*"
+    else
+      wine python -c "
 import zipfile, os
 dn, on = '$dist_name', '{output_name}'
 zf = zipfile.ZipFile(f'Z:\\workspace\\{on}.zip', 'w', zipfile.ZIP_DEFLATED)
@@ -78,49 +79,50 @@ for r, ds, fs in os.walk(dn):
     zf.write(os.path.join(r, f), os.path.relpath(os.path.join(r, f), '.'))
 zf.close()
 "
-  fi
-  cd /workspace
-
-  if [ -f "/workspace/{output_name}.zip" ]; then
-    archive_size=$(ls -lh "/workspace/{output_name}.zip" | awk '{{print $5}}')
-    echo "[Cloud Build] Archive size: $archive_size"
-    windows_artifacts="{output_name}.zip"
-    windows_status="completed"
-    echo "[Cloud Build] Windows artifact ready: $windows_artifacts (standalone folder with dependencies)"
-  else
-    windows_error="Failed to create zip from .dist folder"
-  fi
-else
-  # Fallback: Check for onefile mode (single EXE)
-  echo "[Cloud Build] No .dist folder found, checking for onefile EXE..."
-  found_exe=""
-  
-  if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
-    found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
-    echo "[Cloud Build] Found onefile EXE: $found_exe"
-  else
-    found_exe=$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
-    if [ -n "$found_exe" ]; then
-      echo "[Cloud Build] Found EXE: $found_exe"
     fi
-  fi
+    cd /workspace
 
-  if [ -n "$found_exe" ] && [ -f "$found_exe" ]; then
-    exe_size=$(ls -lh "$found_exe" | awk '{{print $5}}')
-    echo "[Cloud Build] EXE size: $exe_size"
-    cp "$found_exe" "/workspace/{output_name}.exe"
-    if [ -f "/workspace/{output_name}.exe" ]; then
-      windows_artifacts="{output_name}.exe"
+    if [ -f "/workspace/{output_name}.zip" ]; then
+      archive_size=$(ls -lh "/workspace/{output_name}.zip" | awk '{print $5}')
+      echo "[Cloud Build] Archive size: $archive_size"
+      windows_artifacts="{output_name}.zip"
       windows_status="completed"
-      echo "[Cloud Build] Windows artifact ready: $windows_artifacts (self-contained onefile EXE)"
+      echo "[Cloud Build] Windows artifact ready: $windows_artifacts (standalone folder with dependencies)"
     else
-      windows_error="Failed to copy EXE to artifacts"
+      windows_error="Failed to create zip from .dist folder"
     fi
   else
-    if [ -f "./project/source/error_message.txt" ]; then
-      windows_error=$(cat ./project/source/error_message.txt)
+    # Fallback: Check for onefile mode (single EXE)
+    echo "[Cloud Build] No .dist folder found, checking for onefile EXE..."
+    found_exe=""
+    
+    if [ -f "./project/source/build_output_windows_wine/{output_name}.exe" ]; then
+      found_exe="./project/source/build_output_windows_wine/{output_name}.exe"
+      echo "[Cloud Build] Found onefile EXE: $found_exe"
     else
-      windows_error="Windows EXE not found in build output"
+      found_exe=$(find ./project/source/build_output_windows_wine -type f -name "*.exe" 2>/dev/null | head -1)
+      if [ -n "$found_exe" ]; then
+        echo "[Cloud Build] Found EXE: $found_exe"
+      fi
+    fi
+
+    if [ -n "$found_exe" ] && [ -f "$found_exe" ]; then
+      exe_size=$(ls -lh "$found_exe" | awk '{print $5}')
+      echo "[Cloud Build] EXE size: $exe_size"
+      cp "$found_exe" "/workspace/{output_name}.exe"
+      if [ -f "/workspace/{output_name}.exe" ]; then
+        windows_artifacts="{output_name}.exe"
+        windows_status="completed"
+        echo "[Cloud Build] Windows artifact ready: $windows_artifacts (self-contained onefile EXE)"
+      else
+        windows_error="Failed to copy EXE to artifacts"
+      fi
+    else
+      if [ -f "./project/source/error_message.txt" ]; then
+        windows_error=$(cat ./project/source/error_message.txt)
+      else
+        windows_error="Windows EXE not found in build output"
+      fi
     fi
   fi
 fi
