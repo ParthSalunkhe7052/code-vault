@@ -27,13 +27,7 @@ if [ ! -f "./project/source/.github/scripts/cloud_runner.py" ]; then
   exit 0
 fi
 
-nuitka_depends_py=$(find /opt/wineprefix -name "DependsExe.py" | grep "freezer" | head -1)
-if [ -n "$nuitka_depends_py" ]; then
-  if [ -f "./project/source/.github/scripts/nuitka_patch.py" ]; then
-    wine python "./project/source/.github/scripts/nuitka_patch.py" "$nuitka_depends_py"
-  fi
-fi
-
+# Removed nuitka_patch.py execution since we now natively use pefile.
 decoded_config=$(cat /workspace/config.json)
 
 echo "[Cloud Build] Running cloud_runner.py for Windows build..."
