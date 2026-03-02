@@ -402,7 +402,14 @@ async def upload_source_to_r2(build_id: str, source_dir: Path) -> str:
                     f"[Upload] Files in .github/scripts: {list((project_root / '.github' / 'scripts').glob('*')) if (project_root / '.github' / 'scripts').exists() else 'directory does not exist'}"
                 )
 
-            # Removed nuitka_patch.py logic as Nuitka natively supports pefile under Wine in 2.x
+            # Also copy nuitka_patch.py for Wine builds
+            patch_source = project_root / ".github" / "scripts" / "nuitka_patch.py"
+            if patch_source.exists():
+                patch_dest = source_dir / ".github" / "scripts" / "nuitka_patch.py"
+                shutil.copy2(patch_source, patch_dest)
+                logger.info(f"[Upload] Successfully copied nuitka_patch.py to source")
+            else:
+                logger.warning(f"[Upload] nuitka_patch.py not found at {patch_source}")
 
             # Also copy cloud_runner_nodejs.py for Node.js builds
             nodejs_runner_source = (
