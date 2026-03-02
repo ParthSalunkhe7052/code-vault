@@ -237,12 +237,7 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({
         });
     }, [includePackages, excludePackages, demoMode, demoDuration, nodeTarget, enableObfuscation, enableLease, fastBuild, setConfigData, configData]);
 
-    useEffect(() => {
-        if (configData.settings?.file_tree && currentStep === 1) {
-            setCompletedSteps(prev => [...new Set([...prev, 1])]);
-            setCurrentStep(2);
-        }
-    }, [configData.settings?.file_tree, currentStep]);
+
 
     useEffect(() => {
         if (!projectPath || !isTauri) return;

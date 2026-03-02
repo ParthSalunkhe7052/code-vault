@@ -193,7 +193,8 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
             return;
           } else if (buildStatus === 'failed') {
             setStatus('failed');
-            setError(finalError || "Build failed - check logs for details");
+            const errText = finalError ? String(finalError).trim() : '';
+            setError(errText || "Build failed - check logs for details");
             if (projectBuild && projectBuild.updateStatus) {
               projectBuild.updateStatus(response.data);
             }
@@ -526,11 +527,15 @@ export const CloudBuildButton: React.FC<CloudBuildButtonProps> = ({
           <div className="text-sm text-red-300 bg-red-950/40 p-3 rounded-lg border border-red-900/50 space-y-2">
             <p className="font-medium text-red-200 flex items-center gap-2">
               <AlertCircle className="w-4 h-4" />
-              Compilation error detected in your uploaded files:
+              {error && String(error).toLowerCase().includes('syntax error')
+                ? 'Compilation error detected in your uploaded files:'
+                : 'An error occurred during the build process:'}
             </p>
-            <pre className="font-mono whitespace-pre-wrap text-red-400 break-all text-xs bg-black/40 p-2 rounded mt-2">{error}</pre>
+            <pre className="font-mono whitespace-pre-wrap text-red-400 break-all text-xs bg-black/40 p-2 rounded mt-2">
+              {error ? String(error).trim() : 'Unknown error'}
+            </pre>
             <p className="text-red-300 mt-3 border-t border-red-900/50 pt-2">
-              <strong>Action required:</strong> Please fix the error above in your source code, recreate your project source files, and re-upload them in the "Upload" tab to try compiling again.
+              <strong>Action required:</strong> Please look at the error details above to determine how to proceed, or contact support if the issue persists.
             </p>
           </div>
 
