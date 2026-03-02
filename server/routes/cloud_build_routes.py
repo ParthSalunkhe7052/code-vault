@@ -1893,6 +1893,7 @@ async def get_build_status(
                     "platform": art["platform"],
                     "status": art["status"],
                     "download_url": download_url,
+                    "download_key": download_key,
                     "filename": art["download_filename"]
                     or f"{art['platform']}_build.zip",
                     "error": art["error_message"],

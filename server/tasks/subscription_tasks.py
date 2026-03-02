@@ -17,7 +17,7 @@ async def check_expired_subscriptions():
                 # Find subscriptions that expired in the last hour
                 rows = await conn.fetch(
                     """
-                    SELECT id, user_id, plan_id, expires_at 
+                    SELECT id, user_id, plan_tier, expires_at 
                     FROM subscriptions 
                     WHERE status = 'active' AND expires_at < NOW()
                     """

@@ -5,27 +5,14 @@ from database import get_db, release_db
 from repositories.build_repo import BuildRepository
 from utils import get_current_user
 
+from routes.cloud_build_routes import get_build_status as real_get_build_status
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/{build_id}/status")
-async def get_build_status(
-    build_id: str,
-    user: dict = Depends(get_current_user),
-):
-    """Check the status of a specific build."""
-    conn = await get_db()
-    try:
-        build = await BuildRepository.get_build_by_id(conn, build_id)
-        if not build:
-            raise HTTPException(status_code=404, detail="Build not found")
-        
-        if build["user_id"] != user["id"]:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        return build
-    finally:
-        await release_db(conn)
+# Use the full-featured get_build_status from the monolithic router
+# which properly aggregates artifacts, generates signed URLs, handles sync=true etc.
+router.get("/{build_id}/status")(real_get_build_status)
 
 @router.get("/history")
 async def list_build_history(
